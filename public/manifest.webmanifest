@@ -1,0 +1,10 @@
+{
+  "name": "Daily Courier Report System",
+  "short_name": "Courier Reports",
+  "description": "Daily courier branch reporting and export app.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f7f3",
+  "theme_color": "#15803d",
+  "icons": []
+}

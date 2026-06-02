@@ -1,0 +1,575 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { FileDown, Image, Plus, RotateCcw, Trash2, Upload } from "lucide-react";
+import { todayIso } from "../utils/date.js";
+import { exportElementAsPng, exportElementAsPortraitPdf } from "../utils/exportReports.js";
+import { deleteDeliveredReport, getDeliveredReport, getDeliveredRiderNames, saveDeliveredReport as saveDeliveredReportByRider } from "../services/reportStorage.js";
+
+const emptyEntry = {
+  trackingNo: "",
+  value: "",
+};
+
+export default function DeliveredReportConverter({ onSaved, companyName = "Domestic Express (pvt) ltd" }) {
+  const [reportDate, setReportDate] = useState(todayIso());
+  const [riderName, setRiderName] = useState("");
+  const [branchName, setBranchName] = useState("");
+  const [entries, setEntries] = useState([]);
+  const [newEntry, setNewEntry] = useState(emptyEntry);
+  const [fileName, setFileName] = useState("");
+  const [includeSpecialTracking, setIncludeSpecialTracking] = useState(false);
+  const [savedRiderNames, setSavedRiderNames] = useState([]);
+  const reportRef = useRef(null);
+
+  useEffect(() => {
+    setSavedRiderNames(getDeliveredRiderNames(reportDate));
+  }, [reportDate]);
+
+  const riderOptions = useMemo(() => {
+    return [...new Set([...savedRiderNames, riderName].filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  }, [savedRiderNames, riderName]);
+
+  const specialValue = entries.reduce((sum, entry) => (isSpecialTrackingNo(entry.trackingNo) ? sum + parseMoney(entry.value) : sum), 0);
+  const totalValue = entries.reduce((sum, entry) => {
+    if (!includeSpecialTracking && isSpecialTrackingNo(entry.trackingNo)) return sum;
+    return sum + parseMoney(entry.value);
+  }, 0);
+
+  async function handleCsvUpload(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const text = await file.text();
+    const parsed = parseDeliveredCsv(text);
+    setFileName(file.name);
+    setEntries(parsed.entries);
+    setRiderName(parsed.riderName);
+    setBranchName(parsed.branchName);
+    if (parsed.reportDate) setReportDate(parsed.reportDate);
+    event.target.value = "";
+  }
+
+  function updateEntry(index, field, value) {
+    setEntries((current) => current.map((entry, itemIndex) => (itemIndex === index ? { ...entry, [field]: value } : entry)));
+  }
+
+  function deleteEntry(index) {
+    setEntries((current) => current.filter((_, itemIndex) => itemIndex !== index));
+  }
+
+  function addEntry() {
+    if (!newEntry.trackingNo.trim() && !newEntry.value.trim()) return;
+    setEntries((current) => [
+      ...current,
+      {
+        trackingNo: newEntry.trackingNo.trim(),
+        value: normalizeMoney(newEntry.value),
+      },
+    ]);
+    setNewEntry(emptyEntry);
+  }
+
+  function clearAll() {
+    if (!entries.length && !riderName && !branchName && !fileName) return;
+    if (!confirm("Clear converted delivered report data?")) return;
+    setEntries([]);
+    setRiderName("");
+    setBranchName("");
+    setFileName("");
+    setIncludeSpecialTracking(false);
+    setNewEntry(emptyEntry);
+  }
+
+  function saveDeliveredReport() {
+    if (!riderName.trim()) {
+      alert("Please enter or upload Rider Name before saving.");
+      return;
+    }
+    saveDeliveredReportByRider(reportDate, riderName, {
+      riderName,
+      branchName,
+      entries,
+      includeSpecialTracking,
+      fileName,
+    });
+    setSavedRiderNames(getDeliveredRiderNames(reportDate));
+    onSaved?.();
+  }
+
+  function applySavedDeliveredReport(saved) {
+    setRiderName(saved.riderName || "");
+    setBranchName(saved.branchName || "");
+    setEntries(saved.entries || []);
+    setIncludeSpecialTracking(Boolean(saved.includeSpecialTracking));
+    setFileName(saved.fileName || "Saved delivered report");
+  }
+
+  function handleRiderSelect(name) {
+    setRiderName(name);
+    if (!name) return;
+
+    const saved = getDeliveredReport(reportDate, name);
+    if (saved) {
+      applySavedDeliveredReport(saved);
+    }
+  }
+
+  function loadSavedDeliveredReport() {
+    if (!riderName.trim()) {
+      alert("Please enter Rider Name to load saved report.");
+      return;
+    }
+    const saved = getDeliveredReport(reportDate, riderName);
+    if (!saved) {
+      alert(`No delivered report saved for ${riderName} on ${reportDate}.`);
+      return;
+    }
+    applySavedDeliveredReport(saved);
+  }
+
+  function deleteSavedDeliveredReport() {
+    if (!riderName.trim()) {
+      alert("Please enter Rider Name to delete saved report.");
+      return;
+    }
+    if (!confirm(`Delete saved delivered report for ${riderName} on ${reportDate}?`)) return;
+    deleteDeliveredReport(reportDate, riderName);
+    setSavedRiderNames(getDeliveredRiderNames(reportDate));
+    setRiderName("");
+    setEntries([]);
+    setBranchName("");
+    setFileName("");
+    setIncludeSpecialTracking(false);
+    onSaved?.();
+  }
+
+  return (
+    <section className="grid gap-4 md:gap-5">
+      <div className="glass-panel p-3 md:p-4">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-black uppercase tracking-wide text-emerald-700">Standalone Tool</p>
+            <h2 className="text-xl font-black text-[#071537] md:text-2xl">Convert Delivered Report</h2>
+            <p className="mt-1 text-sm font-semibold text-blue-950/70">
+              CSV upload එකෙන් Tracking No, Value, Rider Name auto detect කරලා A4 portrait collection report එකක් හදයි.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={clearAll}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-red-200 bg-white/55 px-4 py-2 text-sm font-extrabold text-red-700 hover:bg-red-50"
+          >
+            <RotateCcw className="h-4 w-4" />
+            Reset
+          </button>
+        </div>
+
+        <label className="mb-4 flex min-h-24 cursor-pointer flex-col items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-blue-300 bg-white/55 p-4 text-center transition hover:bg-blue-50/70 md:min-h-28">
+          <Upload className="h-8 w-8 text-blue-700" />
+          <span className="text-base font-black text-[#071537]">Upload Rider Wise Delivered CSV</span>
+          <span className="text-sm font-semibold text-blue-950/65">{fileName || "Choose CSV file"}</span>
+          <input type="file" accept=".csv,text/csv" onChange={handleCsvUpload} className="hidden" />
+        </label>
+
+        <div className="grid gap-3 md:grid-cols-3">
+          <Field label="Report Date" type="date" value={reportDate} onChange={setReportDate} />
+          <RiderSelect riderName={riderName} riderOptions={riderOptions} onChange={handleRiderSelect} savedCount={savedRiderNames.length} />
+          <Field label="Branch Name" value={branchName} onChange={setBranchName} placeholder="Optional" />
+        </div>
+
+        <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-2xl border border-white/70 bg-white/55 p-3">
+          <input
+            type="checkbox"
+            checked={includeSpecialTracking}
+            onChange={(event) => setIncludeSpecialTracking(event.target.checked)}
+            className="mt-1 h-5 w-5 accent-emerald-700"
+          />
+          <span>
+            <span className="block text-sm font-black text-[#071537]">Include CS40 / CS80 tracking values in total</span>
+            <span className="block text-xs font-semibold text-blue-950/65">
+              Default: CS40/CS80 numbers stay visible at 50% opacity and are not added to total. Special value: {formatMoney(specialValue)}
+            </span>
+          </span>
+        </label>
+
+        <div className="mt-5 grid gap-3 md:hidden">
+          {entries.length === 0 ? (
+            <div className="rounded-2xl border border-white/70 bg-white/55 p-4 text-center text-sm font-semibold text-blue-950/55">
+              Upload CSV file to generate delivered collection rows.
+            </div>
+          ) : (
+            entries.map((entry, index) => (
+              <div key={`${entry.trackingNo}-${index}`} className={`rounded-2xl border border-white/70 bg-white/60 p-3 shadow-sm ${isSpecialTrackingNo(entry.trackingNo) ? "special-tracking-muted" : ""}`}>
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <span className="grid h-8 w-8 place-items-center rounded-xl bg-blue-100 text-sm font-black text-blue-700">{index + 1}</span>
+                  <button type="button" onClick={() => deleteEntry(index)} className="inline-grid h-9 w-9 place-items-center rounded-xl bg-red-50 text-red-600 hover:bg-red-100" aria-label="Delete row">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="grid gap-3">
+                  <Field label="Tracking No" value={entry.trackingNo} onChange={(value) => updateEntry(index, "trackingNo", value)} />
+                  <Field label="Value" value={entry.value} onChange={(value) => updateEntry(index, "value", value)} />
+                </div>
+              </div>
+            ))
+          )}
+
+          <div className="rounded-2xl border border-white/70 bg-white/60 p-3">
+            <p className="mb-3 text-sm font-black text-[#071537]">Add New Entry</p>
+            <div className="grid gap-3">
+              <Field label="Tracking No" value={newEntry.trackingNo} onChange={(value) => setNewEntry((current) => ({ ...current, trackingNo: value }))} placeholder="Tracking No" />
+              <Field label="Value" value={newEntry.value} onChange={(value) => setNewEntry((current) => ({ ...current, value }))} placeholder="Value" />
+              <button type="button" onClick={addEntry} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 text-sm font-black text-white hover:bg-emerald-700">
+                <Plus className="h-4 w-4" />
+                Add Entry
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-5 hidden overflow-x-auto rounded-3xl border border-white/70 bg-white/55 md:block">
+          <table className="min-w-[680px] w-full text-sm">
+            <thead className="bg-blue-50/75 text-left text-[#071537]">
+              <tr>
+                <th className="px-4 py-3">No</th>
+                <th className="px-4 py-3">Tracking No</th>
+                <th className="px-4 py-3">Value</th>
+                <th className="px-4 py-3 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.length === 0 ? (
+                <tr>
+                  <td colSpan="4" className="px-4 py-8 text-center font-semibold text-blue-950/55">
+                    Upload CSV file to generate delivered collection rows.
+                  </td>
+                </tr>
+              ) : (
+                entries.map((entry, index) => (
+                  <tr key={`${entry.trackingNo}-${index}`} className={`border-t border-white/75 ${isSpecialTrackingNo(entry.trackingNo) ? "special-tracking-muted" : ""}`}>
+                    <td className="px-4 py-3 font-bold">{index + 1}</td>
+                    <td className="px-4 py-3">
+                      <input
+                        value={entry.trackingNo}
+                        onChange={(event) => updateEntry(index, "trackingNo", event.target.value)}
+                        className="h-11 w-full rounded-xl border border-white/80 bg-white/75 px-3 font-bold outline-none focus:border-blue-500"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        value={entry.value}
+                        onChange={(event) => updateEntry(index, "value", event.target.value)}
+                        className="h-11 w-full rounded-xl border border-white/80 bg-white/75 px-3 text-right font-bold outline-none focus:border-blue-500"
+                      />
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button type="button" onClick={() => deleteEntry(index)} className="inline-grid h-10 w-10 place-items-center rounded-xl bg-red-50 text-red-600 hover:bg-red-100" aria-label="Delete row">
+                        <Trash2 className="h-5 w-5" />
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+              <tr className="border-t border-white/75 bg-white/45">
+                <td className="px-4 py-3 font-black">Add</td>
+                <td className="px-4 py-3">
+                  <input
+                    value={newEntry.trackingNo}
+                    onChange={(event) => setNewEntry((current) => ({ ...current, trackingNo: event.target.value }))}
+                    placeholder="Tracking No"
+                    className="h-11 w-full rounded-xl border border-white/80 bg-white/75 px-3 font-bold outline-none focus:border-green-500"
+                  />
+                </td>
+                <td className="px-4 py-3">
+                  <input
+                    value={newEntry.value}
+                    onChange={(event) => setNewEntry((current) => ({ ...current, value: event.target.value }))}
+                    placeholder="Value"
+                    className="h-11 w-full rounded-xl border border-white/80 bg-white/75 px-3 text-right font-bold outline-none focus:border-green-500"
+                  />
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <button type="button" onClick={addEntry} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-black text-white hover:bg-emerald-700">
+                    <Plus className="h-4 w-4" />
+                    Add
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 md:grid-cols-3">
+          <ActionButton label="Save Rider Report" icon={Upload} onClick={saveDeliveredReport} disabled={entries.length === 0} tone="blue" />
+          <ActionButton label="Load Saved" icon={RotateCcw} onClick={loadSavedDeliveredReport} disabled={!reportDate} tone="dark" />
+          <ActionButton label="Delete Saved" icon={Trash2} onClick={deleteSavedDeliveredReport} disabled={!reportDate} tone="red" />
+          <ActionButton label="Export A4 PNG" icon={Image} onClick={() => exportElementAsPng(reportRef.current, "Delivered_Collection_Report", reportDate)} disabled={entries.length === 0} tone="green" />
+          <ActionButton label="Export A4 PDF" icon={FileDown} onClick={() => exportElementAsPortraitPdf(reportRef.current, "Delivered_Collection_Report", reportDate)} disabled={entries.length === 0} tone="red" />
+          <div className="rounded-2xl border border-white/70 bg-white/55 px-4 py-3 text-right sm:col-span-2 md:col-span-1">
+            <p className="text-xs font-black uppercase text-blue-950/60">Total Value</p>
+            <p className="text-2xl font-black text-[#071537]">{formatMoney(totalValue)}</p>
+            {!includeSpecialTracking && specialValue > 0 && (
+              <p className="text-xs font-bold text-red-700">CS40/CS80 excluded: {formatMoney(specialValue)}</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-white/70 bg-white/55 p-2 shadow-xl md:overflow-x-auto md:p-0">
+        <div className="mobile-a4-preview">
+        <DeliveredCollectionReport
+          reportRef={reportRef}
+          reportDate={reportDate}
+          riderName={riderName}
+          branchName={branchName}
+          companyName={companyName}
+          entries={entries}
+          totalValue={totalValue}
+          includeSpecialTracking={includeSpecialTracking}
+          specialValue={specialValue}
+        />
+      </div>
+      </div>
+    </section>
+  );
+}
+
+function DeliveredCollectionReport({ reportRef, reportDate, riderName, branchName, companyName, entries, totalValue, includeSpecialTracking, specialValue }) {
+  return (
+    <div ref={reportRef} className="report-paper a4-portrait-report">
+      <p className="report-company">{companyName}</p>
+      <h2 className="report-title text-2xl">Delivered Collection Report</h2>
+      <div className="delivered-report-meta">
+        <p>Date: {reportDate}</p>
+        <p className="text-right">Rider Name: {riderName || "-"}</p>
+        {branchName && <p>Branch: {branchName}</p>}
+      </div>
+
+      <table className="report-table delivered-money-table">
+        <thead>
+          <tr>
+            <th style={{ width: "56px" }}>No</th>
+            <th>Tracking No</th>
+            <th style={{ width: "160px" }}>Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.length === 0 ? (
+            <tr>
+              <td colSpan="3">Upload CSV file to generate report.</td>
+            </tr>
+          ) : (
+            entries.map((entry, index) => (
+              <tr key={`${entry.trackingNo}-${index}`} className={isSpecialTrackingNo(entry.trackingNo) ? "special-tracking-muted" : ""}>
+                <td>{index + 1}</td>
+                <td>{entry.trackingNo}</td>
+                <td className="money-cell">{formatMoney(parseMoney(entry.value))}</td>
+              </tr>
+            ))
+          )}
+          <tr>
+            <td colSpan="2">
+              <strong>Total Value</strong>
+              {!includeSpecialTracking && specialValue > 0 && <span className="total-note"> CS40/CS80 excluded</span>}
+            </td>
+            <td className="money-cell">
+              <strong>{formatMoney(totalValue)}</strong>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div className="paid-amount-row">
+        <span>ලබාදුන් මුදල</span>
+        <div className="paid-amount-line" />
+      </div>
+
+      <div className="signature-row">
+        <div>
+          <div className="signature-line" />
+          <p>මුදල් ලබා දුන් බවට අත්සන</p>
+        </div>
+        <div>
+          <div className="signature-line" />
+          <p>මුදල් ලබාගත් බවට අත්සන</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function parseDeliveredCsv(text) {
+  const rows = parseCsv(text);
+  const metadata = {};
+  let headerIndex = -1;
+
+  rows.forEach((row, index) => {
+    if (row.includes("Tracking No") && row.includes("Value") && row.includes("Rider Name")) {
+      headerIndex = index;
+    }
+    if (row.length >= 2 && headerIndex === -1) {
+      metadata[row[0]] = row[1];
+    }
+  });
+
+  if (headerIndex === -1) {
+    return { entries: [], riderName: "", branchName: "", reportDate: "" };
+  }
+
+  const header = rows[headerIndex].map((item) => item.trim());
+  const trackingIndex = header.indexOf("Tracking No");
+  const valueIndex = header.indexOf("Value");
+  const riderIndex = header.indexOf("Rider Name");
+  const branchIndex = header.indexOf("Delivered Branch");
+  const dateIndex = header.indexOf("Delivered Date");
+
+  const dataRows = rows.slice(headerIndex + 1).filter((row) => row.length > 1 && row[trackingIndex]);
+  const entries = dataRows.map((row) => ({
+    trackingNo: row[trackingIndex]?.trim() || "",
+    value: normalizeMoney(row[valueIndex] || "0"),
+  }));
+
+  const riderNames = uniqueValues(dataRows.map((row) => cleanName(row[riderIndex])));
+  const branches = uniqueValues(dataRows.map((row) => row[branchIndex]?.trim()));
+  const firstDate = dataRows[0]?.[dateIndex];
+
+  return {
+    entries,
+    riderName: riderNames.length === 1 ? riderNames[0] : riderNames.join(", "),
+    branchName: branches.length === 1 ? branches[0] : metadata.CompanyName || "",
+    reportDate: parseCsvDate(firstDate || metadata.TimeStamp),
+  };
+}
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let field = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const nextChar = text[index + 1];
+
+    if (char === '"' && inQuotes && nextChar === '"') {
+      field += '"';
+      index += 1;
+    } else if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === "," && !inQuotes) {
+      row.push(field);
+      field = "";
+    } else if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && nextChar === "\n") index += 1;
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+    } else {
+      field += char;
+    }
+  }
+
+  if (field || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  return rows.map((items) => items.map((item) => item.trim()));
+}
+
+function parseCsvDate(value) {
+  if (!value) return "";
+  const match = String(value).match(/^(\d{2})\/(\d{2})\/(\d{4})|^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return "";
+  if (match[1]) return `${match[3]}-${match[1]}-${match[2]}`;
+  return `${match[4]}-${match[5]}-${match[6]}`;
+}
+
+function uniqueValues(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function cleanName(value) {
+  return String(value || "").replaceAll("_", " ").replace(/\s+/g, " ").trim();
+}
+
+function isSpecialTrackingNo(value) {
+  return /^CS(?:40|80)\d{7}$/i.test(String(value || "").trim());
+}
+
+function parseMoney(value) {
+  const parsed = parseFloat(String(value || "0").replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeMoney(value) {
+  return parseMoney(value).toFixed(2);
+}
+
+function formatMoney(value) {
+  return parseMoney(value).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function Field({ label, type = "text", value, onChange, placeholder }) {
+  return (
+    <label className="grid gap-2">
+      <span className="text-sm font-black text-[#071537]">{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="h-12 rounded-2xl border border-white/80 bg-white/70 px-4 text-base font-bold outline-none focus:border-green-500 focus:ring-4 focus:ring-green-100"
+      />
+    </label>
+  );
+}
+
+function RiderSelect({ riderName, riderOptions, onChange, savedCount }) {
+  return (
+    <label className="grid gap-2">
+      <span className="text-sm font-black text-[#071537]">Rider Name</span>
+      <select
+        value={riderName}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-12 rounded-2xl border border-white/80 bg-white/70 px-4 text-base font-bold outline-none focus:border-green-500 focus:ring-4 focus:ring-green-100"
+      >
+        <option value="">Select saved rider</option>
+        {riderOptions.map((name) => (
+          <option key={name} value={name}>
+            {name}
+          </option>
+        ))}
+      </select>
+      <span className="text-xs font-semibold text-blue-950/60">
+        {savedCount} saved rider{savedCount === 1 ? "" : "s"} for this date. Upload CSV to detect a new rider.
+      </span>
+    </label>
+  );
+}
+
+function ActionButton({ label, icon: Icon, onClick, disabled, tone }) {
+  const toneClass =
+    tone === "red"
+      ? "from-red-500 to-rose-600 shadow-red-300/60"
+      : tone === "blue"
+        ? "from-blue-700 to-sky-500 shadow-blue-300/60"
+        : tone === "dark"
+          ? "from-slate-800 to-slate-600 shadow-slate-300/50"
+      : "from-emerald-700 to-green-400 shadow-emerald-300/60";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`inline-flex min-h-14 items-center justify-center gap-2 rounded-2xl border border-white/60 bg-gradient-to-br px-4 py-3 text-sm font-extrabold text-white shadow-xl transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 ${toneClass}`}
+    >
+      <Icon className="h-5 w-5" />
+      {label}
+    </button>
+  );
+}
