@@ -5,8 +5,22 @@ import { startWhatsAppClient } from "./whatsapp/whatsappService.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
-app.use(cors({ origin: true }));
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
+  }),
+);
 app.use(express.json({ limit: "25mb" }));
 
 app.get("/api/health", (_request, response) => {
@@ -22,4 +36,3 @@ app.listen(port, () => {
 startWhatsAppClient().catch((error) => {
   console.error("[whatsapp-startup]", error);
 });
-

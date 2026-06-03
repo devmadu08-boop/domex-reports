@@ -51,6 +51,36 @@ Then open Settings in the app:
 
 WhatsApp auth/session files are stored in `backend/data/` and are ignored by Git.
 
+### Vercel Deployment Note
+
+The Vite frontend can be deployed on Vercel, but the Baileys WhatsApp backend needs an always-running Node.js server because it keeps a WhatsApp socket/session alive. Vercel static/serverless deployment will return `404` for `/api/whatsapp/status` unless a backend is hosted separately.
+
+Recommended setup:
+
+1. Deploy the frontend to Vercel as usual.
+2. Deploy this backend on an always-on Node host such as Railway, Render, Fly.io, or a VPS.
+3. On that backend host, run:
+
+```bash
+npm install
+npm run server
+```
+
+4. Set backend environment variables:
+
+```text
+PORT=3001
+ALLOWED_ORIGINS=https://your-vercel-domain.vercel.app
+```
+
+5. In Vercel Project Settings → Environment Variables, add:
+
+```text
+VITE_WHATSAPP_API_BASE_URL=https://your-whatsapp-backend-domain.com
+```
+
+6. Redeploy the Vercel frontend.
+
 ## Storage
 
 The first version uses `localStorage`. The storage code is isolated in `src/services/reportStorage.js` so Firebase or Supabase can be added later without rewriting the UI.
