@@ -250,6 +250,7 @@ export function getSettings() {
   const savedSettings = readJson(SETTINGS_KEY, {});
   return {
     companyName: DEFAULT_COMPANY_NAME,
+    branchName: "",
     operationTarget: "",
     autoWeeklyBackup: true,
     lastAutoBackupAt: "",

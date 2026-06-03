@@ -1,10 +1,11 @@
-export function CourierPerformanceReport({ selectedDate, rows, reportRef, companyName = "Domestic Express (pvt) ltd" }) {
+export function CourierPerformanceReport({ selectedDate, rows, reportRef, companyName = "Domestic Express (pvt) ltd", branchName = "" }) {
   const displayRows = rows.length > 0 ? rows : Array.from({ length: 5 }, (_, index) => ({ id: `empty-${index}` }));
 
   return (
     <div ref={reportRef} className="report-paper w-full min-w-[820px]">
       <p className="report-company">{companyName}</p>
       <h2 className="report-title text-2xl">Branch Courier Performance Report</h2>
+      {branchName && <p className="report-branch">Branch: {branchName}</p>}
       <table className="report-table">
         <thead>
           <tr>
@@ -35,7 +36,7 @@ export function CourierPerformanceReport({ selectedDate, rows, reportRef, compan
   );
 }
 
-export function OperationReport({ selectedDate, operation, reportRef, companyName = "Domestic Express (pvt) ltd" }) {
+export function OperationReport({ selectedDate, operation, reportRef, companyName = "Domestic Express (pvt) ltd", branchName = "" }) {
   const data = operation || {};
   const totalPercent =
     data.totalPercent ||
@@ -45,6 +46,7 @@ export function OperationReport({ selectedDate, operation, reportRef, companyNam
     <div ref={reportRef} className="report-paper w-full min-w-[820px]">
       <p className="report-company">{companyName}</p>
       <h2 className="report-title text-2xl">Operation Report</h2>
+      {branchName && <p className="report-branch">Branch: {branchName}</p>}
       <table className="report-table">
         <thead>
           <tr>

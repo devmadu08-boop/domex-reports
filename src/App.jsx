@@ -639,10 +639,10 @@ export default function App() {
 
             <div className="grid gap-5 overflow-hidden xl:grid-cols-2">
               <div className="overflow-x-auto rounded-3xl border border-white/70 bg-white/55 shadow-xl">
-                <CourierPerformanceReport selectedDate={selectedDate} rows={courierRows} reportRef={courierReportRef} companyName={settings.companyName} />
+                <CourierPerformanceReport selectedDate={selectedDate} rows={courierRows} reportRef={courierReportRef} companyName={settings.companyName} branchName={settings.branchName} />
               </div>
               <div className="overflow-x-auto rounded-3xl border border-white/70 bg-white/55 shadow-xl">
-                <OperationReport selectedDate={selectedDate} operation={operation} reportRef={operationReportRef} companyName={settings.companyName} />
+                <OperationReport selectedDate={selectedDate} operation={operation} reportRef={operationReportRef} companyName={settings.companyName} branchName={settings.branchName} />
               </div>
             </div>
 
@@ -650,7 +650,7 @@ export default function App() {
           </section>
         )}
 
-        {activeTab === "deliveredConverter" && <DeliveredReportConverter onSaved={refreshHistory} companyName={settings.companyName} />}
+        {activeTab === "deliveredConverter" && <DeliveredReportConverter onSaved={refreshHistory} companyName={settings.companyName} defaultBranchName={settings.branchName} />}
 
         {activeTab === "settings" && (
           <SettingsPage

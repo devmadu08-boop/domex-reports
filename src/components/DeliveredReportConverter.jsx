@@ -10,7 +10,7 @@ const emptyEntry = {
   value: "",
 };
 
-export default function DeliveredReportConverter({ onSaved, companyName = "Domestic Express (pvt) ltd" }) {
+export default function DeliveredReportConverter({ onSaved, companyName = "Domestic Express (pvt) ltd", defaultBranchName = "" }) {
   const [reportDate, setReportDate] = useState(todayIso());
   const [riderName, setRiderName] = useState("");
   const [branchName, setBranchName] = useState("");
@@ -322,7 +322,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           reportRef={reportRef}
           reportDate={reportDate}
           riderName={riderName}
-          branchName={branchName}
+          branchName={branchName || defaultBranchName}
           companyName={companyName}
           entries={entries}
           totalValue={totalValue}

@@ -69,8 +69,9 @@ export default function SettingsPage({
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-3">
           <Field label="Company Header" value={draftSettings.companyName || ""} onChange={(value) => updateSetting("companyName", value)} />
+          <Field label="Branch Name" value={draftSettings.branchName || ""} onChange={(value) => updateSetting("branchName", value)} placeholder="Example: Middeniya" />
           <Field label="Stable Operation Target" type="number" value={draftSettings.operationTarget || ""} onChange={(value) => updateSetting("operationTarget", value)} />
         </div>
 
