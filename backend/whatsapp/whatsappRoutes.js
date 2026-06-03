@@ -5,7 +5,7 @@ import {
   getWhatsAppStatus,
   logoutWhatsApp,
   reconnectWhatsApp,
-  saveDefaultGroupJid,
+  saveDefaultGroupJids,
   sendReportToDefaultGroup,
 } from "./whatsappService.js";
 
@@ -58,7 +58,7 @@ router.get("/groups", async (_request, response) => {
 
 router.post("/default-group", async (request, response) => {
   try {
-    const config = await saveDefaultGroupJid(request.body.groupJid);
+    const config = await saveDefaultGroupJids(request.body.groupJids || request.body.groupJid);
     response.json(config);
   } catch (error) {
     sendError(response, error);
@@ -74,4 +74,3 @@ router.post("/send-report", async (request, response) => {
 });
 
 export default router;
-

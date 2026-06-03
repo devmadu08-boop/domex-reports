@@ -37,7 +37,7 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
   const [status, setStatus] = useState(null);
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [groups, setGroups] = useState([]);
-  const [selectedGroup, setSelectedGroup] = useState("");
+  const [selectedGroups, setSelectedGroups] = useState([]);
   const [captionTemplates, setCaptionTemplates] = useState(settings.whatsappCaptionTemplates || {});
   const [customTemplates, setCustomTemplates] = useState(settings.whatsappCustomCaptionTemplates || {});
   const [loading, setLoading] = useState(false);
@@ -58,7 +58,8 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
     try {
       const nextStatus = await getWhatsAppStatus();
       setStatus(nextStatus);
-      setSelectedGroup((current) => current || nextStatus.defaultGroupJid || "");
+      const savedGroups = nextStatus.defaultGroupJids?.length ? nextStatus.defaultGroupJids : [nextStatus.defaultGroupJid].filter(Boolean);
+      setSelectedGroups((current) => (current.length ? current : savedGroups));
 
       if (!nextStatus.connected) {
         const qr = await getWhatsAppQr();
@@ -94,8 +95,16 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
 
   async function handleSaveGroup() {
     await runAction(async () => {
-      await saveDefaultWhatsAppGroup(selectedGroup);
-    }, "Default WhatsApp group saved.");
+      await saveDefaultWhatsAppGroup(selectedGroups);
+    }, "Default WhatsApp groups saved.");
+  }
+
+  function toggleGroup(jid) {
+    setSelectedGroups((current) => (current.includes(jid) ? current.filter((item) => item !== jid) : [...current, jid]));
+  }
+
+  function clearSelectedGroups() {
+    setSelectedGroups([]);
   }
 
   function updateTemplate(type, value) {
@@ -135,6 +144,10 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
   }
 
   const connected = Boolean(status?.connected);
+  const savedMissingGroups = selectedGroups
+    .filter((jid) => !groups.some((group) => group.jid === jid))
+    .map((jid) => ({ jid, name: jid, participants: 0 }));
+  const groupOptions = [...groups, ...savedMissingGroups];
 
   return (
     <div className="glass-panel p-4 lg:col-span-2">
@@ -145,7 +158,7 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
           </span>
           <div>
             <h3 className="text-lg font-black text-[#071537]">WhatsApp Settings</h3>
-            <p className="text-sm font-semibold text-blue-950/65">Connect WhatsApp and choose the default report group.</p>
+            <p className="text-sm font-semibold text-blue-950/65">Connect WhatsApp and choose the default report groups.</p>
           </div>
         </div>
         <span className={`rounded-2xl px-4 py-2 text-sm font-black ${connected ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-700"}`}>
@@ -190,8 +203,8 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
           <div className="whatsapp-settings-card">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-black text-[#071537]">Default Report Group</p>
-                <p className="text-xs font-semibold text-blue-950/60">Fetch joined groups, select one, then save it.</p>
+                <p className="text-sm font-black text-[#071537]">Default Report Groups</p>
+                <p className="text-xs font-semibold text-blue-950/60">Fetch joined groups, select one or more groups, then save them.</p>
               </div>
               <button type="button" disabled={loading || !connected} onClick={handleFetchGroups} className="secondary-action disabled:opacity-50">
                 <Users className="h-5 w-5" />
@@ -199,25 +212,54 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
               </button>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-              <select
-                value={selectedGroup}
-                onChange={(event) => setSelectedGroup(event.target.value)}
-                className="whatsapp-control h-12"
-              >
-                <option value="">Select WhatsApp group</option>
-                {groups.map((group) => (
-                  <option key={group.jid} value={group.jid}>
-                    {group.name} ({group.participants})
-                  </option>
-                ))}
-                {selectedGroup && !groups.some((group) => group.jid === selectedGroup) && (
-                  <option value={selectedGroup}>{selectedGroup}</option>
+            <div className="grid gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/70 bg-white/70 px-4 py-3 shadow-inner">
+                <p className="text-sm font-black text-blue-950">
+                  {selectedGroups.length ? `${selectedGroups.length} group${selectedGroups.length === 1 ? "" : "s"} selected` : "No groups selected"}
+                </p>
+                {selectedGroups.length > 0 && (
+                  <button type="button" onClick={clearSelectedGroups} className="text-xs font-black text-red-600 hover:text-red-700">
+                    Clear selection
+                  </button>
                 )}
-              </select>
-              <button type="button" disabled={loading || !selectedGroup} onClick={handleSaveGroup} className="primary-action primary-action-green disabled:opacity-50">
+              </div>
+
+              <div className="grid max-h-72 gap-2 overflow-y-auto rounded-2xl border border-emerald-100 bg-white/50 p-2">
+                {groupOptions.length ? (
+                  groupOptions.map((group) => {
+                    const checked = selectedGroups.includes(group.jid);
+                    return (
+                      <label
+                        key={group.jid}
+                        className={`flex cursor-pointer items-center gap-3 rounded-2xl border px-4 py-3 transition ${
+                          checked ? "border-emerald-300 bg-emerald-50 shadow-lg shadow-emerald-100" : "border-white/70 bg-white/75 hover:border-blue-200"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleGroup(group.jid)}
+                          className="h-5 w-5 rounded border-blue-200 text-emerald-600 focus:ring-emerald-400"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-black text-[#071537]">{group.name || group.jid}</span>
+                          <span className="block truncate text-xs font-semibold text-blue-950/55">
+                            {group.participants ? `${group.participants} participants` : group.jid}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-blue-200 bg-white/70 px-4 py-5 text-center text-sm font-bold text-blue-950/60">
+                    Fetch groups to select WhatsApp report destinations.
+                  </div>
+                )}
+              </div>
+
+              <button type="button" disabled={loading || !selectedGroups.length} onClick={handleSaveGroup} className="primary-action primary-action-green disabled:opacity-50">
                 <Save className="h-5 w-5" />
-                Save Group
+                Save Groups
               </button>
             </div>
           </div>

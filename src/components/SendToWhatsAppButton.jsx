@@ -14,11 +14,11 @@ export default function SendToWhatsAppButton({ reportRef, reportTitle, reportDat
 
     try {
       const imageDataUrl = await captureElementAsPngDataUrl(reportRef.current);
-      await sendReportToWhatsApp({
+      const result = await sendReportToWhatsApp({
         imageDataUrl,
         caption: buildCaption(reportType, reportTitle, reportDate),
       });
-      setMessage("Sent to WhatsApp successfully.");
+      setMessage(`Sent to ${result.sentCount || 1} WhatsApp group${(result.sentCount || 1) === 1 ? "" : "s"} successfully.`);
     } catch (error) {
       setMessage(error.message || "Send failed.");
     } finally {
@@ -51,4 +51,3 @@ function buildCaption(reportType, reportTitle, reportDate) {
   const template = templates[reportType] || "{title} - {date}\nSent automatically from Daily Report System";
   return template.replaceAll("{title}", reportTitle).replaceAll("{date}", reportDate);
 }
-

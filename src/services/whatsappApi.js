@@ -49,10 +49,12 @@ export function fetchWhatsAppGroups() {
   return requestJson("/groups");
 }
 
-export function saveDefaultWhatsAppGroup(groupJid) {
+export function saveDefaultWhatsAppGroup(groupJids) {
   return requestJson("/default-group", {
     method: "POST",
-    body: JSON.stringify({ groupJid }),
+    body: JSON.stringify({
+      groupJids: Array.isArray(groupJids) ? groupJids : [groupJids].filter(Boolean),
+    }),
   });
 }
 
