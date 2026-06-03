@@ -132,6 +132,7 @@ export default function App() {
   const [settings, setSettingsState] = useState(getSettings);
   const [cloudStatus, setCloudStatus] = useState("Cloud sync ready.");
   const [notice, setNotice] = useState("");
+  const [pendingHistoryDownload, setPendingHistoryDownload] = useState(null);
 
   const courierReportRef = useRef(null);
   const operationReportRef = useRef(null);
@@ -165,6 +166,16 @@ export default function App() {
   useEffect(() => {
     loadDate(selectedDate);
   }, [selectedDate]);
+
+  useEffect(() => {
+    if (!pendingHistoryDownload || activeTab !== "exports" || selectedDate !== pendingHistoryDownload.date) return undefined;
+
+    const timer = window.setTimeout(() => {
+      runHistoryDownload(pendingHistoryDownload);
+    }, 350);
+
+    return () => window.clearTimeout(timer);
+  }, [pendingHistoryDownload, selectedDate, activeTab, courierRows, operation]);
 
   useEffect(() => {
     if (!settings.firestoreRealtimeSync) return undefined;
@@ -449,6 +460,40 @@ export default function App() {
     setActiveTab("exports");
   }
 
+  function handleHistoryView(date) {
+    setSelectedDate(date);
+    setActiveTab("exports");
+    showNotice(`Loaded reports for ${date}.`);
+  }
+
+  function handleHistoryDownload(item) {
+    if (!item.hasCourier && !item.hasOperation) {
+      showNotice("This date only has rider delivered reports. Open Convert Delivered Report and select rider to export.");
+      setSelectedDate(item.date);
+      setActiveTab("deliveredConverter");
+      return;
+    }
+
+    setPendingHistoryDownload(item);
+    setSelectedDate(item.date);
+    setActiveTab("exports");
+    showNotice(`Preparing download for ${item.date}...`);
+  }
+
+  async function runHistoryDownload(item) {
+    setPendingHistoryDownload(null);
+    await runExport(async () => {
+      if (item.hasCourier && item.hasOperation) {
+        await exportBothAsPdf([courierReportRef.current, operationReportRef.current], item.date);
+      } else if (item.hasCourier) {
+        await exportElementAsPdf(courierReportRef.current, "Branch_Courier_Performance_Report", item.date);
+      } else if (item.hasOperation) {
+        await exportElementAsPdf(operationReportRef.current, "Operation_Report", item.date);
+      }
+    });
+    showNotice(`Downloaded saved report for ${item.date}.`);
+  }
+
   function handleClearDate() {
     if (!confirm(`Clear all saved data for ${selectedDate}?`)) return;
     clearReportByDate(selectedDate);
@@ -572,7 +617,7 @@ export default function App() {
               <QuickButton label="Export PDF" icon={FileDown} onClick={() => setActiveTab("exports")} tone="red" />
             </div>
 
-            <HistoryList history={history} savedNamesCount={courierNames.length} onOpenExports={() => setActiveTab("exports")} onSelect={(date) => setSelectedDate(date)} onDeleteType={handleHistoryDeleteType} />
+            <HistoryList history={history} savedNamesCount={courierNames.length} onView={handleHistoryView} onDownload={handleHistoryDownload} onSelect={(date) => setSelectedDate(date)} onDeleteType={handleHistoryDeleteType} />
           </section>
         )}
 
@@ -646,7 +691,7 @@ export default function App() {
               </div>
             </div>
 
-            <HistoryList history={history} savedNamesCount={courierNames.length} onOpenExports={() => setActiveTab("exports")} onSelect={(date) => setSelectedDate(date)} onDeleteType={handleHistoryDeleteType} />
+            <HistoryList history={history} savedNamesCount={courierNames.length} onView={handleHistoryView} onDownload={handleHistoryDownload} onSelect={(date) => setSelectedDate(date)} onDeleteType={handleHistoryDeleteType} />
           </section>
         )}
 
@@ -752,7 +797,7 @@ function QuickButton({ label, icon: Icon, onClick, tone, className = "" }) {
   );
 }
 
-function HistoryList({ history, onSelect, savedNamesCount, onOpenExports, onDeleteType }) {
+function HistoryList({ history, onSelect, savedNamesCount, onView, onDownload, onDeleteType }) {
   return (
     <section className="glass-panel p-4">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -789,10 +834,10 @@ function HistoryList({ history, onSelect, savedNamesCount, onOpenExports, onDele
                 <span className="inline-flex items-center rounded-xl bg-violet-100 px-3 py-2 text-xs font-black text-violet-700">{savedNamesCount} names</span>
               </div>
               <div className="flex gap-2 md:justify-end">
-                <button type="button" onClick={() => onSelect(item.date)} className="history-action text-blue-700" aria-label="View report">
+                <button type="button" onClick={() => onView(item.date)} className="history-action text-blue-700" aria-label="View report">
                   <Eye className="h-5 w-5" />
                 </button>
-                <button type="button" onClick={onOpenExports} className="history-action text-blue-700" aria-label="Download report">
+                <button type="button" onClick={() => onDownload(item)} className="history-action text-blue-700" aria-label="Download report">
                   <Download className="h-5 w-5" />
                 </button>
               </div>
