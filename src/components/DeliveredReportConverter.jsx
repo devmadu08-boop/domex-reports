@@ -3,6 +3,7 @@ import { FileDown, Image, Plus, RotateCcw, Trash2, Upload } from "lucide-react";
 import { todayIso } from "../utils/date.js";
 import { exportElementAsPng, exportElementAsPortraitPdf } from "../utils/exportReports.js";
 import { deleteDeliveredReport, getDeliveredReport, getDeliveredRiderNames, saveDeliveredReport as saveDeliveredReportByRider } from "../services/reportStorage.js";
+import SendToWhatsAppButton from "./SendToWhatsAppButton.jsx";
 
 const emptyEntry = {
   trackingNo: "",
@@ -304,6 +305,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           <ActionButton label="Delete Saved" icon={Trash2} onClick={deleteSavedDeliveredReport} disabled={!reportDate} tone="red" />
           <ActionButton label="Export A4 PNG" icon={Image} onClick={() => exportElementAsPng(reportRef.current, "Delivered_Collection_Report", reportDate)} disabled={entries.length === 0} tone="green" />
           <ActionButton label="Export A4 PDF" icon={FileDown} onClick={() => exportElementAsPortraitPdf(reportRef.current, "Delivered_Collection_Report", reportDate)} disabled={entries.length === 0} tone="red" />
+          <SendToWhatsAppButton reportRef={reportRef} reportTitle="Delivered Collection Report" reportType="delivered" reportDate={reportDate} disabled={entries.length === 0} />
           <div className="rounded-2xl border border-white/70 bg-white/55 px-4 py-3 text-right sm:col-span-2 md:col-span-1">
             <p className="text-xs font-black uppercase text-blue-950/60">Total Value</p>
             <p className="text-2xl font-black text-[#071537]">{formatMoney(totalValue)}</p>

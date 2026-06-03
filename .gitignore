@@ -9,3 +9,5 @@ vite-dev.err.log
 .env
 .env.local
 .env.*.local
+
+backend/data/

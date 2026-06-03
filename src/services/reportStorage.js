@@ -1,8 +1,14 @@
 const STORAGE_KEY = "daily-courier-report-system-v1";
 const COURIER_NAMES_KEY = "daily-courier-report-system-courier-names-v1";
 const SETTINGS_KEY = "daily-courier-report-system-settings-v1";
+const META_KEY = "daily-courier-report-system-meta-v1";
 const BACKUP_VERSION = 1;
 const DEFAULT_COMPANY_NAME = "Domestic Express (pvt) ltd";
+const DEFAULT_WHATSAPP_CAPTION_TEMPLATES = {
+  courier: "Branch Courier Performance Report - {date}\nSent automatically from Daily Report System",
+  operation: "Operation Report - {date}\nSent automatically from Daily Report System",
+  delivered: "Delivered Collection Report - {date}\nSent automatically from Daily Report System",
+};
 const DATA_CHANGED_EVENT = "daily-courier-report-data-changed";
 let suppressChangeEvent = false;
 
@@ -44,6 +50,7 @@ export function addDataChangeListener(listener) {
 
 function writeStore(store) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+  markLocalDataChanged();
   emitDataChanged();
 }
 
@@ -58,7 +65,23 @@ function readJson(key, fallback) {
 
 function writeJson(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
+  markLocalDataChanged();
   emitDataChanged();
+}
+
+function writeMeta(meta) {
+  localStorage.setItem(META_KEY, JSON.stringify(meta));
+}
+
+function markLocalDataChanged(value = new Date().toISOString()) {
+  writeMeta({
+    ...readJson(META_KEY, {}),
+    localUpdatedAt: value,
+  });
+}
+
+export function getLocalUpdatedAt() {
+  return readJson(META_KEY, {}).localUpdatedAt || "";
 }
 
 export function getReportByDate(date) {
@@ -224,6 +247,7 @@ export function deleteCourierName(name) {
 }
 
 export function getSettings() {
+  const savedSettings = readJson(SETTINGS_KEY, {});
   return {
     companyName: DEFAULT_COMPANY_NAME,
     operationTarget: "",
@@ -231,7 +255,17 @@ export function getSettings() {
     lastAutoBackupAt: "",
     firestoreRealtimeSync: false,
     cloudLastSyncedAt: "",
-    ...readJson(SETTINGS_KEY, {}),
+    ...savedSettings,
+    whatsappCaptionTemplates: {
+      ...DEFAULT_WHATSAPP_CAPTION_TEMPLATES,
+      ...(savedSettings.whatsappCaptionTemplates || {}),
+    },
+    whatsappCustomCaptionTemplates: {
+      courier: [],
+      operation: [],
+      delivered: [],
+      ...(savedSettings.whatsappCustomCaptionTemplates || {}),
+    },
   };
 }
 
@@ -249,6 +283,7 @@ export function createBackupData() {
     app: "Daily Courier Report System",
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
+    localUpdatedAt: getLocalUpdatedAt(),
     reports: readStore(),
     courierNames: getCourierNames(),
     settings: getSettings(),
@@ -293,6 +328,7 @@ export function restoreBackupData(data, { silent = false } = {}) {
       ...(data.settings || {}),
       restoredAt: new Date().toISOString(),
     });
+    markLocalDataChanged(data.cloudUpdatedAt || data.exportedAt || new Date().toISOString());
   } finally {
     suppressChangeEvent = false;
   }

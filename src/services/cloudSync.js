@@ -4,10 +4,11 @@ import { createBackupData } from "./reportStorage.js";
 
 const CLOUD_REPORT_DOC = doc(firestoreDb, "reportSystems", "domexDailyCourier");
 
-export async function uploadLocalSnapshotToFirestore(reason = "manual") {
+export async function uploadLocalSnapshotToFirestore(reason = "manual", sourceClientId = "") {
   const snapshot = {
     ...createBackupData(),
     reason,
+    sourceClientId,
     cloudUpdatedAt: new Date().toISOString(),
   };
 
@@ -19,6 +20,23 @@ export async function uploadLocalSnapshotToFirestore(reason = "manual") {
     },
     { merge: true },
   );
+
+  return snapshot;
+}
+
+export async function saveWeeklyBackupToFirestore() {
+  const date = new Date().toISOString().slice(0, 10);
+  const snapshot = {
+    ...createBackupData(),
+    reason: "weekly-firebase-backup",
+    sourceClientId: "",
+    cloudUpdatedAt: new Date().toISOString(),
+  };
+
+  await setDoc(doc(firestoreDb, "reportSystemWeeklyBackups", date), {
+    snapshot,
+    createdAt: serverTimestamp(),
+  });
 
   return snapshot;
 }

@@ -50,6 +50,11 @@ async function captureElement(element) {
   }
 }
 
+export async function captureElementAsPngDataUrl(element) {
+  const canvas = await captureElement(element);
+  return canvas.toDataURL("image/png", 1);
+}
+
 export async function exportElementAsPng(element, reportName, date) {
   const canvas = await captureElement(element);
   const link = document.createElement("a");

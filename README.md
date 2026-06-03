@@ -23,7 +23,7 @@ A simple React + Vite web app for entering daily courier branch data and exporti
 
 ```bash
 npm install
-npm run dev
+npm run dev:all
 ```
 
 Open the local URL shown in the terminal, usually:
@@ -31,6 +31,25 @@ Open the local URL shown in the terminal, usually:
 ```text
 http://127.0.0.1:5173
 ```
+
+## WhatsApp Backend
+
+WhatsApp sending uses a Node.js backend with Baileys. `npm run dev:all` starts both the frontend and backend together. You can also start them separately:
+
+```bash
+npm run server
+```
+
+Then open Settings in the app:
+
+1. Go to `WhatsApp Settings`.
+2. Click `Reconnect` if QR is not visible.
+3. Scan the QR from WhatsApp Linked Devices.
+4. Click `Fetch Groups`.
+5. Select the report group and click `Save Group`.
+6. Use `Send to WhatsApp` from the report/export area.
+
+WhatsApp auth/session files are stored in `backend/data/` and are ignored by Git.
 
 ## Storage
 

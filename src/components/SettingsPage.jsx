@@ -1,6 +1,7 @@
 import { Cloud, CloudDownload, CloudUpload, Download, RotateCcw, Save, Settings, Trash2, Upload, UserPlus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { downloadBackupFile, restoreBackupFile } from "../services/reportStorage.js";
+import WhatsAppSettings from "./WhatsAppSettings.jsx";
 
 export default function SettingsPage({
   settings,
@@ -116,6 +117,8 @@ export default function SettingsPage({
       </div>
 
       <div className="grid gap-5 lg:grid-cols-2">
+        <WhatsAppSettings settings={settings} onSaveSettings={onSaveSettings} />
+
         <div className="glass-panel p-4">
           <h3 className="mb-3 text-lg font-black text-[#071537]">Saved Courier Names</h3>
           <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">

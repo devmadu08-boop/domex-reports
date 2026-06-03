@@ -27,6 +27,7 @@ import DeliveredReportConverter from "./components/DeliveredReportConverter.jsx"
 import ExportButtons from "./components/ExportButtons.jsx";
 import OperationReportForm, { emptyOperationForm } from "./components/OperationReportForm.jsx";
 import { CourierPerformanceReport, OperationReport } from "./components/ReportTable.jsx";
+import SendToWhatsAppButton from "./components/SendToWhatsAppButton.jsx";
 import SettingsPage from "./components/SettingsPage.jsx";
 import {
   clearReportByDate,
@@ -38,6 +39,7 @@ import {
   getReportByDate,
   getReportHistory,
   getSettings,
+  getLocalUpdatedAt,
   markWeeklyBackupComplete,
   restoreBackupData,
   saveCourierName,
@@ -45,7 +47,7 @@ import {
   saveSettings,
   shouldRunWeeklyBackup,
 } from "./services/reportStorage.js";
-import { downloadSnapshotFromFirestore, subscribeToFirestoreSnapshot, uploadLocalSnapshotToFirestore } from "./services/cloudSync.js";
+import { downloadSnapshotFromFirestore, saveWeeklyBackupToFirestore, subscribeToFirestoreSnapshot, uploadLocalSnapshotToFirestore } from "./services/cloudSync.js";
 import { todayIso, displayDate } from "./utils/date.js";
 import { exportBothAsPdf, exportElementAsPdf, exportElementAsPng } from "./utils/exportReports.js";
 
@@ -57,6 +59,15 @@ const tabs = [
   { id: "deliveredConverter", label: "Convert Delivered Report", mobileLabel: "Convert", icon: FileText },
   { id: "settings", label: "Settings", mobileLabel: "Settings", icon: Settings },
 ];
+
+function getSyncClientId() {
+  const key = "daily-courier-report-sync-client-id";
+  const existing = localStorage.getItem(key);
+  if (existing) return existing;
+  const nextId = crypto.randomUUID();
+  localStorage.setItem(key, nextId);
+  return nextId;
+}
 
 function calculateOutwardAchievement(operation) {
   const target = Number(operation?.target) || 0;
@@ -120,12 +131,16 @@ export default function App() {
   const [stableTarget, setStableTarget] = useState("");
   const [settings, setSettingsState] = useState(getSettings);
   const [cloudStatus, setCloudStatus] = useState("Cloud sync ready.");
+  const [notice, setNotice] = useState("");
 
   const courierReportRef = useRef(null);
   const operationReportRef = useRef(null);
   const realtimeUploadTimerRef = useRef(null);
   const applyingRemoteSnapshotRef = useRef(false);
   const lastCloudUpdateRef = useRef("");
+  const bootstrappedCloudRef = useRef(false);
+  const unsavedDraftUpdatedAtRef = useRef("");
+  const syncClientIdRef = useRef(getSyncClientId());
 
   useEffect(() => {
     const savedSettings = getSettings();
@@ -135,8 +150,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    bootstrapFromFirestore();
+  }, []);
+
+  useEffect(() => {
     if (!shouldRunWeeklyBackup(settings)) return;
     downloadBackupFile("weekly-auto");
+    saveWeeklyBackupToFirestore()
+      .then(() => setCloudStatus("Weekly Firebase backup saved."))
+      .catch((error) => setCloudStatus(error.message || "Weekly Firebase backup failed."));
     setSettingsState(markWeeklyBackupComplete());
   }, [settings]);
 
@@ -148,13 +170,19 @@ export default function App() {
     if (!settings.firestoreRealtimeSync) return undefined;
 
     setCloudStatus("Realtime sync active.");
+    uploadLocalSnapshotToFirestore("realtime-enabled", syncClientIdRef.current)
+      .then((snapshot) => {
+        lastCloudUpdateRef.current = snapshot.cloudUpdatedAt;
+        setCloudStatus(`Realtime synced: ${new Date(snapshot.cloudUpdatedAt).toLocaleTimeString()}`);
+      })
+      .catch((error) => setCloudStatus(error.message || "Initial realtime sync failed."));
 
     const unsubscribeLocal = addDataChangeListener(() => {
       if (applyingRemoteSnapshotRef.current) return;
       window.clearTimeout(realtimeUploadTimerRef.current);
       realtimeUploadTimerRef.current = window.setTimeout(async () => {
         try {
-          const snapshot = await uploadLocalSnapshotToFirestore("realtime-auto");
+          const snapshot = await uploadLocalSnapshotToFirestore("realtime-auto", syncClientIdRef.current);
           lastCloudUpdateRef.current = snapshot.cloudUpdatedAt;
           setCloudStatus(`Realtime uploaded: ${new Date(snapshot.cloudUpdatedAt).toLocaleTimeString()}`);
         } catch (error) {
@@ -166,6 +194,8 @@ export default function App() {
     const unsubscribeCloud = subscribeToFirestoreSnapshot(
       (snapshot) => {
         if (!snapshot?.reports || snapshot.cloudUpdatedAt === lastCloudUpdateRef.current) return;
+        if (snapshot.sourceClientId === syncClientIdRef.current) return;
+        if (!shouldApplyCloudSnapshot(snapshot)) return;
         lastCloudUpdateRef.current = snapshot.cloudUpdatedAt || "";
         applyingRemoteSnapshotRef.current = true;
         try {
@@ -187,6 +217,53 @@ export default function App() {
       unsubscribeCloud();
     };
   }, [settings.firestoreRealtimeSync, selectedDate]);
+
+  useEffect(() => {
+    if (!notice) return undefined;
+    const timer = window.setTimeout(() => setNotice(""), 2600);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
+  function showNotice(message) {
+    setNotice(message);
+  }
+
+  function shouldApplyCloudSnapshot(snapshot) {
+    if (unsavedDraftUpdatedAtRef.current) return false;
+    const cloudTime = new Date(snapshot.cloudUpdatedAt || snapshot.exportedAt || 0).getTime();
+    const localTime = new Date(getLocalUpdatedAt() || 0).getTime();
+    const draftTime = new Date(unsavedDraftUpdatedAtRef.current || 0).getTime();
+    const newestLocalTime = Math.max(Number.isFinite(localTime) ? localTime : 0, Number.isFinite(draftTime) ? draftTime : 0);
+    if (!Number.isFinite(cloudTime)) return false;
+    return cloudTime >= newestLocalTime;
+  }
+
+  async function bootstrapFromFirestore() {
+    if (bootstrappedCloudRef.current) return;
+    bootstrappedCloudRef.current = true;
+
+    try {
+      const snapshot = await downloadSnapshotFromFirestore();
+      if (!snapshot?.reports) return;
+
+      lastCloudUpdateRef.current = snapshot.cloudUpdatedAt || "";
+      const remoteSyncEnabled = Boolean(snapshot.settings?.firestoreRealtimeSync);
+
+      if (remoteSyncEnabled && shouldApplyCloudSnapshot(snapshot)) {
+        applyingRemoteSnapshotRef.current = true;
+        restoreBackupData(snapshot, { silent: true });
+        handleRestoreBackup();
+        setCloudStatus("Firestore settings and reports loaded.");
+      } else if (remoteSyncEnabled) {
+        setSettingsState((current) => ({ ...current, firestoreRealtimeSync: true }));
+        setCloudStatus("Firestore sync enabled. Local data is newer.");
+      }
+    } catch (error) {
+      setCloudStatus(error.message || "Firestore bootstrap failed.");
+    } finally {
+      applyingRemoteSnapshotRef.current = false;
+    }
+  }
 
   function refreshHistory() {
     setHistory(getReportHistory());
@@ -224,9 +301,11 @@ export default function App() {
       : [...courierRows, normalized];
 
     setCourierRows(nextRows);
+    unsavedDraftUpdatedAtRef.current = new Date().toISOString();
     setCourierForm(emptyCourierForm);
     setEditingCourierId(null);
     setCourierNames(saveCourierName(normalized.courierName));
+    showNotice(editingCourierId ? "Courier row updated successfully." : "Courier row added successfully.");
   }
 
   function handleCourierEdit(row) {
@@ -244,7 +323,9 @@ export default function App() {
   function handleCourierDelete(id) {
     if (!confirm("Delete this courier row?")) return;
     const nextRows = courierRows.filter((row) => row.id !== id);
+    unsavedDraftUpdatedAtRef.current = new Date().toISOString();
     setCourierRows(nextRows);
+    showNotice("Courier row deleted.");
   }
 
   function handleOperationSubmit(event) {
@@ -253,17 +334,21 @@ export default function App() {
     setOperation(nextOperation);
     saveReportType(selectedDate, "operation", nextOperation);
     refreshHistory();
+    showNotice("Operation report saved successfully.");
   }
 
   function handleSaveCourierReport() {
     saveReportType(selectedDate, "courierRows", courierRows);
+    unsavedDraftUpdatedAtRef.current = "";
     refreshHistory();
+    showNotice("Courier performance report saved successfully.");
   }
 
   function handleDeleteSavedReportType(type) {
     if (!confirm(`Delete saved ${reportTypeLabel(type)} report for ${selectedDate}?`)) return;
     deleteReportType(selectedDate, type);
     loadDate(selectedDate);
+    showNotice(`${reportTypeLabel(type)} report deleted.`);
   }
 
   function handleHistoryDeleteType(date, type) {
@@ -271,16 +356,19 @@ export default function App() {
     deleteReportType(date, type);
     refreshHistory();
     if (date === selectedDate) loadDate(selectedDate);
+    showNotice(`${reportTypeLabel(type)} report deleted.`);
   }
 
   function handleSaveCourierName(name) {
     const nextNames = saveCourierName(name);
     setCourierNames(nextNames);
+    showNotice("Courier name saved successfully.");
   }
 
   function handleDeleteCourierName(name) {
     if (!confirm(`Delete courier name "${name}"?`)) return;
     setCourierNames(deleteCourierName(name));
+    showNotice("Courier name deleted.");
   }
 
   function handleApplyStableTarget() {
@@ -291,13 +379,24 @@ export default function App() {
       target: savedSettings.operationTarget || "",
     };
     setOperationForm(nextForm);
+    showNotice("Stable target saved successfully.");
   }
 
-  function handleSaveAppSettings(nextSettings) {
+  async function handleSaveAppSettings(nextSettings) {
     const savedSettings = saveSettings(nextSettings);
     setSettingsState(savedSettings);
     setStableTarget(savedSettings.operationTarget || "");
     setOperationForm((current) => ({ ...current, target: savedSettings.operationTarget || "" }));
+    showNotice("Settings saved successfully.");
+
+    setCloudStatus("Saving settings to Firestore...");
+    try {
+      const snapshot = await uploadLocalSnapshotToFirestore("settings-save", syncClientIdRef.current);
+      lastCloudUpdateRef.current = snapshot.cloudUpdatedAt;
+      setCloudStatus(`Settings synced to Firestore: ${new Date(snapshot.cloudUpdatedAt).toLocaleTimeString()}`);
+    } catch (error) {
+      setCloudStatus(error.message || "Settings Firestore sync failed.");
+    }
   }
 
   function handleRestoreBackup() {
@@ -311,11 +410,12 @@ export default function App() {
   async function handleCloudUpload() {
     setCloudStatus("Uploading local data to Firestore...");
     try {
-      const snapshot = await uploadLocalSnapshotToFirestore("manual-upload");
+      const snapshot = await uploadLocalSnapshotToFirestore("manual-upload", syncClientIdRef.current);
       lastCloudUpdateRef.current = snapshot.cloudUpdatedAt;
       const savedSettings = saveSettings({ cloudLastSyncedAt: snapshot.cloudUpdatedAt });
       setSettingsState(savedSettings);
       setCloudStatus(`Uploaded to Firestore: ${new Date(snapshot.cloudUpdatedAt).toLocaleString()}`);
+      showNotice("Uploaded to Firestore successfully.");
     } catch (error) {
       setCloudStatus(error.message || "Cloud upload failed.");
     }
@@ -335,6 +435,7 @@ export default function App() {
       handleRestoreBackup();
       lastCloudUpdateRef.current = snapshot.cloudUpdatedAt || "";
       setCloudStatus(`Downloaded from Firestore: ${new Date(snapshot.cloudUpdatedAt || snapshot.exportedAt).toLocaleString()}`);
+      showNotice("Downloaded from Firestore successfully.");
     } catch (error) {
       setCloudStatus(error.message || "Cloud download failed.");
     } finally {
@@ -352,6 +453,7 @@ export default function App() {
     if (!confirm(`Clear all saved data for ${selectedDate}?`)) return;
     clearReportByDate(selectedDate);
     loadDate(selectedDate);
+    showNotice("Selected date data cleared.");
   }
 
   async function runExport(action) {
@@ -377,6 +479,11 @@ export default function App() {
 
   return (
     <div className="app-shell app-background pb-24 text-[#071537] md:grid md:grid-cols-[250px_1fr] md:gap-4 md:p-3 md:pb-3">
+      {notice && (
+        <div className="fixed right-4 top-4 z-50 max-w-sm rounded-2xl border border-white/70 bg-emerald-600 px-5 py-3 text-sm font-black text-white shadow-2xl">
+          {notice}
+        </div>
+      )}
       <aside className="glass-sidebar no-print hidden md:flex">
         <div className="grid gap-3 text-center">
           <div className="mx-auto grid h-16 w-16 place-items-center rounded-3xl bg-gradient-to-br from-emerald-500 to-green-800 text-white shadow-[0_18px_35px_rgba(16,185,129,0.35)]">
@@ -519,6 +626,9 @@ export default function App() {
               </div>
               <ExportButtons
                 disabled={exporting}
+                courierReportRef={courierReportRef}
+                operationReportRef={operationReportRef}
+                reportDate={selectedDate}
                 onCourierPng={() => runExport(() => exportElementAsPng(courierReportRef.current, "Branch_Courier_Performance_Report", selectedDate))}
                 onCourierPdf={() => runExport(() => exportElementAsPdf(courierReportRef.current, "Branch_Courier_Performance_Report", selectedDate))}
                 onOperationPng={() => runExport(() => exportElementAsPng(operationReportRef.current, "Operation_Report", selectedDate))}
