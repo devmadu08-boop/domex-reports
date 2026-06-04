@@ -2,20 +2,25 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   BarChart3,
+  Bell,
   CalendarDays,
   CheckCircle2,
+  Crown,
   Download,
   Eye,
   FileDown,
   FileText,
   History,
+  Home,
   Image,
   ListChecks,
   Package,
   PackageCheck,
   RotateCcw,
+  Search,
   Send,
   Settings,
+  Sparkles,
   Target,
   Trash2,
   Truck,
@@ -52,11 +57,11 @@ import { todayIso, displayDate } from "./utils/date.js";
 import { exportBothAsPdf, exportElementAsPdf, exportElementAsPng } from "./utils/exportReports.js";
 
 const tabs = [
-  { id: "dashboard", label: "Dashboard", mobileLabel: "Home", icon: BarChart3 },
+  { id: "dashboard", label: "Dashboard", mobileLabel: "Home", icon: Home },
   { id: "courier", label: "Courier Performance", mobileLabel: "Courier", icon: Truck },
   { id: "operation", label: "Operation Report", mobileLabel: "Operation", icon: PackageCheck },
   { id: "exports", label: "Export / History", mobileLabel: "Export", icon: History },
-  { id: "deliveredConverter", label: "Convert Delivered Report", mobileLabel: "Convert", icon: FileText },
+  { id: "deliveredConverter", label: "Convert Report", mobileLabel: "Convert", icon: FileText },
   { id: "settings", label: "Settings", mobileLabel: "Settings", icon: Settings },
 ];
 
@@ -523,24 +528,24 @@ export default function App() {
   const activeTabLabel = tabs.find((tab) => tab.id === activeTab)?.label || "Dashboard";
 
   return (
-    <div className="app-shell app-background pb-24 text-[#071537] md:grid md:grid-cols-[250px_1fr] md:gap-4 md:p-3 md:pb-3">
+    <div className="app-shell app-background pb-24 text-[#15143b] xl:grid xl:grid-cols-[260px_1fr] xl:gap-5 xl:p-5 xl:pb-5">
       {notice && (
-        <div className="fixed right-4 top-4 z-50 max-w-sm rounded-2xl border border-white/70 bg-emerald-600 px-5 py-3 text-sm font-black text-white shadow-2xl">
+        <div className="fixed right-4 top-4 z-50 max-w-sm rounded-[22px] border border-white/70 bg-violet-600 px-5 py-3 text-sm font-black text-white shadow-2xl shadow-violet-300/50">
           {notice}
         </div>
       )}
-      <aside className="glass-sidebar no-print hidden md:flex">
-        <div className="grid gap-3 text-center">
-          <div className="mx-auto grid h-16 w-16 place-items-center rounded-3xl bg-gradient-to-br from-emerald-500 to-green-800 text-white shadow-[0_18px_35px_rgba(16,185,129,0.35)]">
-            <Truck className="h-9 w-9" />
+      <aside className="glass-sidebar no-print hidden xl:flex">
+        <div className="sidebar-profile">
+          <div className="profile-avatar">
+            <Truck className="h-11 w-11" />
           </div>
           <div>
-            <h2 className="text-xl font-black leading-tight">Daily Courier</h2>
-            <p className="text-sm font-semibold text-blue-900/75">Report System</p>
+            <h2 className="text-2xl font-black leading-tight text-white drop-shadow">Hi, Admin!</h2>
+            <p className="text-sm font-bold text-white/88">Welcome back</p>
           </div>
         </div>
 
-        <nav className="mt-8 grid gap-3">
+        <nav className="mt-7 grid gap-3">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -560,37 +565,67 @@ export default function App() {
           })}
         </nav>
 
-        <div className="mt-auto rounded-[28px] border border-white/70 bg-cyan-50/55 p-5 text-center shadow-inner">
-          <div className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-cyan-500 to-emerald-500 text-white shadow-lg">
-            <Send className="h-8 w-8" />
+        <div className="sidebar-premium-card">
+          <div className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-[24px] bg-gradient-to-br from-amber-300 to-orange-400 text-white shadow-xl shadow-orange-300/45">
+            <Crown className="h-8 w-8" />
           </div>
-          <p className="font-black">Fast. Accurate.</p>
-          <p className="text-sm font-semibold text-blue-900/70">Daily Courier Reporting</p>
+          <p className="font-black text-[#211246]">Go Premium</p>
+          <p className="mt-1 text-xs font-semibold text-[#211246]/70">Unlock advanced reports and exports</p>
+          <button type="button" className="mt-4 rounded-2xl bg-gradient-to-br from-rose-400 to-pink-500 px-4 py-2 text-xs font-black text-white shadow-lg shadow-pink-300/50">
+            Upgrade Now
+          </button>
+        </div>
+
+        <div className="mt-auto rounded-[26px] border border-white/55 bg-white/35 p-4 shadow-[inset_6px_6px_14px_rgba(92,69,152,0.18),inset_-6px_-6px_14px_rgba(255,255,255,0.55)]">
+          <div className="flex items-center gap-3">
+            <span className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-lg shadow-violet-400/40">
+              <Send className="h-6 w-6" />
+            </span>
+            <span>
+              <span className="block text-sm font-black text-white">Fast. Accurate.</span>
+              <span className="block text-xs font-semibold text-white/82">Daily Courier Reporting</span>
+            </span>
+          </div>
         </div>
       </aside>
 
-      <div className="min-w-0 md:rounded-[32px] md:border md:border-white/70 md:bg-white/25 md:p-7 md:shadow-[0_25px_80px_rgba(28,80,140,0.18)]">
-      <header className="sticky top-0 z-30 border-b border-white/50 bg-white/80 backdrop-blur md:static md:border-0 md:bg-transparent">
-        <div className="flex flex-col gap-3 px-4 py-3 md:px-0 md:py-0 lg:flex-row lg:items-center lg:justify-between">
-          <div className="min-w-0">
-            <p className="text-xs font-black uppercase tracking-wide text-teal-700 md:text-sm">Daily <span className="text-emerald-600">Courier</span> Branch Reporting</p>
-            <h1 className="mt-0.5 text-2xl font-black tracking-tight text-[#091333] md:mt-3 md:text-5xl">Daily Courier Report System</h1>
-            <p className="mt-1 text-sm font-semibold text-blue-950/80 md:text-base">Fast daily entry, saved courier names, clean WhatsApp-ready exports.</p>
+      <div className="main-dashboard-surface min-w-0">
+      <header className="sticky top-0 z-30 border-b border-white/50 bg-[#fff7f2]/88 backdrop-blur xl:static xl:border-0 xl:bg-transparent">
+        <div className="flex flex-col gap-4 px-4 py-4 xl:px-0 xl:py-0">
+          <div className="grid gap-4 xl:grid-cols-[1fr_360px_auto] xl:items-center">
+            <div>
+              <p className="text-sm font-black text-violet-600">Dashboard</p>
+              <h1 className="mt-2 text-3xl font-black tracking-tight text-[#101233] md:text-5xl">Daily Courier Report System</h1>
+              <p className="mt-2 text-sm font-semibold text-[#4d4b86] md:text-base">Fast daily entry, saved courier names, clean WhatsApp-ready exports.</p>
+            </div>
+            <label className="top-search-bar">
+              <Search className="h-6 w-6 text-violet-400" />
+              <input type="search" placeholder="Search reports, couriers..." className="min-w-0 flex-1 bg-transparent text-sm font-bold text-[#15143b] outline-none placeholder:text-[#8b7bb5]" />
+            </label>
+            <div className="flex items-center justify-start gap-3 xl:justify-end">
+              <button type="button" className="top-icon-button relative" aria-label="Notifications">
+                <Bell className="h-6 w-6" />
+                <span className="absolute -right-1 -top-1 grid h-6 w-6 place-items-center rounded-full bg-rose-500 text-[11px] font-black text-white">3</span>
+              </button>
+              <button type="button" className="top-icon-button bg-gradient-to-br from-violet-400 to-purple-600 text-white" aria-label="User profile">
+                <UserRound className="h-7 w-7" />
+              </button>
+            </div>
           </div>
-          <div className="grid grid-cols-2 gap-3 lg:min-w-[460px]">
+          <div className="grid grid-cols-2 gap-3 xl:hidden">
             <TopMetric icon={CalendarDays} label="Today" value={displayDate(todayIso())} tone="red" />
             <TopMetric icon={Target} label="Target" value={stableTarget || "Not set"} tone="green" />
           </div>
         </div>
       </header>
 
-      <main className="grid gap-4 px-3 py-4 md:gap-5 md:px-0 md:py-6">
-        <div className="md:hidden">
-          <p className="text-sm font-black text-stone-900">{activeTabLabel}</p>
-          <p className="text-xs font-semibold text-stone-500">Mobile app mode</p>
+      <main className="grid gap-4 px-3 py-4 md:gap-5 md:px-4 xl:px-0 xl:py-6">
+        <div className="xl:hidden">
+          <p className="text-sm font-black text-[#15143b]">{activeTabLabel}</p>
+          <p className="text-xs font-semibold text-[#6f6597]">Mobile app mode</p>
         </div>
 
-        {activeTab !== "deliveredConverter" && activeTab !== "settings" && (
+        {activeTab !== "deliveredConverter" && activeTab !== "settings" && activeTab !== "dashboard" && (
           <DateSelector
             selectedDate={selectedDate}
             onDateChange={setSelectedDate}
@@ -601,23 +636,46 @@ export default function App() {
         )}
 
         {activeTab === "dashboard" && (
-          <section className="grid gap-5">
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <SummaryCard label="Courier Rows" value={courierRows.length} helper="Total entries for this report" icon={Truck} color="green" />
-              <SummaryCard label="Saved Names" value={courierNames.length} helper="Unique courier names saved" icon={UserRound} color="purple" />
-              <SummaryCard label="Delivery %" value={`${stats.deliveryPercent}%`} helper="Successful deliveries" icon={Target} color="blue" />
-              <SummaryCard label="Outward Achievement" value={`${stats.achievement}%`} helper="Outward target achieved" icon={ArrowRight} color="red" />
+          <section className="dashboard-layout">
+            <div className="dashboard-main-column">
+              <div className="grid gap-5 xl:grid-cols-[1fr_390px]">
+                <DateSelector
+                  selectedDate={selectedDate}
+                  onDateChange={setSelectedDate}
+                  searchDate={searchDate}
+                  onSearchDateChange={setSearchDate}
+                  onSearch={handleSearch}
+                />
+                <CourierBanner />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                <SummaryCard label="Courier Rows" value={courierRows.length} helper="Total entries for this report" icon={Package} color="purple" />
+                <SummaryCard label="Saved Names" value={courierNames.length} helper="Unique courier names saved" icon={UserRound} color="pink" />
+                <SummaryCard label="Delivery %" value={`${stats.deliveryPercent}%`} helper="Successful deliveries" icon={Target} color="orange" />
+                <SummaryCard label="Outward Achievement" value={`${stats.achievement}%`} helper="Outward target achieved" icon={ArrowRight} color="blue" />
+              </div>
+
+              <div className="action-dock">
+                <QuickButton label="Add Courier" icon={Truck} onClick={() => setActiveTab("courier")} tone="purple" />
+                <QuickButton label="Add Operation" icon={Package} onClick={() => setActiveTab("operation")} tone="pink" />
+                <QuickButton label="View Reports" icon={FileText} onClick={() => setActiveTab("exports")} tone="orange" />
+                <QuickButton label="Export PNG" icon={Image} onClick={() => setActiveTab("exports")} tone="blue" />
+                <QuickButton label="Export PDF" icon={FileDown} onClick={() => setActiveTab("exports")} tone="green" />
+              </div>
+
+              <HistoryList history={history} savedNamesCount={courierNames.length} onView={handleHistoryView} onDownload={handleHistoryDownload} onSelect={(date) => setSelectedDate(date)} onDeleteType={handleHistoryDeleteType} />
+              <BottomBanner onClick={() => setActiveTab("courier")} />
             </div>
 
-            <div className="glass-panel grid grid-cols-2 gap-3 p-3 md:grid-cols-5">
-              <QuickButton label="Add Courier" icon={Truck} onClick={() => setActiveTab("courier")} tone="green" />
-              <QuickButton label="Add Operation" icon={Package} onClick={() => setActiveTab("operation")} tone="red" />
-              <QuickButton label="View Reports" icon={History} onClick={() => setActiveTab("exports")} tone="blue" className="col-span-2 md:col-span-1" />
-              <QuickButton label="Export PNG" icon={Image} onClick={() => setActiveTab("exports")} tone="teal" />
-              <QuickButton label="Export PDF" icon={FileDown} onClick={() => setActiveTab("exports")} tone="red" />
-            </div>
-
-            <HistoryList history={history} savedNamesCount={courierNames.length} onView={handleHistoryView} onDownload={handleHistoryDownload} onSelect={(date) => setSelectedDate(date)} onDeleteType={handleHistoryDeleteType} />
+            <aside className="dashboard-side-column">
+              <div className="hidden grid-cols-2 gap-3 xl:grid">
+                <TopMetric icon={CalendarDays} label="Today" value={displayDate(todayIso())} tone="red" />
+                <TopMetric icon={Target} label="Target" value={stableTarget || "Not set"} tone="green" />
+              </div>
+              <PerformanceOverview stats={stats} />
+              <QuickSummary history={history} stats={stats} courierNames={courierNames} />
+            </aside>
           </section>
         )}
 
@@ -713,7 +771,7 @@ export default function App() {
       </main>
       </div>
 
-      <nav className="mobile-bottom-nav no-print fixed inset-x-0 bottom-0 z-40 border-t border-stone-200 bg-white/95 px-2 pt-2 shadow-[0_-8px_24px_rgba(20,40,20,0.10)] backdrop-blur md:hidden">
+      <nav className="mobile-bottom-nav no-print fixed inset-x-0 bottom-0 z-40 border-t border-violet-100 bg-white/95 px-2 pt-2 shadow-[0_-8px_24px_rgba(128,104,178,0.14)] backdrop-blur xl:hidden">
         <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
           {tabs.map((tab) => {
             const Icon = tab.icon;
@@ -724,7 +782,7 @@ export default function App() {
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-md px-1 text-[11px] font-black transition ${
-                  isActive ? "bg-green-700 text-white" : "text-stone-600 hover:bg-green-50 hover:text-green-800"
+                  isActive ? "bg-violet-600 text-white shadow-lg shadow-violet-200" : "text-[#6d6195] hover:bg-violet-50 hover:text-violet-700"
                 }`}
               >
                 <Icon className="h-5 w-5" />
@@ -739,14 +797,14 @@ export default function App() {
 }
 
 function TopMetric({ icon: Icon, label, value, tone }) {
-  const toneClass = tone === "red" ? "from-rose-50/90 to-white/65 text-red-600" : "from-emerald-50/90 to-white/65 text-emerald-700";
+  const toneClass = tone === "red" ? "from-rose-100/90 to-pink-50/80 text-rose-600" : "from-emerald-100/90 to-emerald-50/80 text-emerald-700";
   return (
-    <div className={`glass-panel flex items-center gap-3 bg-gradient-to-br ${toneClass} p-3 md:p-4`}>
-      <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white/75 shadow-inner md:h-16 md:w-16">
+    <div className={`metric-card flex items-center gap-3 bg-gradient-to-br ${toneClass} p-4`}>
+      <div className="grid h-14 w-14 shrink-0 place-items-center rounded-[22px] bg-white/72 shadow-[8px_8px_18px_rgba(128,104,178,0.16),-8px_-8px_18px_rgba(255,255,255,0.9)]">
         <Icon className="h-7 w-7" />
       </div>
       <div className="min-w-0">
-        <p className="text-xs font-black uppercase text-[#071537]"> {label}</p>
+        <p className="text-xs font-black uppercase text-[#15143b]">{label}</p>
         <p className="truncate text-lg font-black md:text-2xl">{value}</p>
       </div>
     </div>
@@ -755,25 +813,27 @@ function TopMetric({ icon: Icon, label, value, tone }) {
 
 function SummaryCard({ label, value, helper, icon: Icon, color }) {
   const colorClass =
-    color === "red"
-      ? "from-rose-50/95 to-pink-100/70 text-red-600"
-      : color === "blue"
-        ? "from-sky-50/95 to-cyan-100/75 text-blue-600"
-        : color === "purple"
-          ? "from-violet-50/95 to-purple-100/70 text-violet-700"
-          : "from-emerald-50/95 to-green-100/75 text-emerald-700";
+    color === "pink"
+      ? "from-rose-50/95 to-pink-100/75 text-rose-500"
+    : color === "blue"
+        ? "from-blue-50/95 to-sky-100/75 text-blue-500"
+        : color === "orange"
+          ? "from-orange-50/95 to-amber-100/75 text-orange-500"
+          : "from-violet-50/95 to-purple-100/75 text-violet-600";
   return (
-    <div className={`glass-panel relative overflow-hidden bg-gradient-to-br p-4 ${colorClass}`}>
+    <div className={`kpi-card relative overflow-hidden bg-gradient-to-br p-5 ${colorClass}`}>
       <div className="flex items-start justify-between gap-3">
-        <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/70 shadow-lg md:h-16 md:w-16">
-          <Icon className="h-7 w-7 md:h-9 md:w-9" />
+        <div className="kpi-icon">
+          <Icon className="h-7 w-7" />
         </div>
-        <ListChecks className="h-5 w-5 opacity-55" />
+        <span className="grid h-8 w-8 place-items-center rounded-full bg-white/45 text-current">
+          <ListChecks className="h-4 w-4 opacity-55" />
+        </span>
       </div>
       <div className="mt-4">
-        <p className="text-[11px] font-black uppercase tracking-wide text-[#071537] md:text-xs">{label}</p>
-        <p className="mt-1 text-3xl font-black text-[#071537] md:text-4xl">{value}</p>
-        <p className="mt-3 max-w-36 text-xs font-semibold text-blue-950/80 md:text-sm">{helper}</p>
+        <p className="text-[11px] font-black uppercase tracking-wide text-[#15143b] md:text-xs">{label}</p>
+        <p className="mt-1 text-3xl font-black text-[#101233] md:text-4xl">{value}</p>
+        <p className="mt-3 max-w-36 text-xs font-semibold text-[#464170] md:text-sm">{helper}</p>
       </div>
       <div className="mini-chart" />
     </div>
@@ -782,18 +842,147 @@ function SummaryCard({ label, value, helper, icon: Icon, color }) {
 
 function QuickButton({ label, icon: Icon, onClick, tone, className = "" }) {
   const toneClass =
-    tone === "red"
-      ? "from-red-500 to-rose-600 shadow-red-300/60"
-      : tone === "blue"
-        ? "from-blue-700 to-sky-500 shadow-blue-300/60"
-        : tone === "teal"
-          ? "from-teal-600 to-emerald-500 shadow-emerald-300/60"
-          : "from-emerald-700 to-green-400 shadow-emerald-300/60";
+    tone === "pink"
+      ? "from-rose-400 to-pink-500 shadow-pink-300/60"
+    : tone === "blue"
+        ? "from-blue-400 to-sky-500 shadow-blue-300/60"
+        : tone === "orange"
+          ? "from-amber-400 to-orange-500 shadow-orange-300/60"
+          : tone === "green"
+            ? "from-emerald-400 to-green-500 shadow-emerald-300/60"
+            : "from-violet-500 to-purple-600 shadow-violet-300/60";
   return (
-    <button type="button" onClick={onClick} className={`inline-flex min-h-14 items-center justify-center gap-2 rounded-2xl border border-white/55 bg-gradient-to-br px-3 py-3 text-sm font-extrabold text-white shadow-xl transition hover:-translate-y-0.5 md:min-h-16 md:px-4 md:text-base ${toneClass} ${className}`}>
+    <button type="button" onClick={onClick} className={`inline-flex min-h-14 items-center justify-center gap-2 rounded-[22px] border border-white/55 bg-gradient-to-br px-3 py-3 text-sm font-extrabold text-white shadow-xl transition hover:-translate-y-0.5 md:min-h-16 md:px-4 md:text-base ${toneClass} ${className}`}>
       <Icon className="h-5 w-5" />
       {label}
     </button>
+  );
+}
+
+function CourierBanner() {
+  return (
+    <div className="courier-banner">
+      <div className="relative z-10">
+        <p className="text-2xl font-black leading-tight text-[#15143b]">Deliver<br />Performance</p>
+        <p className="mt-2 text-sm font-semibold text-[#4f4779]">Track. Analyze. Deliver.</p>
+        <button type="button" className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 px-5 py-3 text-sm font-black text-white shadow-xl shadow-violet-300/60">
+          <BarChart3 className="h-5 w-5" />
+          View Insights
+        </button>
+      </div>
+      <div className="courier-illustration" aria-hidden="true">
+        <div className="cloud cloud-one" />
+        <div className="cloud cloud-two" />
+        <div className="truck-3d">
+          <div className="truck-box" />
+          <div className="truck-cab" />
+          <div className="truck-window" />
+          <div className="wheel wheel-left" />
+          <div className="wheel wheel-right" />
+        </div>
+        <div className="parcel-stack">
+          <span />
+          <span />
+          <span />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PerformanceOverview({ stats }) {
+  const delivered = Math.max(0, Math.min(100, Number(stats.deliveryPercent) || 0));
+  const pending = Math.max(0, 100 - delivered);
+  return (
+    <section className="side-card">
+      <div className="mb-5 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="grid h-9 w-9 place-items-center rounded-2xl bg-violet-100 text-violet-600">
+            <BarChart3 className="h-5 w-5" />
+          </span>
+          <h2 className="font-black text-[#15143b]">Performance Overview</h2>
+        </div>
+        <span className="rounded-2xl bg-white/55 px-4 py-2 text-xs font-black text-violet-600">This Week</span>
+      </div>
+      <div className="grid gap-5 sm:grid-cols-[150px_1fr] sm:items-center">
+        <div className="donut-chart" style={{ "--value": `${delivered}%` }}>
+          <div>
+            <strong>{delivered.toFixed(0)}%</strong>
+            <span>Overall</span>
+          </div>
+        </div>
+        <div className="grid gap-4 text-sm font-bold text-[#4b4771]">
+          <MetricLine color="bg-emerald-400" label="Delivered" value={`${delivered.toFixed(0)}% (${stats.totalDelivery})`} />
+          <MetricLine color="bg-rose-400" label="Pending" value={`${pending.toFixed(0)}% (${Math.max(0, stats.totalOnRoute - stats.totalDelivery)})`} />
+          <MetricLine color="bg-blue-400" label="Total" value={stats.totalOnRoute} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function MetricLine({ color, label, value }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="inline-flex items-center gap-2">
+        <span className={`h-3 w-3 rounded-full ${color}`} />
+        {label}
+      </span>
+      <span className="font-black text-[#15143b]">{value}</span>
+    </div>
+  );
+}
+
+function QuickSummary({ history, stats, courierNames }) {
+  const pendingItems = Math.max(0, stats.totalOnRoute - stats.totalDelivery);
+  const items = [
+    { label: "Total Reports", value: history.length, icon: CalendarDays, tone: "violet" },
+    { label: "Total Deliveries", value: stats.totalDelivery, icon: PackageCheck, tone: "blue" },
+    { label: "Pending Items", value: pendingItems, icon: Package, tone: "orange" },
+    { label: "Saved Couriers", value: courierNames.length, icon: UserRound, tone: "green" },
+  ];
+  return (
+    <section className="side-card">
+      <div className="mb-4 flex items-center gap-3">
+        <span className="grid h-9 w-9 place-items-center rounded-2xl bg-emerald-100 text-emerald-600">
+          <ListChecks className="h-5 w-5" />
+        </span>
+        <h2 className="font-black text-[#15143b]">Quick Summary</h2>
+      </div>
+      <div className="grid gap-1">
+        {items.map((item) => {
+          const Icon = item.icon;
+          return (
+            <div key={item.label} className="summary-line">
+              <span className={`summary-icon summary-${item.tone}`}>
+                <Icon className="h-5 w-5" />
+              </span>
+              <span className="flex-1 text-sm font-bold text-[#4b4771]">{item.label}</span>
+              <strong className="text-[#15143b]">{item.value}</strong>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function BottomBanner({ onClick }) {
+  return (
+    <section className="bottom-banner">
+      <div className="banner-parcels" aria-hidden="true">
+        <Package className="h-14 w-14" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <h2 className="text-xl font-black text-white md:text-2xl">
+          Make reporting easier <Sparkles className="inline h-5 w-5 text-amber-200" />
+        </h2>
+        <p className="text-sm font-semibold text-white/86 md:text-base">Save time, stay organized, deliver more.</p>
+      </div>
+      <button type="button" onClick={onClick} className="rounded-[22px] border border-white/40 bg-white/18 px-8 py-3 text-sm font-black text-white shadow-[inset_3px_3px_8px_rgba(93,61,160,0.24),inset_-3px_-3px_8px_rgba(255,255,255,0.18)] transition hover:bg-white/24">
+        Get Started
+      </button>
+    </section>
   );
 }
 
