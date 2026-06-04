@@ -665,13 +665,13 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell app-background pb-24 text-[#15143b] xl:grid xl:grid-cols-[260px_1fr] xl:gap-5 xl:p-5 xl:pb-5">
+    <div className="app-shell app-background pb-24 text-[#15143b] 2xl:grid 2xl:grid-cols-[260px_1fr] 2xl:gap-5 2xl:p-5 2xl:pb-5">
       {notice && (
         <div className="fixed right-4 top-4 z-50 max-w-sm rounded-[22px] border border-white/70 bg-violet-600 px-5 py-3 text-sm font-black text-white shadow-2xl shadow-violet-300/50">
           {notice}
         </div>
       )}
-      <aside className="glass-sidebar no-print hidden xl:flex">
+      <aside className="glass-sidebar no-print hidden 2xl:flex">
         <div className="sidebar-profile">
           <div className="profile-avatar">
             <span className="avatar-hair" />
@@ -729,9 +729,9 @@ export default function App() {
           <StatusPill icon={Server} label="Backend" value={backendStatus} ok={backendStatus.includes("running")} />
         </div>
       )}
-      <header className="sticky top-0 z-30 border-b border-[#eadff2] bg-[#fff7f2] xl:static xl:border-0 xl:bg-transparent">
-        <div className="flex flex-col gap-4 px-4 py-4 xl:px-0 xl:py-0">
-          <div className="grid gap-4 xl:grid-cols-[1fr_420px] xl:items-center">
+      <header className="sticky top-0 z-30 border-b border-[#eadff2] bg-[#fff7f2] 2xl:static 2xl:border-0 2xl:bg-transparent">
+        <div className="flex flex-col gap-4 px-4 py-4 2xl:px-0 2xl:py-0">
+          <div className="grid gap-4 2xl:grid-cols-[1fr_420px] 2xl:items-center">
             <div>
               <p className="text-sm font-black text-violet-600">{activeTabLabel}</p>
               <h1 className="mt-2 text-3xl font-black tracking-tight text-[#101233] md:text-5xl">Daily Courier Report System</h1>
@@ -742,15 +742,15 @@ export default function App() {
               <input type="search" placeholder="Search reports, couriers..." className="min-w-0 flex-1 bg-transparent text-sm font-bold text-[#15143b] outline-none placeholder:text-[#8b7bb5]" />
             </label>
           </div>
-          <div className="grid grid-cols-2 gap-3 xl:hidden">
+          <div className="grid grid-cols-2 gap-3 2xl:hidden">
             <TopMetric icon={CalendarDays} label="Today" value={displayDate(todayIso())} tone="red" />
             <TopMetric icon={Target} label="Target" value={stableTarget || "Not set"} tone="green" />
           </div>
         </div>
       </header>
 
-      <main className="grid gap-4 px-3 py-4 md:gap-5 md:px-4 xl:px-0 xl:py-6">
-        <div className="xl:hidden">
+      <main className="grid gap-4 px-3 py-4 md:gap-5 md:px-4 2xl:px-0 2xl:py-6">
+        <div className="2xl:hidden">
           <p className="text-sm font-black text-[#15143b]">{activeTabLabel}</p>
           <p className="text-xs font-semibold text-[#6f6597]">Mobile app mode</p>
         </div>
@@ -776,7 +776,7 @@ export default function App() {
                 onSearch={handleSearch}
               />
 
-              <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <SummaryCard label="Courier Rows" value={courierRows.length} helper="Total entries for this report" icon={Package} color="purple" />
                 <SummaryCard label="Saved Names" value={courierNames.length} helper="Unique courier names saved" icon={UserRound} color="pink" />
                 <SummaryCard label="Delivery %" value={`${stats.deliveryPercent}%`} helper="Successful deliveries" icon={Target} color="orange" />
@@ -903,8 +903,8 @@ export default function App() {
       </main>
       </div>
 
-      <nav className="mobile-bottom-nav no-print fixed inset-x-0 bottom-0 z-40 border-t border-violet-100 bg-[#fff8f4] px-2 pt-2 shadow-[0_-8px_24px_rgba(128,104,178,0.14)] xl:hidden">
-        <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${visibleTabs.length}, minmax(0, 1fr))` }}>
+      <nav className="mobile-bottom-nav no-print fixed inset-x-0 bottom-0 z-40 border-t border-violet-100 bg-[#fff8f4] px-2 pt-2 shadow-[0_-8px_24px_rgba(128,104,178,0.14)] 2xl:hidden">
+        <div className="mobile-scrollbar flex gap-1 overflow-x-auto pb-1">
           {visibleTabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -913,7 +913,7 @@ export default function App() {
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-md px-1 text-[11px] font-black transition ${
+                className={`flex min-h-14 min-w-[76px] flex-col items-center justify-center gap-1 rounded-md px-1 text-[11px] font-black transition sm:min-w-[92px] ${
                   isActive ? "bg-violet-600 text-white shadow-lg shadow-violet-200" : "text-[#6d6195] hover:bg-violet-50 hover:text-violet-700"
                 }`}
               >
