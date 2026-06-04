@@ -44,6 +44,21 @@ select {
   font: inherit;
 }
 
+button,
+label,
+select,
+input[type="checkbox"],
+input[type="date"],
+input[type="file"] {
+  cursor: pointer;
+}
+
+button:disabled,
+input:disabled,
+select:disabled {
+  cursor: not-allowed;
+}
+
 input,
 select,
 textarea {
@@ -60,6 +75,57 @@ textarea {
     radial-gradient(circle at 88% 14%, rgba(255, 220, 229, 0.45), transparent 34%),
     radial-gradient(circle at 75% 88%, rgba(220, 236, 255, 0.55), transparent 32%),
     linear-gradient(135deg, #fbf2ff 0%, #fff7f1 42%, #fffaf6 100%);
+}
+
+.login-card {
+  width: min(100%, 460px);
+  border: 1px solid var(--border-soft);
+  border-radius: 34px;
+  background:
+    radial-gradient(circle at 12% 0%, #f3e4ff 0 12%, transparent 34%),
+    linear-gradient(145deg, #fffaf6, #f2e8ff);
+  padding: 34px;
+  text-align: center;
+  box-shadow: 18px 20px 48px rgba(128, 104, 178, 0.2), -10px -10px 24px rgba(255, 255, 255, 0.9);
+}
+
+.login-input {
+  min-height: 52px;
+  width: 100%;
+  border: 1px solid #e5d8f4;
+  border-radius: 18px;
+  background: #fff8f4;
+  padding: 0 16px;
+  color: #15143b;
+  font-size: 16px;
+  font-weight: 800;
+  outline: none;
+  box-shadow: var(--shadow-pressed);
+}
+
+.login-input:focus {
+  border-color: #9b75ef;
+  box-shadow: 0 0 0 4px rgba(155, 117, 239, 0.16), var(--shadow-pressed);
+}
+
+.status-pill {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  gap: 10px;
+  border-radius: 20px;
+  border: 1px solid var(--border-soft);
+  background: #fff8f4;
+  padding: 10px 14px;
+  box-shadow: 7px 8px 18px rgba(128, 104, 178, 0.12), -5px -5px 14px rgba(255, 255, 255, 0.88);
+}
+
+.status-pill-ok {
+  color: #047857;
+}
+
+.status-pill-warn {
+  color: #b45309;
 }
 
 .glass-panel {

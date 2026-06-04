@@ -2,8 +2,11 @@ const STORAGE_KEY = "daily-courier-report-system-v1";
 const COURIER_NAMES_KEY = "daily-courier-report-system-courier-names-v1";
 const SETTINGS_KEY = "daily-courier-report-system-settings-v1";
 const META_KEY = "daily-courier-report-system-meta-v1";
+const SESSION_KEY = "daily-courier-report-system-session-v1";
+const USERS_KEY = "daily-courier-report-system-users-v1";
 const BACKUP_VERSION = 1;
 const DEFAULT_COMPANY_NAME = "Domestic Express (pvt) ltd";
+const ADMIN_USER = { branchName: "madu", password: "2006", role: "admin", createdAt: "system" };
 const DEFAULT_WHATSAPP_CAPTION_TEMPLATES = {
   courier: "Branch Courier Performance Report - {date}\nSent automatically from Daily Report System",
   operation: "Operation Report - {date}\nSent automatically from Daily Report System",
@@ -11,6 +14,7 @@ const DEFAULT_WHATSAPP_CAPTION_TEMPLATES = {
 };
 const DATA_CHANGED_EVENT = "daily-courier-report-data-changed";
 let suppressChangeEvent = false;
+let activeBranchName = "";
 
 const emptyReport = {
   courierRows: [],
@@ -31,11 +35,15 @@ function normalizeDelivered(value) {
 
 function readStore() {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = localStorage.getItem(scopedKey(STORAGE_KEY));
     return saved ? JSON.parse(saved) : {};
   } catch {
     return {};
   }
+}
+
+function scopedKey(key) {
+  return activeBranchName ? `${key}::${activeBranchName.toLowerCase()}` : key;
 }
 
 function emitDataChanged() {
@@ -49,12 +57,27 @@ export function addDataChangeListener(listener) {
 }
 
 function writeStore(store) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+  localStorage.setItem(scopedKey(STORAGE_KEY), JSON.stringify(store));
   markLocalDataChanged();
   emitDataChanged();
 }
 
 function readJson(key, fallback) {
+  try {
+    const saved = localStorage.getItem(scopedKey(key));
+    return saved ? JSON.parse(saved) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJson(key, value) {
+  localStorage.setItem(scopedKey(key), JSON.stringify(value));
+  markLocalDataChanged();
+  emitDataChanged();
+}
+
+function readRawJson(key, fallback) {
   try {
     const saved = localStorage.getItem(key);
     return saved ? JSON.parse(saved) : fallback;
@@ -63,14 +86,98 @@ function readJson(key, fallback) {
   }
 }
 
-function writeJson(key, value) {
+function writeRawJson(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
-  markLocalDataChanged();
-  emitDataChanged();
+}
+
+function normalizeBranchName(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+export function setActiveBranch(branchName) {
+  activeBranchName = normalizeBranchName(branchName);
+}
+
+export function getActiveBranch() {
+  return activeBranchName;
+}
+
+export function getStoredSession() {
+  return readRawJson(SESSION_KEY, null);
+}
+
+export function saveStoredSession(session) {
+  writeRawJson(SESSION_KEY, session);
+}
+
+export function clearStoredSession() {
+  localStorage.removeItem(SESSION_KEY);
+  activeBranchName = "";
+}
+
+export function getUsers() {
+  const users = readRawJson(USERS_KEY, []);
+  const normalizedUsers = Array.isArray(users) ? users : [];
+  const hasAdmin = normalizedUsers.some((user) => normalizeBranchName(user.branchName) === ADMIN_USER.branchName);
+  return (hasAdmin ? normalizedUsers : [ADMIN_USER, ...normalizedUsers]).sort((a, b) => a.branchName.localeCompare(b.branchName));
+}
+
+export function saveUserAccount(user) {
+  const branchName = normalizeBranchName(user.branchName);
+  const password = String(user.password || "").trim();
+  if (!branchName || !password) throw new Error("Branch name and password are required.");
+  if (branchName === ADMIN_USER.branchName) throw new Error("Admin account cannot be edited.");
+
+  const users = getUsers().filter((item) => normalizeBranchName(item.branchName) !== ADMIN_USER.branchName);
+  const nextUsers = [
+    ...users.filter((item) => normalizeBranchName(item.branchName) !== branchName),
+    { branchName, password, role: "branch", createdAt: user.createdAt || new Date().toISOString() },
+  ].sort((a, b) => a.branchName.localeCompare(b.branchName));
+
+  writeRawJson(USERS_KEY, nextUsers);
+  return getUsers();
+}
+
+export function deleteUserAccount(branchName) {
+  const cleanBranchName = normalizeBranchName(branchName);
+  if (cleanBranchName === ADMIN_USER.branchName) throw new Error("Admin account cannot be deleted.");
+  writeRawJson(
+    USERS_KEY,
+    getUsers().filter((user) => normalizeBranchName(user.branchName) !== cleanBranchName && normalizeBranchName(user.branchName) !== ADMIN_USER.branchName),
+  );
+  return getUsers();
+}
+
+export function replaceUserAccounts(users) {
+  const nextUsers = (Array.isArray(users) ? users : [])
+    .filter((user) => normalizeBranchName(user.branchName) && normalizeBranchName(user.branchName) !== ADMIN_USER.branchName)
+    .map((user) => ({
+      branchName: normalizeBranchName(user.branchName),
+      password: String(user.password || ""),
+      role: "branch",
+      createdAt: user.createdAt || new Date().toISOString(),
+    }));
+  writeRawJson(USERS_KEY, nextUsers);
+  return getUsers();
+}
+
+export function loginWithBranch(branchName, password) {
+  const cleanBranchName = normalizeBranchName(branchName);
+  const user = getUsers().find((item) => normalizeBranchName(item.branchName) === cleanBranchName && String(item.password) === String(password || ""));
+  if (!user) throw new Error("Invalid branch name or password.");
+
+  const session = {
+    branchName: normalizeBranchName(user.branchName),
+    role: user.role || "branch",
+    loggedAt: new Date().toISOString(),
+  };
+  setActiveBranch(session.branchName);
+  saveStoredSession(session);
+  return session;
 }
 
 function writeMeta(meta) {
-  localStorage.setItem(META_KEY, JSON.stringify(meta));
+  localStorage.setItem(scopedKey(META_KEY), JSON.stringify(meta));
 }
 
 function markLocalDataChanged(value = new Date().toISOString()) {

@@ -36,6 +36,14 @@ export function getWhatsAppStatus() {
   return requestJson("/status");
 }
 
+export function getBackendHealth() {
+  const url = whatsappApiBaseUrl ? `${whatsappApiBaseUrl}/api/health` : "/api/health";
+  return fetch(url).then((response) => {
+    if (!response.ok) throw new Error("Backend server is not running.");
+    return response.json();
+  });
+}
+
 export function getWhatsAppQr() {
   return requestJson("/qr");
 }

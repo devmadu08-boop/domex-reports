@@ -120,20 +120,9 @@ export default function SettingsPage({
           </span>
         </label>
 
-        <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-2xl border border-white/70 bg-white/55 p-3">
-          <input
-            type="checkbox"
-            checked={Boolean(draftSettings.firestoreRealtimeSync)}
-            onChange={(event) => updateSetting("firestoreRealtimeSync", event.target.checked)}
-            className="mt-1 h-5 w-5 accent-blue-700"
-          />
-          <span>
-            <span className="block text-sm font-black text-[#071537]">Firestore realtime sync</span>
-            <span className="block text-xs font-semibold text-blue-950/65">
-              Keep reports synced with Firebase Firestore after saving settings.
-            </span>
-          </span>
-        </label>
+        <div className="mt-3 rounded-2xl border border-emerald-100 bg-emerald-50 p-3 text-sm font-black text-emerald-800">
+          Firebase auto sync is always enabled after branch login.
+        </div>
 
         <div className="mt-4 flex flex-wrap gap-3">
           <button type="button" onClick={handleSaveSettings} className="primary-action primary-action-green">

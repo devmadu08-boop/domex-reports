@@ -11,18 +11,23 @@ import {
   History,
   Home,
   Image,
+  KeyRound,
   ListChecks,
+  LogOut,
   Package,
   PackageCheck,
   RotateCcw,
   Search,
   Send,
+  Server,
   Settings,
+  ShieldCheck,
   Sparkles,
   Target,
   Trash2,
   Truck,
   UserRound,
+  UserPlus,
 } from "lucide-react";
 import CourierPerformanceForm, { emptyCourierForm } from "./components/CourierPerformanceForm.jsx";
 import DateSelector from "./components/DateSelector.jsx";
@@ -38,19 +43,28 @@ import {
   deleteCourierName,
   downloadBackupFile,
   addDataChangeListener,
+  clearStoredSession,
   getCourierNames,
   getReportByDate,
   getReportHistory,
   getSettings,
   getLocalUpdatedAt,
+  getStoredSession,
+  getUsers,
+  loginWithBranch,
   markWeeklyBackupComplete,
   restoreBackupData,
+  replaceUserAccounts,
   saveCourierName,
   saveReportType,
   saveSettings,
+  saveUserAccount,
+  deleteUserAccount,
+  setActiveBranch,
   shouldRunWeeklyBackup,
 } from "./services/reportStorage.js";
-import { downloadSnapshotFromFirestore, saveWeeklyBackupToFirestore, subscribeToFirestoreSnapshot, uploadLocalSnapshotToFirestore } from "./services/cloudSync.js";
+import { downloadSnapshotFromFirestore, downloadUsersFromFirestore, saveWeeklyBackupToFirestore, subscribeToFirestoreSnapshot, uploadLocalSnapshotToFirestore, uploadUsersToFirestore } from "./services/cloudSync.js";
+import { getBackendHealth } from "./services/whatsappApi.js";
 import { todayIso, displayDate } from "./utils/date.js";
 import { exportBothAsPdf, exportElementAsPdf, exportElementAsPng } from "./utils/exportReports.js";
 
@@ -61,6 +75,7 @@ const tabs = [
   { id: "exports", label: "Export / History", mobileLabel: "Export", icon: History },
   { id: "deliveredConverter", label: "Convert Report", mobileLabel: "Convert", icon: FileText },
   { id: "settings", label: "Settings", mobileLabel: "Settings", icon: Settings },
+  { id: "users", label: "User Management", mobileLabel: "Users", icon: ShieldCheck, adminOnly: true },
 ];
 
 function getSyncClientId() {
@@ -120,6 +135,12 @@ function reportTypeLabel(type) {
 }
 
 export default function App() {
+  const initialSession = getStoredSession();
+  if (initialSession?.branchName) setActiveBranch(initialSession.branchName);
+  const [session, setSession] = useState(initialSession);
+  const [firebaseStatus, setFirebaseStatus] = useState("Firebase waiting for login.");
+  const [backendStatus, setBackendStatus] = useState("Checking backend...");
+  const [users, setUsers] = useState(getUsers);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [selectedDate, setSelectedDate] = useState(todayIso());
   const [searchDate, setSearchDate] = useState("");
@@ -146,29 +167,47 @@ export default function App() {
   const unsavedDraftUpdatedAtRef = useRef("");
   const syncClientIdRef = useRef(getSyncClientId());
 
+  const visibleTabs = useMemo(() => tabs.filter((tab) => !tab.adminOnly || session?.role === "admin"), [session?.role]);
+
   useEffect(() => {
+    if (!session?.branchName) return;
+    setActiveBranch(session.branchName);
     const savedSettings = getSettings();
     setSettingsState(savedSettings);
     setStableTarget(savedSettings.operationTarget || "");
     setCourierNames(getCourierNames());
-  }, []);
+  }, [session?.branchName]);
 
   useEffect(() => {
+    if (!session?.branchName) return;
     bootstrapFromFirestore();
-  }, []);
+  }, [session?.branchName]);
 
   useEffect(() => {
+    if (session?.role !== "admin") return;
+    downloadUsersFromFirestore()
+      .then((cloudUsers) => {
+        if (cloudUsers.length) setUsers(replaceUserAccounts(cloudUsers));
+      })
+      .catch(() => {
+        setUsers(getUsers());
+      });
+  }, [session?.role]);
+
+  useEffect(() => {
+    if (!session?.branchName) return;
     if (!shouldRunWeeklyBackup(settings)) return;
     downloadBackupFile("weekly-auto");
     saveWeeklyBackupToFirestore()
       .then(() => setCloudStatus("Weekly Firebase backup saved."))
       .catch((error) => setCloudStatus(error.message || "Weekly Firebase backup failed."));
     setSettingsState(markWeeklyBackupComplete());
-  }, [settings]);
+  }, [settings, session?.branchName]);
 
   useEffect(() => {
+    if (!session?.branchName) return;
     loadDate(selectedDate);
-  }, [selectedDate]);
+  }, [selectedDate, session?.branchName]);
 
   useEffect(() => {
     if (!pendingHistoryDownload || activeTab !== "exports" || selectedDate !== pendingHistoryDownload.date) return undefined;
@@ -181,15 +220,20 @@ export default function App() {
   }, [pendingHistoryDownload, selectedDate, activeTab, courierRows, operation]);
 
   useEffect(() => {
-    if (!settings.firestoreRealtimeSync) return undefined;
+    if (!session?.branchName) return undefined;
 
-    setCloudStatus("Realtime sync active.");
-    uploadLocalSnapshotToFirestore("realtime-enabled", syncClientIdRef.current)
+    setCloudStatus("Firebase auto sync active.");
+    setFirebaseStatus("Firebase syncing...");
+    uploadLocalSnapshotToFirestore("auto-sync-enabled", syncClientIdRef.current)
       .then((snapshot) => {
         lastCloudUpdateRef.current = snapshot.cloudUpdatedAt;
-        setCloudStatus(`Realtime synced: ${new Date(snapshot.cloudUpdatedAt).toLocaleTimeString()}`);
+        setCloudStatus(`Firebase synced: ${new Date(snapshot.cloudUpdatedAt).toLocaleTimeString()}`);
+        setFirebaseStatus("Firebase connected");
       })
-      .catch((error) => setCloudStatus(error.message || "Initial realtime sync failed."));
+      .catch((error) => {
+        setCloudStatus(error.message || "Initial Firebase sync failed.");
+        setFirebaseStatus("Firebase error");
+      });
 
     const unsubscribeLocal = addDataChangeListener(() => {
       if (applyingRemoteSnapshotRef.current) return;
@@ -198,9 +242,11 @@ export default function App() {
         try {
           const snapshot = await uploadLocalSnapshotToFirestore("realtime-auto", syncClientIdRef.current);
           lastCloudUpdateRef.current = snapshot.cloudUpdatedAt;
-          setCloudStatus(`Realtime uploaded: ${new Date(snapshot.cloudUpdatedAt).toLocaleTimeString()}`);
+          setCloudStatus(`Firebase uploaded: ${new Date(snapshot.cloudUpdatedAt).toLocaleTimeString()}`);
+          setFirebaseStatus("Firebase connected");
         } catch (error) {
-          setCloudStatus(error.message || "Realtime upload failed.");
+          setCloudStatus(error.message || "Firebase upload failed.");
+          setFirebaseStatus("Firebase error");
         }
       }, 900);
     });
@@ -215,14 +261,19 @@ export default function App() {
         try {
           restoreBackupData(snapshot, { silent: true });
           handleRestoreBackup();
-          setCloudStatus(`Realtime downloaded: ${new Date(snapshot.cloudUpdatedAt || snapshot.exportedAt).toLocaleTimeString()}`);
+          setCloudStatus(`Firebase downloaded: ${new Date(snapshot.cloudUpdatedAt || snapshot.exportedAt).toLocaleTimeString()}`);
+          setFirebaseStatus("Firebase connected");
         } catch (error) {
-          setCloudStatus(error.message || "Realtime download failed.");
+          setCloudStatus(error.message || "Firebase download failed.");
+          setFirebaseStatus("Firebase error");
         } finally {
           applyingRemoteSnapshotRef.current = false;
         }
       },
-      (error) => setCloudStatus(error.message || "Realtime sync error."),
+      (error) => {
+        setCloudStatus(error.message || "Firebase sync error.");
+        setFirebaseStatus("Firebase error");
+      },
     );
 
     return () => {
@@ -230,7 +281,7 @@ export default function App() {
       unsubscribeLocal();
       unsubscribeCloud();
     };
-  }, [settings.firestoreRealtimeSync, selectedDate]);
+  }, [session?.branchName, selectedDate]);
 
   useEffect(() => {
     if (!notice) return undefined;
@@ -238,8 +289,55 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [notice]);
 
+  useEffect(() => {
+    if (session?.role !== "admin") return undefined;
+
+    let cancelled = false;
+    async function checkBackend() {
+      try {
+        await getBackendHealth();
+        if (!cancelled) setBackendStatus("Backend server running");
+      } catch {
+        if (!cancelled) setBackendStatus("Backend server offline");
+      }
+    }
+
+    checkBackend();
+    const timer = window.setInterval(checkBackend, 10000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [session?.role]);
+
   function showNotice(message) {
     setNotice(message);
+  }
+
+  async function handleLogin(branchName, password) {
+    try {
+      const cloudUsers = await downloadUsersFromFirestore().catch(() => []);
+      if (cloudUsers.length) setUsers(replaceUserAccounts(cloudUsers));
+      const nextSession = loginWithBranch(branchName, password);
+      setSession(nextSession);
+      setActiveTab("dashboard");
+      bootstrappedCloudRef.current = false;
+      showNotice(`Logged in as ${nextSession.branchName}.`);
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  function handleLogout() {
+    clearStoredSession();
+    setSession(null);
+    setActiveTab("dashboard");
+    setCourierRows([]);
+    setOperation(null);
+    setHistory([]);
+    setCourierNames([]);
+    setFirebaseStatus("Firebase waiting for login.");
+    setBackendStatus("Checking backend...");
   }
 
   function shouldApplyCloudSnapshot(snapshot) {
@@ -261,16 +359,15 @@ export default function App() {
       if (!snapshot?.reports) return;
 
       lastCloudUpdateRef.current = snapshot.cloudUpdatedAt || "";
-      const remoteSyncEnabled = Boolean(snapshot.settings?.firestoreRealtimeSync);
 
-      if (remoteSyncEnabled && shouldApplyCloudSnapshot(snapshot)) {
+      if (shouldApplyCloudSnapshot(snapshot)) {
         applyingRemoteSnapshotRef.current = true;
         restoreBackupData(snapshot, { silent: true });
         handleRestoreBackup();
-        setCloudStatus("Firestore settings and reports loaded.");
-      } else if (remoteSyncEnabled) {
-        setSettingsState((current) => ({ ...current, firestoreRealtimeSync: true }));
-        setCloudStatus("Firestore sync enabled. Local data is newer.");
+        setCloudStatus("Firebase settings and reports loaded.");
+        setFirebaseStatus("Firebase connected");
+      } else {
+        setCloudStatus("Firebase sync enabled. Local data is newer.");
       }
     } catch (error) {
       setCloudStatus(error.message || "Firestore bootstrap failed.");
@@ -457,6 +554,29 @@ export default function App() {
     }
   }
 
+  async function handleSaveUser(user) {
+    try {
+      const nextUsers = saveUserAccount(user);
+      setUsers(nextUsers);
+      await uploadUsersToFirestore();
+      showNotice("Branch user saved and synced.");
+    } catch (error) {
+      showNotice(error.message || "Could not save user.");
+    }
+  }
+
+  async function handleDeleteUser(branchName) {
+    if (!confirm(`Delete branch user "${branchName}"?`)) return;
+    try {
+      const nextUsers = deleteUserAccount(branchName);
+      setUsers(nextUsers);
+      await uploadUsersToFirestore();
+      showNotice("Branch user deleted and synced.");
+    } catch (error) {
+      showNotice(error.message || "Could not delete user.");
+    }
+  }
+
   function handleSearch() {
     if (!searchDate) return;
     setSelectedDate(searchDate);
@@ -523,7 +643,11 @@ export default function App() {
     return { totalOnRoute, totalDelivery, deliveryPercent, outward, targetValue, achievement };
   }, [courierRows, operation, stableTarget]);
 
-  const activeTabLabel = tabs.find((tab) => tab.id === activeTab)?.label || "Dashboard";
+  const activeTabLabel = visibleTabs.find((tab) => tab.id === activeTab)?.label || "Dashboard";
+
+  if (!session) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
 
   return (
     <div className="app-shell app-background pb-24 text-[#15143b] xl:grid xl:grid-cols-[260px_1fr] xl:gap-5 xl:p-5 xl:pb-5">
@@ -540,13 +664,13 @@ export default function App() {
             <span className="avatar-body" />
           </div>
           <div>
-            <h2 className="text-2xl font-black leading-tight text-white drop-shadow">Hi, {settings.branchName || "Branch"}!</h2>
+            <h2 className="text-2xl font-black leading-tight text-white drop-shadow">Hi, {settings.branchName || session.branchName || "Branch"}!</h2>
             <p className="text-sm font-bold text-white/88">Welcome back</p>
           </div>
         </div>
 
         <nav className="mt-7 grid gap-3">
-          {tabs.map((tab) => {
+          {visibleTabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (
@@ -565,7 +689,12 @@ export default function App() {
           })}
         </nav>
 
-        <div className="mt-auto rounded-[26px] border border-[#cdbcf5] bg-[#b497f1] p-4 shadow-[inset_7px_7px_15px_rgba(101,72,178,0.24),inset_-7px_-7px_15px_rgba(224,209,255,0.5),9px_10px_20px_rgba(92,68,166,0.22)]">
+        <button type="button" onClick={handleLogout} className="mt-auto inline-flex min-h-12 items-center justify-center gap-2 rounded-[20px] border border-[#d6c7f7] bg-[#fff8f4] text-sm font-black text-violet-700 shadow-[7px_8px_16px_rgba(92,68,166,0.18),-5px_-5px_14px_rgba(221,207,255,0.38)]">
+          <LogOut className="h-5 w-5" />
+          Logout
+        </button>
+
+        <div className="rounded-[26px] border border-[#cdbcf5] bg-[#b497f1] p-4 shadow-[inset_7px_7px_15px_rgba(101,72,178,0.24),inset_-7px_-7px_15px_rgba(224,209,255,0.5),9px_10px_20px_rgba(92,68,166,0.22)]">
           <div className="flex items-center gap-3">
             <span className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-lg shadow-violet-400/40">
               <Send className="h-6 w-6" />
@@ -579,11 +708,17 @@ export default function App() {
       </aside>
 
       <div className="main-dashboard-surface min-w-0">
+      {session.role === "admin" && (
+        <div className="mb-4 grid gap-3 md:grid-cols-2">
+          <StatusPill icon={ShieldCheck} label="Firebase" value={firebaseStatus} ok={firebaseStatus.includes("connected")} />
+          <StatusPill icon={Server} label="Backend" value={backendStatus} ok={backendStatus.includes("running")} />
+        </div>
+      )}
       <header className="sticky top-0 z-30 border-b border-[#eadff2] bg-[#fff7f2] xl:static xl:border-0 xl:bg-transparent">
         <div className="flex flex-col gap-4 px-4 py-4 xl:px-0 xl:py-0">
           <div className="grid gap-4 xl:grid-cols-[1fr_420px] xl:items-center">
             <div>
-              <p className="text-sm font-black text-violet-600">Dashboard</p>
+              <p className="text-sm font-black text-violet-600">{activeTabLabel}</p>
               <h1 className="mt-2 text-3xl font-black tracking-tight text-[#101233] md:text-5xl">Daily Courier Report System</h1>
               <p className="mt-2 text-sm font-semibold text-[#4d4b86] md:text-base">Fast daily entry, saved courier names, clean WhatsApp-ready exports.</p>
             </div>
@@ -742,12 +877,16 @@ export default function App() {
             cloudStatus={cloudStatus}
           />
         )}
+
+        {activeTab === "users" && session.role === "admin" && (
+          <UserManagement users={users} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} />
+        )}
       </main>
       </div>
 
       <nav className="mobile-bottom-nav no-print fixed inset-x-0 bottom-0 z-40 border-t border-violet-100 bg-[#fff8f4] px-2 pt-2 shadow-[0_-8px_24px_rgba(128,104,178,0.14)] xl:hidden">
         <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
-          {tabs.map((tab) => {
+          {visibleTabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (
@@ -958,6 +1097,130 @@ function BottomBanner({ onClick }) {
       </button>
     </section>
   );
+}
+
+function LoginScreen({ onLogin }) {
+  const [branchName, setBranchName] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loggingIn, setLoggingIn] = useState(false);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setError("");
+    setLoggingIn(true);
+    try {
+      await onLogin(branchName, password);
+    } catch (loginError) {
+      setError(loginError.message || "Login failed.");
+    } finally {
+      setLoggingIn(false);
+    }
+  }
+
+  return (
+    <main className="app-shell app-background grid place-items-center p-4 text-[#15143b]">
+      <form onSubmit={handleSubmit} className="login-card">
+        <div className="mx-auto mb-5 grid h-20 w-20 place-items-center rounded-[28px] bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-xl shadow-violet-300/50">
+          <KeyRound className="h-10 w-10" />
+        </div>
+        <p className="text-sm font-black text-violet-600">Daily Courier Report System</p>
+        <h1 className="mt-2 text-3xl font-black text-[#101233]">Branch Login</h1>
+        <p className="mt-2 text-sm font-semibold text-[#625987]">Enter branch name and password to sync reports with Firebase.</p>
+
+        <div className="mt-6 grid gap-4">
+          <label className="grid gap-2 text-left">
+            <span className="text-sm font-black text-[#071537]">Branch Name</span>
+            <input value={branchName} onChange={(event) => setBranchName(event.target.value)} className="login-input" placeholder="madu" />
+          </label>
+          <label className="grid gap-2 text-left">
+            <span className="text-sm font-black text-[#071537]">Password</span>
+            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="login-input" placeholder="Password" />
+          </label>
+          {error && <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-700">{error}</p>}
+          <button type="submit" disabled={loggingIn} className="primary-action primary-action-blue min-h-14 disabled:opacity-60">
+            <ShieldCheck className="h-5 w-5" />
+            {loggingIn ? "Logging in..." : "Login"}
+          </button>
+        </div>
+      </form>
+    </main>
+  );
+}
+
+function StatusPill({ icon: Icon, label, value, ok }) {
+  return (
+    <div className={`status-pill ${ok ? "status-pill-ok" : "status-pill-warn"}`}>
+      <Icon className="h-5 w-5" />
+      <span className="font-black">{label}</span>
+      <span className="text-sm font-bold">{value}</span>
+    </div>
+  );
+}
+
+function UserManagement({ users, onSaveUser, onDeleteUser }) {
+  const [branchName, setBranchName] = useState("");
+  const [password, setPassword] = useState("");
+
+  function handleSave(event) {
+    event.preventDefault();
+    onSaveUser({ branchName, password });
+    setBranchName("");
+    setPassword("");
+  }
+
+  return (
+    <section className="grid gap-5">
+      <div className="glass-panel p-4">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="grid h-12 w-12 place-items-center rounded-2xl bg-violet-100 text-violet-700 shadow-inner">
+            <UserPlus className="h-6 w-6" />
+          </span>
+          <div>
+            <h2 className="text-xl font-black text-[#071537]">User Management</h2>
+            <p className="text-sm font-semibold text-blue-950/65">Create branch accounts. Each branch keeps separate Firebase synced data.</p>
+          </div>
+        </div>
+
+        <form onSubmit={handleSave} className="grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
+          <label className="grid gap-2">
+            <span className="text-sm font-black text-[#071537]">Branch Name</span>
+            <input value={branchName} onChange={(event) => setBranchName(event.target.value)} className="login-input" placeholder="branch name" />
+          </label>
+          <label className="grid gap-2">
+            <span className="text-sm font-black text-[#071537]">Password</span>
+            <input value={password} onChange={(event) => setPassword(event.target.value)} className="login-input" placeholder="password" />
+          </label>
+          <button type="submit" className="primary-action primary-action-green">
+            <SaveUserIcon />
+            Save User
+          </button>
+        </form>
+      </div>
+
+      <div className="glass-panel p-4">
+        <h3 className="mb-3 text-lg font-black text-[#071537]">Branch Accounts</h3>
+        <div className="grid gap-2">
+          {users.map((user) => (
+            <div key={user.branchName} className="grid gap-3 rounded-2xl border border-[#eadff2] bg-[#fff8f4] px-4 py-3 md:grid-cols-[1fr_auto_auto] md:items-center">
+              <span>
+                <span className="block font-black text-[#071537]">{user.branchName}</span>
+                <span className="text-xs font-bold text-blue-950/60">{user.role === "admin" ? "Admin login" : "Branch account"}</span>
+              </span>
+              <span className="rounded-2xl bg-violet-50 px-3 py-2 text-xs font-black text-violet-700">{user.role || "branch"}</span>
+              <button type="button" disabled={user.role === "admin"} onClick={() => onDeleteUser(user.branchName)} className="history-action text-red-600 disabled:cursor-not-allowed disabled:opacity-40" aria-label={`Delete ${user.branchName}`}>
+                <Trash2 className="h-5 w-5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SaveUserIcon() {
+  return <UserPlus className="h-5 w-5" />;
 }
 
 function HistoryList({ history, onSelect, savedNamesCount, onView, onDownload, onDeleteType }) {
