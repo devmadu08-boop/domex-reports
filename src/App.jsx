@@ -139,6 +139,7 @@ export default function App() {
   if (initialSession?.branchName) setActiveBranch(initialSession.branchName);
   const [session, setSession] = useState(initialSession);
   const [firebaseStatus, setFirebaseStatus] = useState("Firebase waiting for login.");
+  const [firebaseBootstrapped, setFirebaseBootstrapped] = useState(false);
   const [backendStatus, setBackendStatus] = useState("Checking backend...");
   const [users, setUsers] = useState(getUsers);
   const [activeTab, setActiveTab] = useState("dashboard");
@@ -179,11 +180,6 @@ export default function App() {
   }, [session?.branchName]);
 
   useEffect(() => {
-    if (!session?.branchName) return;
-    bootstrapFromFirestore();
-  }, [session?.branchName]);
-
-  useEffect(() => {
     if (session?.role !== "admin") return;
     downloadUsersFromFirestore()
       .then((cloudUsers) => {
@@ -196,13 +192,14 @@ export default function App() {
 
   useEffect(() => {
     if (!session?.branchName) return;
+    if (!firebaseBootstrapped) return;
     if (!shouldRunWeeklyBackup(settings)) return;
     downloadBackupFile("weekly-auto");
     saveWeeklyBackupToFirestore()
       .then(() => setCloudStatus("Weekly Firebase backup saved."))
       .catch((error) => setCloudStatus(error.message || "Weekly Firebase backup failed."));
     setSettingsState(markWeeklyBackupComplete());
-  }, [settings, session?.branchName]);
+  }, [settings, session?.branchName, firebaseBootstrapped]);
 
   useEffect(() => {
     if (!session?.branchName) return;
@@ -222,20 +219,32 @@ export default function App() {
   useEffect(() => {
     if (!session?.branchName) return undefined;
 
-    setCloudStatus("Firebase auto sync active.");
+    let cancelled = false;
+    setCloudStatus("Loading Firebase branch data...");
     setFirebaseStatus("Firebase syncing...");
-    uploadLocalSnapshotToFirestore("auto-sync-enabled", syncClientIdRef.current)
-      .then((snapshot) => {
+
+    async function bootstrapThenUpload() {
+      try {
+        await bootstrapFromFirestore();
+        if (cancelled) return;
+        const snapshot = await uploadLocalSnapshotToFirestore("auto-sync-enabled", syncClientIdRef.current);
+        if (cancelled) return;
         lastCloudUpdateRef.current = snapshot.cloudUpdatedAt;
         setCloudStatus(`Firebase synced: ${new Date(snapshot.cloudUpdatedAt).toLocaleTimeString()}`);
         setFirebaseStatus("Firebase connected");
-      })
-      .catch((error) => {
+      } catch (error) {
+        if (cancelled) return;
         setCloudStatus(error.message || "Initial Firebase sync failed.");
         setFirebaseStatus("Firebase error");
-      });
+      } finally {
+        if (!cancelled) setFirebaseBootstrapped(true);
+      }
+    }
+
+    bootstrapThenUpload();
 
     const unsubscribeLocal = addDataChangeListener(() => {
+      if (!firebaseBootstrapped) return;
       if (applyingRemoteSnapshotRef.current) return;
       window.clearTimeout(realtimeUploadTimerRef.current);
       realtimeUploadTimerRef.current = window.setTimeout(async () => {
@@ -277,11 +286,12 @@ export default function App() {
     );
 
     return () => {
+      cancelled = true;
       window.clearTimeout(realtimeUploadTimerRef.current);
       unsubscribeLocal();
       unsubscribeCloud();
     };
-  }, [session?.branchName, selectedDate]);
+  }, [session?.branchName, selectedDate, firebaseBootstrapped]);
 
   useEffect(() => {
     if (!notice) return undefined;
@@ -319,6 +329,7 @@ export default function App() {
       const cloudUsers = await downloadUsersFromFirestore().catch(() => []);
       if (cloudUsers.length) setUsers(replaceUserAccounts(cloudUsers));
       const nextSession = loginWithBranch(branchName, password);
+      setFirebaseBootstrapped(false);
       setSession(nextSession);
       setActiveTab("dashboard");
       bootstrappedCloudRef.current = false;
@@ -337,6 +348,7 @@ export default function App() {
     setHistory([]);
     setCourierNames([]);
     setFirebaseStatus("Firebase waiting for login.");
+    setFirebaseBootstrapped(false);
     setBackendStatus("Checking backend...");
   }
 
