@@ -195,16 +195,6 @@ textarea {
   box-shadow: 6px 6px 12px rgba(116, 75, 210, 0.22), -4px -4px 10px rgba(255, 255, 255, 0.55);
 }
 
-.sidebar-premium-card {
-  margin-top: 22px;
-  border: 1px solid rgba(255, 255, 255, 0.55);
-  border-radius: 26px;
-  background: linear-gradient(145deg, #ffd9cf, #ffc1d7);
-  padding: 20px 16px;
-  text-align: center;
-  box-shadow: 10px 12px 24px rgba(119, 63, 157, 0.22), inset 1px 1px 0 rgba(255, 255, 255, 0.5);
-}
-
 .top-search-bar {
   display: flex;
   min-height: 58px;
@@ -215,18 +205,6 @@ textarea {
   background: rgba(255, 250, 246, 0.72);
   padding: 0 20px;
   box-shadow: var(--shadow-pressed), 0 8px 18px rgba(128, 104, 178, 0.1);
-}
-
-.top-icon-button {
-  display: grid;
-  height: 58px;
-  width: 58px;
-  place-items: center;
-  border-radius: 22px;
-  border: 1px solid rgba(255, 255, 255, 0.72);
-  background: rgba(255, 250, 246, 0.8);
-  color: var(--lavender-deep);
-  box-shadow: var(--shadow-soft);
 }
 
 .dashboard-layout {

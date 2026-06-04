@@ -2,10 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   BarChart3,
-  Bell,
   CalendarDays,
   CheckCircle2,
-  Crown,
   Download,
   Eye,
   FileDown,
@@ -542,7 +540,7 @@ export default function App() {
             <span className="avatar-body" />
           </div>
           <div>
-            <h2 className="text-2xl font-black leading-tight text-white drop-shadow">Hi, Mia!</h2>
+            <h2 className="text-2xl font-black leading-tight text-white drop-shadow">Hi, {settings.branchName || "Branch"}!</h2>
             <p className="text-sm font-bold text-white/88">Welcome back</p>
           </div>
         </div>
@@ -567,17 +565,6 @@ export default function App() {
           })}
         </nav>
 
-        <div className="sidebar-premium-card">
-          <div className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-[24px] bg-gradient-to-br from-amber-300 to-orange-400 text-white shadow-xl shadow-orange-300/45">
-            <Crown className="h-8 w-8" />
-          </div>
-          <p className="font-black text-[#211246]">Go Premium</p>
-          <p className="mt-1 text-xs font-semibold text-[#211246]/70">Unlock advanced reports and exports</p>
-          <button type="button" className="mt-4 rounded-2xl bg-gradient-to-br from-rose-400 to-pink-500 px-4 py-2 text-xs font-black text-white shadow-lg shadow-pink-300/50">
-            Upgrade Now
-          </button>
-        </div>
-
         <div className="mt-auto rounded-[26px] border border-white/55 bg-white/35 p-4 shadow-[inset_6px_6px_14px_rgba(92,69,152,0.18),inset_-6px_-6px_14px_rgba(255,255,255,0.55)]">
           <div className="flex items-center gap-3">
             <span className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-lg shadow-violet-400/40">
@@ -594,7 +581,7 @@ export default function App() {
       <div className="main-dashboard-surface min-w-0">
       <header className="sticky top-0 z-30 border-b border-white/50 bg-[#fff7f2]/88 backdrop-blur xl:static xl:border-0 xl:bg-transparent">
         <div className="flex flex-col gap-4 px-4 py-4 xl:px-0 xl:py-0">
-          <div className="grid gap-4 xl:grid-cols-[1fr_360px_auto] xl:items-center">
+          <div className="grid gap-4 xl:grid-cols-[1fr_420px] xl:items-center">
             <div>
               <p className="text-sm font-black text-violet-600">Dashboard</p>
               <h1 className="mt-2 text-3xl font-black tracking-tight text-[#101233] md:text-5xl">Daily Courier Report System</h1>
@@ -604,15 +591,6 @@ export default function App() {
               <Search className="h-6 w-6 text-violet-400" />
               <input type="search" placeholder="Search reports, couriers..." className="min-w-0 flex-1 bg-transparent text-sm font-bold text-[#15143b] outline-none placeholder:text-[#8b7bb5]" />
             </label>
-            <div className="flex items-center justify-start gap-3 xl:justify-end">
-              <button type="button" className="top-icon-button relative" aria-label="Notifications">
-                <Bell className="h-6 w-6" />
-                <span className="absolute -right-1 -top-1 grid h-6 w-6 place-items-center rounded-full bg-rose-500 text-[11px] font-black text-white">3</span>
-              </button>
-              <button type="button" className="top-icon-button bg-gradient-to-br from-violet-400 to-purple-600 text-white" aria-label="User profile">
-                <UserRound className="h-7 w-7" />
-              </button>
-            </div>
           </div>
           <div className="grid grid-cols-2 gap-3 xl:hidden">
             <TopMetric icon={CalendarDays} label="Today" value={displayDate(todayIso())} tone="red" />
