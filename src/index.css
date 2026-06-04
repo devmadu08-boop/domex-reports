@@ -778,6 +778,51 @@ textarea {
   padding: 50px 44px 42px;
 }
 
+.delivered-preview-stack {
+  display: grid;
+  gap: 18px;
+  width: max-content;
+}
+
+.delivered-report-page {
+  position: relative;
+}
+
+.delivered-continuation-page .delivered-total-row,
+.delivered-continuation-page .delivered-final-only {
+  display: none;
+}
+
+.delivered-continuation-page::after {
+  position: absolute;
+  bottom: 42px;
+  left: 44px;
+  right: 44px;
+  color: #000000;
+  content: "Continued on next A4 page...";
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.pdf-export-highlight {
+  outline: 4px solid rgba(251, 191, 36, 0.75);
+  box-shadow:
+    0 0 0 8px rgba(254, 226, 226, 0.95),
+    0 18px 38px rgba(244, 63, 94, 0.35) !important;
+  animation: pdfPulse 1.35s ease-in-out infinite;
+}
+
+@keyframes pdfPulse {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
 .delivered-report-meta {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -902,5 +947,19 @@ textarea {
     transform: scale(calc((100vw - 40px) / 794));
     transform-origin: top left;
     padding: 50px 44px 42px;
+  }
+
+  .delivered-preview-stack.mobile-a4-preview {
+    aspect-ratio: auto;
+    display: grid;
+    gap: 16px;
+    overflow: visible;
+    width: max-content;
+  }
+
+  .delivered-preview-stack.mobile-a4-preview .a4-portrait-report {
+    position: relative;
+    transform: none;
+    zoom: calc((100vw - 40px) / 794);
   }
 }

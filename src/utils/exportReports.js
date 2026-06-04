@@ -74,6 +74,24 @@ export async function exportElementAsPortraitPdf(element, reportName, date) {
   return exportElementAsPdf(element, reportName, date, "portrait");
 }
 
+export async function exportElementsAsPortraitPdf(elements, reportName, date) {
+  const pageElements = elements.filter(Boolean);
+  if (!pageElements.length) {
+    throw new Error("Report area is not available for export.");
+  }
+
+  const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+  for (let index = 0; index < pageElements.length; index += 1) {
+    const canvas = await captureElement(pageElements[index]);
+    if (index > 0) pdf.addPage("a4", "portrait");
+    addCanvasToPdfPage(pdf, canvas);
+  }
+
+  pdf.save(`${safeFileName(reportName)}_${date}.pdf`);
+  return { pageCount: pageElements.length };
+}
+
 export async function exportBothAsPdf(reports, date) {
   const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
 

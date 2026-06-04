@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FileDown, Image, Plus, RotateCcw, Trash2, Upload } from "lucide-react";
 import { todayIso } from "../utils/date.js";
-import { exportElementAsPng, exportElementAsPortraitPdf } from "../utils/exportReports.js";
+import { exportElementAsPng, exportElementsAsPortraitPdf } from "../utils/exportReports.js";
 import { deleteDeliveredReport, getDeliveredReport, getDeliveredRiderNames, saveDeliveredReport as saveDeliveredReportByRider } from "../services/reportStorage.js";
 import SendToWhatsAppButton from "./SendToWhatsAppButton.jsx";
 
@@ -20,6 +20,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
   const [includeSpecialTracking, setIncludeSpecialTracking] = useState(false);
   const [savedRiderNames, setSavedRiderNames] = useState([]);
   const reportRef = useRef(null);
+  const reportPageRefs = useRef([]);
 
   useEffect(() => {
     setSavedRiderNames(getDeliveredRiderNames(reportDate));
@@ -34,6 +35,9 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
     if (!includeSpecialTracking && isSpecialTrackingNo(entry.trackingNo)) return sum;
     return sum + parseMoney(entry.value);
   }, 0);
+  const reportPages = useMemo(() => paginateDeliveredEntries(entries), [entries]);
+  const pageCount = reportPages.length || 1;
+  const hasMultiplePdfPages = pageCount > 1;
 
   async function handleCsvUpload(event) {
     const file = event.target.files?.[0];
@@ -142,6 +146,15 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
     setIncludeSpecialTracking(false);
     onSaved?.();
   }
+
+  async function handlePdfExport() {
+    const pageElements = reportPageRefs.current.filter(Boolean);
+    const nextPageCount = pageElements.length || pageCount;
+    alert(`මෙම Delivered Collection Report එක A4 PDF page ${nextPageCount} කට export වෙනවා.`);
+    await exportElementsAsPortraitPdf(pageElements, "Delivered_Collection_Report", reportDate);
+  }
+
+  reportPageRefs.current = [];
 
   return (
     <section className="grid gap-4 md:gap-5">
@@ -304,7 +317,14 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           <ActionButton label="Load Saved" icon={RotateCcw} onClick={loadSavedDeliveredReport} disabled={!reportDate} tone="dark" />
           <ActionButton label="Delete Saved" icon={Trash2} onClick={deleteSavedDeliveredReport} disabled={!reportDate} tone="red" />
           <ActionButton label="Export A4 PNG" icon={Image} onClick={() => exportElementAsPng(reportRef.current, "Delivered_Collection_Report", reportDate)} disabled={entries.length === 0} tone="green" />
-          <ActionButton label="Export A4 PDF" icon={FileDown} onClick={() => exportElementAsPortraitPdf(reportRef.current, "Delivered_Collection_Report", reportDate)} disabled={entries.length === 0} tone="red" />
+          <ActionButton
+            label={`Export A4 PDF${hasMultiplePdfPages ? ` (${pageCount} pages)` : ""}`}
+            icon={FileDown}
+            onClick={handlePdfExport}
+            disabled={entries.length === 0}
+            tone="red"
+            highlight={hasMultiplePdfPages}
+          />
           <SendToWhatsAppButton reportRef={reportRef} reportTitle="Delivered Collection Report" reportType="delivered" reportDate={reportDate} disabled={entries.length === 0} />
           <div className="rounded-2xl border border-white/70 bg-white/55 px-4 py-3 text-right sm:col-span-2 md:col-span-1">
             <p className="text-xs font-black uppercase text-blue-950/60">Total Value</p>
@@ -314,36 +334,51 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
             )}
           </div>
         </div>
+        {hasMultiplePdfPages && (
+          <div className="mt-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-black text-red-700">
+            Items වැඩි නිසා මෙම report එක A4 pages {pageCount} කට බෙදෙයි. Print balance හොඳට තියාගන්න highlighted PDF button එකෙන් export කරන්න.
+          </div>
+        )}
       </div>
 
       <div className="rounded-3xl border border-white/70 bg-white/55 p-2 shadow-xl md:overflow-x-auto md:p-0">
-        <div className="mobile-a4-preview">
-        <DeliveredCollectionReport
-          reportRef={reportRef}
-          reportDate={reportDate}
-          riderName={riderName}
-          branchName={branchName || defaultBranchName}
-          companyName={companyName}
-          entries={entries}
-          totalValue={totalValue}
-          includeSpecialTracking={includeSpecialTracking}
-          specialValue={specialValue}
-        />
-      </div>
+        <div ref={reportRef} className="delivered-preview-stack mobile-a4-preview">
+          {reportPages.map((page, pageIndex) => (
+            <DeliveredCollectionReportPage
+              key={`delivered-page-${pageIndex}`}
+              reportRef={(node) => {
+                if (node) reportPageRefs.current[pageIndex] = node;
+              }}
+              reportDate={reportDate}
+              riderName={riderName}
+              branchName={branchName || defaultBranchName}
+              companyName={companyName}
+              entries={page.entries}
+              startIndex={page.startIndex}
+              totalValue={totalValue}
+              includeSpecialTracking={includeSpecialTracking}
+              specialValue={specialValue}
+              pageNumber={pageIndex + 1}
+              pageCount={pageCount}
+              isFinalPage={page.isFinalPage}
+            />
+          ))}
+        </div>
       </div>
     </section>
   );
 }
 
-function DeliveredCollectionReport({ reportRef, reportDate, riderName, branchName, companyName, entries, totalValue, includeSpecialTracking, specialValue }) {
+function DeliveredCollectionReportPage({ reportRef, reportDate, riderName, branchName, companyName, entries, startIndex, totalValue, includeSpecialTracking, specialValue, pageNumber, pageCount, isFinalPage }) {
   return (
-    <div ref={reportRef} className="report-paper a4-portrait-report">
+    <div ref={reportRef} className={`report-paper a4-portrait-report delivered-report-page ${isFinalPage ? "delivered-final-page" : "delivered-continuation-page"}`}>
       <p className="report-company">{companyName}</p>
       <h2 className="report-title text-2xl">Delivered Collection Report</h2>
       <div className="delivered-report-meta">
         <p>Date: {reportDate}</p>
         <p className="text-right">Rider Name: {riderName || "-"}</p>
         {branchName && <p>Branch: {branchName}</p>}
+        <p className="text-right">Page: {pageNumber} / {pageCount}</p>
       </div>
 
       <table className="report-table delivered-money-table">
@@ -362,13 +397,13 @@ function DeliveredCollectionReport({ reportRef, reportDate, riderName, branchNam
           ) : (
             entries.map((entry, index) => (
               <tr key={`${entry.trackingNo}-${index}`} className={isSpecialTrackingNo(entry.trackingNo) ? "special-tracking-muted" : ""}>
-                <td>{index + 1}</td>
+                <td>{startIndex + index + 1}</td>
                 <td>{entry.trackingNo}</td>
                 <td className="money-cell">{formatMoney(parseMoney(entry.value))}</td>
               </tr>
             ))
           )}
-          <tr>
+          <tr className="delivered-total-row">
             <td colSpan="2">
               <strong>Total Value</strong>
               {!includeSpecialTracking && specialValue > 0 && <span className="total-note"> CS40/CS80 excluded</span>}
@@ -380,12 +415,12 @@ function DeliveredCollectionReport({ reportRef, reportDate, riderName, branchNam
         </tbody>
       </table>
 
-      <div className="paid-amount-row">
+      <div className="paid-amount-row delivered-final-only">
         <span>ලබාදුන් මුදල</span>
         <div className="paid-amount-line" />
       </div>
 
-      <div className="signature-row">
+      <div className="signature-row delivered-final-only">
         <div>
           <div className="signature-line" />
           <p>මුදල් ලබා දුන් බවට අත්සන</p>
@@ -397,6 +432,51 @@ function DeliveredCollectionReport({ reportRef, reportDate, riderName, branchNam
       </div>
     </div>
   );
+}
+
+function paginateDeliveredEntries(entries) {
+  const normalRowsPerPage = 24;
+  const finalRowsPerPage = 18;
+
+  if (!entries.length) {
+    return [{ entries: [], startIndex: 0, isFinalPage: true }];
+  }
+
+  if (entries.length <= finalRowsPerPage) {
+    return [{ entries, startIndex: 0, isFinalPage: true }];
+  }
+
+  const pages = [];
+  let startIndex = 0;
+
+  while (entries.length - startIndex > normalRowsPerPage + finalRowsPerPage) {
+    pages.push({
+      entries: entries.slice(startIndex, startIndex + normalRowsPerPage),
+      startIndex,
+      isFinalPage: false,
+    });
+    startIndex += normalRowsPerPage;
+  }
+
+  if (entries.length - startIndex > finalRowsPerPage) {
+    const remaining = entries.length - startIndex;
+    const take = Math.min(normalRowsPerPage, Math.max(Math.ceil(remaining / 2), remaining - finalRowsPerPage));
+
+    pages.push({
+      entries: entries.slice(startIndex, startIndex + take),
+      startIndex,
+      isFinalPage: false,
+    });
+    startIndex += take;
+  }
+
+  pages.push({
+    entries: entries.slice(startIndex),
+    startIndex,
+    isFinalPage: true,
+  });
+
+  return pages;
 }
 
 function parseDeliveredCsv(text) {
@@ -553,7 +633,7 @@ function RiderSelect({ riderName, riderOptions, onChange, savedCount }) {
   );
 }
 
-function ActionButton({ label, icon: Icon, onClick, disabled, tone }) {
+function ActionButton({ label, icon: Icon, onClick, disabled, tone, highlight = false }) {
   const toneClass =
     tone === "red"
       ? "from-red-500 to-rose-600 shadow-red-300/60"
@@ -568,7 +648,7 @@ function ActionButton({ label, icon: Icon, onClick, disabled, tone }) {
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`inline-flex min-h-14 items-center justify-center gap-2 rounded-2xl border border-white/60 bg-gradient-to-br px-4 py-3 text-sm font-extrabold text-white shadow-xl transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 ${toneClass}`}
+      className={`inline-flex min-h-14 items-center justify-center gap-2 rounded-2xl border border-white/60 bg-gradient-to-br px-4 py-3 text-sm font-extrabold text-white shadow-xl transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 ${toneClass} ${highlight ? "pdf-export-highlight" : ""}`}
     >
       <Icon className="h-5 w-5" />
       {label}
