@@ -7,6 +7,7 @@ import {
   Download,
   Eye,
   FileDown,
+  FileSpreadsheet,
   FileText,
   History,
   Home,
@@ -33,6 +34,7 @@ import CourierPerformanceForm, { emptyCourierForm } from "./components/CourierPe
 import DateSelector from "./components/DateSelector.jsx";
 import DeliveredReportConverter from "./components/DeliveredReportConverter.jsx";
 import ExportButtons from "./components/ExportButtons.jsx";
+import AllInOneReports from "./components/AllInOneReports.jsx";
 import OperationReportForm, { emptyOperationForm } from "./components/OperationReportForm.jsx";
 import { CourierPerformanceReport, OperationReport } from "./components/ReportTable.jsx";
 import SendToWhatsAppButton from "./components/SendToWhatsAppButton.jsx";
@@ -73,6 +75,7 @@ const tabs = [
   { id: "courier", label: "Courier Performance", mobileLabel: "Courier", icon: Truck },
   { id: "operation", label: "Operation Report", mobileLabel: "Operation", icon: PackageCheck },
   { id: "exports", label: "Export / History", mobileLabel: "Export", icon: History },
+  { id: "allReports", label: "All Reports", mobileLabel: "All", icon: FileSpreadsheet },
   { id: "deliveredConverter", label: "Convert Report", mobileLabel: "Convert", icon: FileText },
   { id: "settings", label: "Settings", mobileLabel: "Settings", icon: Settings },
   { id: "users", label: "User Management", mobileLabel: "Users", icon: ShieldCheck, adminOnly: true },
@@ -874,6 +877,10 @@ export default function App() {
           </section>
         )}
 
+        {activeTab === "allReports" && (
+          <AllInOneReports companyName={settings.companyName} branchName={settings.branchName || session.branchName} />
+        )}
+
         {activeTab === "deliveredConverter" && <DeliveredReportConverter onSaved={refreshHistory} companyName={settings.companyName} defaultBranchName={settings.branchName} />}
 
         {activeTab === "settings" && (
@@ -897,7 +904,7 @@ export default function App() {
       </div>
 
       <nav className="mobile-bottom-nav no-print fixed inset-x-0 bottom-0 z-40 border-t border-violet-100 bg-[#fff8f4] px-2 pt-2 shadow-[0_-8px_24px_rgba(128,104,178,0.14)] xl:hidden">
-        <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
+        <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${visibleTabs.length}, minmax(0, 1fr))` }}>
           {visibleTabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;

@@ -65,6 +65,129 @@ textarea {
   font-size: 16px;
 }
 
+.report-filter-input {
+  min-height: 56px;
+  width: 100%;
+  border: 1px solid #e5d8f4;
+  border-radius: 20px;
+  background: #fff8f4;
+  padding: 0 16px;
+  color: #15143b;
+  font-weight: 900;
+  outline: none;
+  box-shadow: var(--shadow-pressed);
+}
+
+.report-filter-input:focus {
+  border-color: #9b75ef;
+  box-shadow: 0 0 0 4px rgba(155, 117, 239, 0.16), var(--shadow-pressed);
+}
+
+.all-report-preview {
+  display: grid;
+  gap: 22px;
+  justify-items: center;
+  overflow-x: auto;
+  border-radius: 28px;
+  border: 1px solid var(--border-soft);
+  background: #fff8f4;
+  padding: 22px;
+  box-shadow: var(--shadow-soft);
+}
+
+.all-report-paper {
+  width: 794px;
+  min-height: 1123px;
+  background: #ffffff;
+  color: #000000;
+  padding: 34px 34px 42px;
+  font-family: Arial, Helvetica, sans-serif;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+}
+
+.all-report-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  border-bottom: 2px solid #000000;
+  padding-bottom: 12px;
+}
+
+.all-report-header h2,
+.all-report-header h1 {
+  margin: 0;
+  color: #000000;
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.all-report-header h1 {
+  font-size: 24px;
+}
+
+.all-report-header p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.all-report-section-title {
+  margin: 22px 0 12px;
+  text-align: center;
+  color: #000000;
+  font-size: 20px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.all-report-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  background: #ffffff;
+  color: #000000;
+  font-size: 12px;
+}
+
+.all-report-table th,
+.all-report-table td {
+  border: 1.5px solid #000000;
+  padding: 8px 6px;
+  text-align: center;
+  vertical-align: middle;
+  word-break: break-word;
+}
+
+.all-report-table th {
+  background: #f0f0f0;
+  font-weight: 900;
+}
+
+.all-report-table td {
+  min-height: 34px;
+  font-weight: 700;
+}
+
+.all-report-total {
+  margin-top: 16px;
+  border: 2px solid #000000;
+  padding: 10px 12px;
+  text-align: right;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.all-report-empty {
+  margin-top: 36px;
+  border: 2px dashed #000000;
+  padding: 42px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 900;
+}
+
 .app-shell {
   min-height: 100dvh;
 }
@@ -601,6 +724,11 @@ textarea {
 .primary-action-blue {
   background: linear-gradient(135deg, #1d4ed8, #0ea5e9);
   box-shadow: 0 16px 30px rgba(59, 130, 246, 0.24);
+}
+
+.primary-action-purple {
+  background: linear-gradient(135deg, #7e55df, #a78bfa);
+  box-shadow: 0 16px 30px rgba(126, 85, 223, 0.26);
 }
 
 .primary-action-red {

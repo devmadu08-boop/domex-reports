@@ -335,6 +335,19 @@ export function getReportHistory() {
     .sort((a, b) => b.date.localeCompare(a.date));
 }
 
+export function getAllReports() {
+  const store = readStore();
+  return Object.entries(store)
+    .map(([date, value]) => ({
+      date,
+      courierRows: value.courierRows || [],
+      operation: value.operation || null,
+      delivered: normalizeDelivered(value.delivered),
+      updatedAt: value.updatedAt,
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
 export function clearReportByDate(date) {
   const store = readStore();
   delete store[date];
