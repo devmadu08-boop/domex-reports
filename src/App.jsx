@@ -565,7 +565,7 @@ export default function App() {
           })}
         </nav>
 
-        <div className="mt-auto rounded-[26px] border border-white/55 bg-white/35 p-4 shadow-[inset_6px_6px_14px_rgba(92,69,152,0.18),inset_-6px_-6px_14px_rgba(255,255,255,0.55)]">
+        <div className="mt-auto rounded-[26px] border border-[#cdbcf5] bg-[#b497f1] p-4 shadow-[inset_7px_7px_15px_rgba(101,72,178,0.24),inset_-7px_-7px_15px_rgba(224,209,255,0.5),9px_10px_20px_rgba(92,68,166,0.22)]">
           <div className="flex items-center gap-3">
             <span className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-lg shadow-violet-400/40">
               <Send className="h-6 w-6" />
@@ -579,7 +579,7 @@ export default function App() {
       </aside>
 
       <div className="main-dashboard-surface min-w-0">
-      <header className="sticky top-0 z-30 border-b border-white/50 bg-[#fff7f2]/88 backdrop-blur xl:static xl:border-0 xl:bg-transparent">
+      <header className="sticky top-0 z-30 border-b border-[#eadff2] bg-[#fff7f2] xl:static xl:border-0 xl:bg-transparent">
         <div className="flex flex-col gap-4 px-4 py-4 xl:px-0 xl:py-0">
           <div className="grid gap-4 xl:grid-cols-[1fr_420px] xl:items-center">
             <div>
@@ -715,10 +715,10 @@ export default function App() {
             </div>
 
             <div className="grid gap-5 overflow-hidden xl:grid-cols-2">
-              <div className="overflow-x-auto rounded-3xl border border-white/70 bg-white/55 shadow-xl">
+              <div className="overflow-x-auto rounded-3xl border border-[#eadff2] bg-[#fff8f4] shadow-xl">
                 <CourierPerformanceReport selectedDate={selectedDate} rows={courierRows} reportRef={courierReportRef} companyName={settings.companyName} branchName={settings.branchName} />
               </div>
-              <div className="overflow-x-auto rounded-3xl border border-white/70 bg-white/55 shadow-xl">
+              <div className="overflow-x-auto rounded-3xl border border-[#eadff2] bg-[#fff8f4] shadow-xl">
                 <OperationReport selectedDate={selectedDate} operation={operation} reportRef={operationReportRef} companyName={settings.companyName} branchName={settings.branchName} />
               </div>
             </div>
@@ -745,7 +745,7 @@ export default function App() {
       </main>
       </div>
 
-      <nav className="mobile-bottom-nav no-print fixed inset-x-0 bottom-0 z-40 border-t border-violet-100 bg-white/95 px-2 pt-2 shadow-[0_-8px_24px_rgba(128,104,178,0.14)] backdrop-blur xl:hidden">
+      <nav className="mobile-bottom-nav no-print fixed inset-x-0 bottom-0 z-40 border-t border-violet-100 bg-[#fff8f4] px-2 pt-2 shadow-[0_-8px_24px_rgba(128,104,178,0.14)] xl:hidden">
         <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
           {tabs.map((tab) => {
             const Icon = tab.icon;
@@ -774,7 +774,7 @@ function TopMetric({ icon: Icon, label, value, tone }) {
   const toneClass = tone === "red" ? "from-rose-100/90 to-pink-50/80 text-rose-600" : "from-emerald-100/90 to-emerald-50/80 text-emerald-700";
   return (
     <div className={`metric-card flex items-center gap-3 bg-gradient-to-br ${toneClass} p-4`}>
-      <div className="grid h-14 w-14 shrink-0 place-items-center rounded-[22px] bg-white/72 shadow-[8px_8px_18px_rgba(128,104,178,0.16),-8px_-8px_18px_rgba(255,255,255,0.9)]">
+      <div className="grid h-14 w-14 shrink-0 place-items-center rounded-[22px] bg-[#fff8f4] shadow-[8px_8px_18px_rgba(128,104,178,0.16),-8px_-8px_18px_rgba(255,255,255,0.9)]">
         <Icon className="h-7 w-7" />
       </div>
       <div className="min-w-0">
@@ -800,7 +800,7 @@ function SummaryCard({ label, value, helper, icon: Icon, color }) {
         <div className="kpi-icon">
           <Icon className="h-7 w-7" />
         </div>
-        <span className="grid h-8 w-8 place-items-center rounded-full bg-white/45 text-current">
+        <span className="grid h-8 w-8 place-items-center rounded-full bg-[#fff8f4] text-current shadow-[inset_3px_3px_7px_rgba(128,104,178,0.10),inset_-3px_-3px_7px_rgba(255,255,255,0.9)]">
           <ListChecks className="h-4 w-4 opacity-55" />
         </span>
       </div>
@@ -876,7 +876,7 @@ function PerformanceOverview({ stats }) {
           </span>
           <h2 className="font-black text-[#15143b]">Performance Overview</h2>
         </div>
-        <span className="rounded-2xl bg-white/55 px-4 py-2 text-xs font-black text-violet-600">This Week</span>
+        <span className="rounded-2xl bg-[#fff8f4] px-4 py-2 text-xs font-black text-violet-600 shadow-[inset_3px_3px_7px_rgba(128,104,178,0.10),inset_-3px_-3px_7px_rgba(255,255,255,0.9)]">This Week</span>
       </div>
       <div className="grid gap-5 sm:grid-cols-[150px_1fr] sm:items-center">
         <div className="donut-chart" style={{ "--value": `${delivered}%` }}>
@@ -953,7 +953,7 @@ function BottomBanner({ onClick }) {
         </h2>
         <p className="text-sm font-semibold text-white/86 md:text-base">Save time, stay organized, deliver more.</p>
       </div>
-      <button type="button" onClick={onClick} className="rounded-[22px] border border-white/40 bg-white/18 px-8 py-3 text-sm font-black text-white shadow-[inset_3px_3px_8px_rgba(93,61,160,0.24),inset_-3px_-3px_8px_rgba(255,255,255,0.18)] transition hover:bg-white/24">
+      <button type="button" onClick={onClick} className="rounded-[22px] border border-[#c8b0ff] bg-[#a984f1] px-8 py-3 text-sm font-black text-white shadow-[inset_4px_4px_9px_rgba(93,61,160,0.28),inset_-4px_-4px_9px_rgba(220,202,255,0.32),8px_9px_18px_rgba(84,53,155,0.22)] transition hover:bg-[#9d78e9]">
         Get Started
       </button>
     </section>
@@ -970,17 +970,17 @@ function HistoryList({ history, onSelect, savedNamesCount, onView, onDownload, o
           </span>
           <h2 className="text-lg font-black text-[#071537]">Saved Report History</h2>
         </div>
-        <span className="hidden items-center gap-2 rounded-2xl border border-white/70 bg-white/50 px-4 py-2 text-sm font-black text-blue-950 md:inline-flex">
+        <span className="hidden items-center gap-2 rounded-2xl border border-[#eadff2] bg-[#fff8f4] px-4 py-2 text-sm font-black text-blue-950 shadow-[inset_3px_3px_8px_rgba(128,104,178,0.08),inset_-3px_-3px_8px_rgba(255,255,255,0.9)] md:inline-flex">
           View All History
           <ArrowRight className="h-4 w-4" />
         </span>
       </div>
       {history.length === 0 ? (
-        <p className="rounded-2xl bg-white/55 p-4 text-sm font-semibold text-blue-950/65">No saved reports yet.</p>
+        <p className="rounded-2xl bg-[#fff8f4] p-4 text-sm font-semibold text-blue-950/65 shadow-[inset_4px_4px_9px_rgba(128,104,178,0.08),inset_-4px_-4px_9px_rgba(255,255,255,0.9)]">No saved reports yet.</p>
       ) : (
         <div className="grid gap-2">
           {history.map((item) => (
-            <div key={item.date} className="grid gap-3 rounded-[18px] border border-white/70 bg-white/64 px-4 py-3 text-left shadow-[4px_6px_14px_rgba(128,104,178,0.10)] md:grid-cols-[1.1fr_1.7fr_auto] md:items-center">
+            <div key={item.date} className="grid gap-3 rounded-[18px] border border-[#eadff2] bg-[#fff8f4] px-4 py-3 text-left shadow-[7px_8px_18px_rgba(128,104,178,0.12),-5px_-5px_14px_rgba(255,255,255,0.9)] md:grid-cols-[1.1fr_1.7fr_auto] md:items-center">
               <button type="button" onClick={() => onSelect(item.date)} className="flex items-center gap-3 text-left">
                 <span className="history-date-badge">
                   <strong>{String(new Date(`${item.date}T00:00:00`).getDate()).padStart(2, "0")}</strong>
