@@ -19,6 +19,9 @@ async function requestJson(path, options = {}) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     if (response.status === 404) {
+      if (path === "/send-report-to-recipient") {
+        throw new Error("Rider WhatsApp send API was not found. Update/pull the WhatsApp backend on the VPS and restart it.");
+      }
       throw new Error("WhatsApp API was not found. On Vercel, deploy the WhatsApp backend separately and set VITE_WHATSAPP_API_BASE_URL.");
     }
     if (response.status === 502) {
