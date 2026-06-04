@@ -537,10 +537,12 @@ export default function App() {
       <aside className="glass-sidebar no-print hidden xl:flex">
         <div className="sidebar-profile">
           <div className="profile-avatar">
-            <Truck className="h-11 w-11" />
+            <span className="avatar-hair" />
+            <span className="avatar-face" />
+            <span className="avatar-body" />
           </div>
           <div>
-            <h2 className="text-2xl font-black leading-tight text-white drop-shadow">Hi, Admin!</h2>
+            <h2 className="text-2xl font-black leading-tight text-white drop-shadow">Hi, Mia!</h2>
             <p className="text-sm font-bold text-white/88">Welcome back</p>
           </div>
         </div>
@@ -638,16 +640,13 @@ export default function App() {
         {activeTab === "dashboard" && (
           <section className="dashboard-layout">
             <div className="dashboard-main-column">
-              <div className="grid gap-5 xl:grid-cols-[1fr_390px]">
-                <DateSelector
-                  selectedDate={selectedDate}
-                  onDateChange={setSelectedDate}
-                  searchDate={searchDate}
-                  onSearchDateChange={setSearchDate}
-                  onSearch={handleSearch}
-                />
-                <CourierBanner />
-              </div>
+              <DateSelector
+                selectedDate={selectedDate}
+                onDateChange={setSelectedDate}
+                searchDate={searchDate}
+                onSearchDateChange={setSearchDate}
+                onSearch={handleSearch}
+              />
 
               <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
                 <SummaryCard label="Courier Rows" value={courierRows.length} helper="Total entries for this report" icon={Package} color="purple" />
@@ -669,10 +668,7 @@ export default function App() {
             </div>
 
             <aside className="dashboard-side-column">
-              <div className="hidden grid-cols-2 gap-3 xl:grid">
-                <TopMetric icon={CalendarDays} label="Today" value={displayDate(todayIso())} tone="red" />
-                <TopMetric icon={Target} label="Target" value={stableTarget || "Not set"} tone="green" />
-              </div>
+              <CourierBanner />
               <PerformanceOverview stats={stats} />
               <QuickSummary history={history} stats={stats} courierNames={courierNames} />
             </aside>
@@ -991,7 +987,7 @@ function HistoryList({ history, onSelect, savedNamesCount, onView, onDownload, o
     <section className="glass-panel p-4">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <span className="grid h-11 w-11 place-items-center rounded-2xl bg-emerald-100 text-emerald-700 shadow-inner">
+          <span className="grid h-11 w-11 place-items-center rounded-2xl bg-violet-100 text-violet-600 shadow-inner">
             <ListChecks className="h-6 w-6" />
           </span>
           <h2 className="text-lg font-black text-[#071537]">Saved Report History</h2>
@@ -1006,10 +1002,11 @@ function HistoryList({ history, onSelect, savedNamesCount, onView, onDownload, o
       ) : (
         <div className="grid gap-2">
           {history.map((item) => (
-            <div key={item.date} className="grid gap-3 rounded-2xl border border-white/65 bg-white/55 px-4 py-3 text-left shadow-sm md:grid-cols-[1.1fr_1.7fr_auto] md:items-center">
+            <div key={item.date} className="grid gap-3 rounded-[18px] border border-white/70 bg-white/64 px-4 py-3 text-left shadow-[4px_6px_14px_rgba(128,104,178,0.10)] md:grid-cols-[1.1fr_1.7fr_auto] md:items-center">
               <button type="button" onClick={() => onSelect(item.date)} className="flex items-center gap-3 text-left">
-                <span className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-100 text-emerald-700">
-                  <CalendarDays className="h-5 w-5" />
+                <span className="history-date-badge">
+                  <strong>{String(new Date(`${item.date}T00:00:00`).getDate()).padStart(2, "0")}</strong>
+                  <small>{new Date(`${item.date}T00:00:00`).toLocaleDateString("en-US", { month: "short" }).toUpperCase()}</small>
                 </span>
                 <span>
                   <span className="block font-black text-[#071537]">{displayDate(item.date)}</span>
