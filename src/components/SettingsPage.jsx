@@ -1,6 +1,6 @@
 import { Cloud, CloudDownload, CloudUpload, Download, RotateCcw, Save, Settings, Trash2, Upload, UserPlus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { downloadBackupFile, restoreBackupFile } from "../services/reportStorage.js";
+import { downloadBackupFile, getAllDeliveredRiderNames, restoreBackupFile } from "../services/reportStorage.js";
 import WhatsAppSettings from "./WhatsAppSettings.jsx";
 
 export default function SettingsPage({
@@ -16,6 +16,8 @@ export default function SettingsPage({
 }) {
   const [draftSettings, setDraftSettings] = useState(settings);
   const [newCourierName, setNewCourierName] = useState("");
+  const [newRiderName, setNewRiderName] = useState("");
+  const [newRiderPhone, setNewRiderPhone] = useState("");
   const [restoreStatus, setRestoreStatus] = useState("");
   const fileInputRef = useRef(null);
 
@@ -35,6 +37,34 @@ export default function SettingsPage({
     onSaveCourierName(newCourierName);
     setNewCourierName("");
   }
+
+  function updateRiderPhone(name, phoneNumber) {
+    updateSetting("deliveredRiderWhatsAppNumbers", {
+      ...(draftSettings.deliveredRiderWhatsAppNumbers || {}),
+      [name]: phoneNumber,
+    });
+  }
+
+  function handleAddRiderPhone() {
+    const cleanName = newRiderName.trim();
+    if (!cleanName) return;
+    updateRiderPhone(cleanName, newRiderPhone.trim());
+    setNewRiderName("");
+    setNewRiderPhone("");
+  }
+
+  function handleDeleteRiderPhone(name) {
+    const nextNumbers = { ...(draftSettings.deliveredRiderWhatsAppNumbers || {}) };
+    delete nextNumbers[name];
+    updateSetting("deliveredRiderWhatsAppNumbers", nextNumbers);
+  }
+
+  const deliveredRiderNames = [
+    ...new Set([
+      ...getAllDeliveredRiderNames(),
+      ...Object.keys(draftSettings.deliveredRiderWhatsAppNumbers || {}),
+    ]),
+  ].sort((a, b) => a.localeCompare(b));
 
   async function handleRestore(event) {
     const file = event.target.files?.[0];
@@ -143,6 +173,50 @@ export default function SettingsPage({
                 </div>
               ))
             )}
+          </div>
+        </div>
+
+        <div className="glass-panel p-4">
+          <h3 className="mb-3 text-lg font-black text-[#071537]">Delivered Rider WhatsApp Numbers</h3>
+          <p className="mb-4 text-sm font-semibold text-blue-950/65">
+            Convert Delivered Report එකේ saved rider names සඳහා WhatsApp number save කරන්න.
+          </p>
+
+          <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+            <Field label="Rider Name" value={newRiderName} onChange={setNewRiderName} placeholder="Rider name" />
+            <Field label="WhatsApp Number" value={newRiderPhone} onChange={setNewRiderPhone} placeholder="947XXXXXXXX" />
+            <button type="button" onClick={handleAddRiderPhone} className="primary-action primary-action-blue">
+              <UserPlus className="h-5 w-5" />
+              Add Rider
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-2">
+            {deliveredRiderNames.length === 0 ? (
+              <p className="rounded-2xl bg-white/55 p-4 text-sm font-semibold text-blue-950/60">No delivered rider names saved yet.</p>
+            ) : (
+              deliveredRiderNames.map((name) => (
+                <div key={name} className="grid gap-3 rounded-2xl border border-white/70 bg-white/55 px-4 py-3 md:grid-cols-[1fr_1.2fr_auto] md:items-center">
+                  <span className="font-black text-[#071537]">{name}</span>
+                  <input
+                    value={draftSettings.deliveredRiderWhatsAppNumbers?.[name] || ""}
+                    onChange={(event) => updateRiderPhone(name, event.target.value)}
+                    placeholder="947XXXXXXXX"
+                    className="h-11 rounded-2xl border border-white/80 bg-white/70 px-4 text-base font-bold outline-none focus:border-green-500 focus:ring-4 focus:ring-green-100"
+                  />
+                  <button type="button" onClick={() => handleDeleteRiderPhone(name)} className="history-action text-red-600" aria-label={`Delete ${name} WhatsApp number`}>
+                    <Trash2 className="h-5 w-5" />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="mt-4">
+            <button type="button" onClick={handleSaveSettings} className="primary-action primary-action-green">
+              <Save className="h-5 w-5" />
+              Save Rider Numbers
+            </button>
           </div>
         </div>
 

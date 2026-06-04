@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FileDown, Image, Plus, RotateCcw, Trash2, Upload } from "lucide-react";
 import { todayIso } from "../utils/date.js";
-import { exportElementAsPng, exportElementsAsPortraitPdf } from "../utils/exportReports.js";
-import { deleteDeliveredReport, getDeliveredReport, getDeliveredRiderNames, saveDeliveredReport as saveDeliveredReportByRider } from "../services/reportStorage.js";
+import { captureElementAsPngDataUrl, exportElementAsPng, exportElementsAsPortraitPdf } from "../utils/exportReports.js";
+import { deleteDeliveredReport, getDeliveredReport, getDeliveredRiderNames, getSettings, saveDeliveredReport as saveDeliveredReportByRider, saveSettings } from "../services/reportStorage.js";
+import { sendReportToWhatsAppRecipient } from "../services/whatsappApi.js";
 import SendToWhatsAppButton from "./SendToWhatsAppButton.jsx";
 
 const emptyEntry = {
@@ -19,6 +20,11 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
   const [fileName, setFileName] = useState("");
   const [includeSpecialTracking, setIncludeSpecialTracking] = useState(false);
   const [savedRiderNames, setSavedRiderNames] = useState([]);
+  const [exportPrompt, setExportPrompt] = useState(null);
+  const [sendToRiderWhatsApp, setSendToRiderWhatsApp] = useState(false);
+  const [rememberSendChoice, setRememberSendChoice] = useState(false);
+  const [exportStatus, setExportStatus] = useState("");
+  const [exportingDelivered, setExportingDelivered] = useState(false);
   const reportRef = useRef(null);
   const reportPageRefs = useRef([]);
 
@@ -149,9 +155,65 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
 
   async function handlePdfExport() {
     const pageElements = reportPageRefs.current.filter(Boolean);
-    const nextPageCount = pageElements.length || pageCount;
-    alert(`මෙම Delivered Collection Report එක A4 PDF page ${nextPageCount} කට export වෙනවා.`);
     await exportElementsAsPortraitPdf(pageElements, "Delivered_Collection_Report", reportDate);
+  }
+
+  function openExportPrompt(type) {
+    const settings = getSettings();
+    const riderPhone = settings.deliveredRiderWhatsAppNumbers?.[riderName] || "";
+    setSendToRiderWhatsApp(Boolean(settings.deliveredExportAutoWhatsApp && riderPhone));
+    setRememberSendChoice(Boolean(settings.deliveredExportAutoWhatsApp));
+    setExportStatus("");
+    setExportPrompt({
+      type,
+      riderPhone,
+      pageCount,
+    });
+  }
+
+  function updateSendToRiderWhatsApp(checked) {
+    setSendToRiderWhatsApp(checked);
+    if (checked && !rememberSendChoice) {
+      setRememberSendChoice(confirm("මෙය හැම export එකකදීම auto tick වෙන්න save කරන්නද?"));
+    }
+  }
+
+  async function confirmExport() {
+    if (!exportPrompt) return;
+
+    setExportingDelivered(true);
+    setExportStatus("");
+    try {
+      if (exportPrompt.type === "pdf") {
+        await handlePdfExport();
+      } else {
+        await exportElementAsPng(reportRef.current, "Delivered_Collection_Report", reportDate);
+      }
+
+      if (sendToRiderWhatsApp) {
+        if (!exportPrompt.riderPhone) {
+          throw new Error("This rider has no saved WhatsApp number. Add it in Settings first.");
+        }
+        const imageDataUrl = await captureElementAsPngDataUrl(reportRef.current);
+        await sendReportToWhatsAppRecipient({
+          phoneNumber: exportPrompt.riderPhone,
+          imageDataUrl,
+          caption: `Delivered Collection Report - ${reportDate}\nRider: ${riderName || "-"}\nSent automatically from Daily Report System`,
+        });
+      }
+
+      const nextAutoWhatsApp = Boolean(rememberSendChoice && sendToRiderWhatsApp);
+      if (nextAutoWhatsApp !== Boolean(getSettings().deliveredExportAutoWhatsApp)) {
+        saveSettings({ deliveredExportAutoWhatsApp: nextAutoWhatsApp });
+      }
+
+      setExportStatus(sendToRiderWhatsApp ? "Export complete and sent to rider WhatsApp." : "Export complete.");
+      window.setTimeout(() => setExportPrompt(null), 900);
+    } catch (error) {
+      setExportStatus(error.message || "Export failed.");
+    } finally {
+      setExportingDelivered(false);
+    }
   }
 
   reportPageRefs.current = [];
@@ -316,11 +378,11 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           <ActionButton label="Save Rider Report" icon={Upload} onClick={saveDeliveredReport} disabled={entries.length === 0} tone="blue" />
           <ActionButton label="Load Saved" icon={RotateCcw} onClick={loadSavedDeliveredReport} disabled={!reportDate} tone="dark" />
           <ActionButton label="Delete Saved" icon={Trash2} onClick={deleteSavedDeliveredReport} disabled={!reportDate} tone="red" />
-          <ActionButton label="Export A4 PNG" icon={Image} onClick={() => exportElementAsPng(reportRef.current, "Delivered_Collection_Report", reportDate)} disabled={entries.length === 0} tone="green" />
+          <ActionButton label="Export A4 PNG" icon={Image} onClick={() => openExportPrompt("png")} disabled={entries.length === 0} tone="green" />
           <ActionButton
             label={`Export A4 PDF${hasMultiplePdfPages ? ` (${pageCount} pages)` : ""}`}
             icon={FileDown}
-            onClick={handlePdfExport}
+            onClick={() => openExportPrompt("pdf")}
             disabled={entries.length === 0}
             tone="red"
             highlight={hasMultiplePdfPages}
@@ -365,6 +427,23 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           ))}
         </div>
       </div>
+
+      {exportPrompt && (
+        <ExportPromptModal
+          type={exportPrompt.type}
+          pageCount={exportPrompt.pageCount}
+          riderName={riderName}
+          riderPhone={exportPrompt.riderPhone}
+          sendToRiderWhatsApp={sendToRiderWhatsApp}
+          rememberSendChoice={rememberSendChoice}
+          exporting={exportingDelivered}
+          status={exportStatus}
+          onSendChange={updateSendToRiderWhatsApp}
+          onRememberChange={setRememberSendChoice}
+          onCancel={() => setExportPrompt(null)}
+          onConfirm={confirmExport}
+        />
+      )}
     </section>
   );
 }
@@ -630,6 +709,81 @@ function RiderSelect({ riderName, riderOptions, onChange, savedCount }) {
         {savedCount} saved rider{savedCount === 1 ? "" : "s"} for this date. Upload CSV to detect a new rider.
       </span>
     </label>
+  );
+}
+
+function ExportPromptModal({
+  type,
+  pageCount,
+  riderName,
+  riderPhone,
+  sendToRiderWhatsApp,
+  rememberSendChoice,
+  exporting,
+  status,
+  onSendChange,
+  onRememberChange,
+  onCancel,
+  onConfirm,
+}) {
+  const isPdf = type === "pdf";
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">
+      <div className="w-full max-w-lg rounded-[28px] border border-[#eadff2] bg-[#fff8f4] p-5 shadow-[18px_18px_45px_rgba(30,20,60,0.24)]">
+        <div className="mb-4">
+          <p className="text-sm font-black uppercase text-violet-700">Export {isPdf ? "PDF" : "PNG"}</p>
+          <h3 className="text-xl font-black text-[#071537]">Send to WhatsApp?</h3>
+          <p className="mt-2 text-sm font-semibold text-blue-950/70">
+            {isPdf
+              ? `මෙම Delivered Collection Report එක A4 PDF page ${pageCount} කට export වෙනවා.`
+              : "PNG export එකෙන් පසු අවශ්‍ය නම් rider WhatsApp number එකට image එක send කළ හැක."}
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-[#eadff2] bg-white px-4 py-3 text-sm font-bold text-blue-950">
+          <p>Rider: <span className="font-black">{riderName || "-"}</span></p>
+          <p className="mt-1">WhatsApp: <span className={riderPhone ? "font-black text-emerald-700" : "font-black text-red-700"}>{riderPhone || "Not saved in Settings"}</span></p>
+        </div>
+
+        <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-2xl border border-[#eadff2] bg-white px-4 py-3">
+          <input
+            type="checkbox"
+            checked={sendToRiderWhatsApp}
+            onChange={(event) => onSendChange(event.target.checked)}
+            disabled={!riderPhone}
+            className="mt-1 h-5 w-5 accent-emerald-700 disabled:opacity-40"
+          />
+          <span>
+            <span className="block text-sm font-black text-[#071537]">WhatsApp send</span>
+            <span className="block text-xs font-semibold text-blue-950/60">Export complete උනාම report PNG එක rider ගෙ WhatsApp number එකට send කරන්න.</span>
+          </span>
+        </label>
+
+        <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-2xl border border-[#eadff2] bg-white px-4 py-3">
+          <input
+            type="checkbox"
+            checked={rememberSendChoice}
+            onChange={(event) => onRememberChange(event.target.checked)}
+            className="mt-1 h-5 w-5 accent-violet-700"
+          />
+          <span>
+            <span className="block text-sm font-black text-[#071537]">Always tick this option</span>
+            <span className="block text-xs font-semibold text-blue-950/60">ඊළඟ exports වලදී WhatsApp send option එක auto tick කරන්න.</span>
+          </span>
+        </label>
+
+        {status && <p className={`mt-4 rounded-2xl px-4 py-3 text-sm font-black ${status.includes("failed") || status.includes("no saved") ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>{status}</p>}
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <button type="button" onClick={onCancel} disabled={exporting} className="secondary-action">
+            Cancel
+          </button>
+          <button type="button" onClick={onConfirm} disabled={exporting} className="primary-action primary-action-green">
+            {exporting ? "Exporting..." : `Export ${isPdf ? "PDF" : "PNG"}`}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -64,3 +64,10 @@ export function sendReportToWhatsApp({ imageDataUrl, caption }) {
     body: JSON.stringify({ imageDataUrl, caption }),
   });
 }
+
+export function sendReportToWhatsAppRecipient({ phoneNumber, imageDataUrl, caption }) {
+  return requestJson("/send-report-to-recipient", {
+    method: "POST",
+    body: JSON.stringify({ phoneNumber, imageDataUrl, caption }),
+  });
+}

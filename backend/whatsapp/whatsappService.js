@@ -47,6 +47,17 @@ function normalizeGroupJids(groupJids) {
   return [...new Set((Array.isArray(groupJids) ? groupJids : [groupJids]).map((jid) => String(jid || "").trim()).filter(Boolean))];
 }
 
+function normalizeRecipientJid(phoneNumber) {
+  const rawValue = String(phoneNumber || "").trim();
+  if (!rawValue) return "";
+  if (rawValue.includes("@")) return rawValue;
+
+  const digits = rawValue.replace(/\D/g, "");
+  if (!digits) return "";
+  const internationalDigits = digits.length === 10 && digits.startsWith("0") ? `94${digits.slice(1)}` : digits;
+  return `${internationalDigits}@s.whatsapp.net`;
+}
+
 function normalizeConfig(config = {}) {
   const defaultGroupJids = normalizeGroupJids(config.defaultGroupJids?.length ? config.defaultGroupJids : config.defaultGroupJid);
   return {
@@ -208,6 +219,34 @@ export async function sendReportToDefaultGroup({ imageDataUrl, caption }) {
     groupJid: defaultGroupJids[0],
     groupJids: defaultGroupJids,
     sentCount: defaultGroupJids.length,
+    sentAt: new Date().toISOString(),
+  };
+}
+
+export async function sendReportToRecipient({ phoneNumber, imageDataUrl, caption }) {
+  if (!socket || connectionState !== "connected") {
+    throw new Error("WhatsApp is not connected. Scan QR from Settings.");
+  }
+
+  const recipientJid = normalizeRecipientJid(phoneNumber);
+  if (!recipientJid) {
+    throw new Error("Rider WhatsApp number is required.");
+  }
+
+  if (!imageDataUrl?.startsWith("data:image/png;base64,")) {
+    throw new Error("A PNG report image is required.");
+  }
+
+  const imageBuffer = Buffer.from(imageDataUrl.split(",")[1], "base64");
+  await socket.sendMessage(recipientJid, {
+    image: imageBuffer,
+    caption,
+  });
+
+  return {
+    ok: true,
+    recipientJid,
+    sentCount: 1,
     sentAt: new Date().toISOString(),
   };
 }

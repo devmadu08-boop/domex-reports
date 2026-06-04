@@ -7,6 +7,7 @@ import {
   reconnectWhatsApp,
   saveDefaultGroupJids,
   sendReportToDefaultGroup,
+  sendReportToRecipient,
 } from "./whatsappService.js";
 
 const router = express.Router();
@@ -68,6 +69,14 @@ router.post("/default-group", async (request, response) => {
 router.post("/send-report", async (request, response) => {
   try {
     response.json(await sendReportToDefaultGroup(request.body));
+  } catch (error) {
+    sendError(response, error);
+  }
+});
+
+router.post("/send-report-to-recipient", async (request, response) => {
+  try {
+    response.json(await sendReportToRecipient(request.body));
   } catch (error) {
     sendError(response, error);
   }

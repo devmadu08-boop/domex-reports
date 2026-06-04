@@ -153,6 +153,15 @@ export function getDeliveredRiderNames(date) {
   return Object.keys(getReportByDate(date).delivered || {}).sort((a, b) => a.localeCompare(b));
 }
 
+export function getAllDeliveredRiderNames() {
+  const store = readStore();
+  return [
+    ...new Set(
+      Object.values(store).flatMap((report) => Object.keys(normalizeDelivered(report.delivered))),
+    ),
+  ].sort((a, b) => a.localeCompare(b));
+}
+
 export function deleteDeliveredReport(date, riderName) {
   const cleanRiderName = riderName.trim();
   const store = readStore();
@@ -256,6 +265,8 @@ export function getSettings() {
     lastAutoBackupAt: "",
     firestoreRealtimeSync: false,
     cloudLastSyncedAt: "",
+    deliveredRiderWhatsAppNumbers: {},
+    deliveredExportAutoWhatsApp: false,
     ...savedSettings,
     whatsappCaptionTemplates: {
       ...DEFAULT_WHATSAPP_CAPTION_TEMPLATES,
