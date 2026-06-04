@@ -1161,6 +1161,16 @@ textarea {
   width: max-content;
 }
 
+.delivered-converter-section {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.delivered-preview-card {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 @media print {
   body {
     background: #ffffff;
@@ -1221,5 +1231,31 @@ textarea {
     position: relative;
     transform: none;
     zoom: calc((100vw - 40px) / 794);
+  }
+
+  .delivered-converter-section {
+    overflow: visible;
+  }
+
+  .delivered-preview-card {
+    overflow: hidden;
+    border-radius: 22px;
+    padding: 10px;
+  }
+
+  .delivered-preview-stack.mobile-a4-preview {
+    width: 100%;
+    max-width: 100%;
+    justify-items: center;
+  }
+
+  .delivered-preview-stack.mobile-a4-preview .a4-portrait-report {
+    max-width: none;
+    zoom: min(1, calc((100vw - 46px) / 794));
+  }
+
+  .delivered-converter-section .primary-action,
+  .delivered-converter-section button {
+    max-width: 100%;
   }
 }

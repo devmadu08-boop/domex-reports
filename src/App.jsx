@@ -731,6 +731,20 @@ export default function App() {
       )}
       <header className="sticky top-0 z-30 border-b border-[#eadff2] bg-[#fff7f2] 2xl:static 2xl:border-0 2xl:bg-transparent">
         <div className="flex flex-col gap-4 px-4 py-4 2xl:px-0 2xl:py-0">
+          <div className="flex items-center justify-between gap-3 2xl:hidden">
+            <div className="min-w-0">
+              <p className="text-xs font-black uppercase text-violet-500">Signed in branch</p>
+              <p className="truncate text-sm font-black text-[#15143b]">{settings.branchName || session.branchName || "Branch"}</p>
+            </div>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-[18px] border border-[#eadff2] bg-[#fff8f4] px-4 text-sm font-black text-violet-700 shadow-[7px_8px_16px_rgba(128,104,178,0.14),-5px_-5px_13px_rgba(255,255,255,0.9)]"
+            >
+              <LogOut className="h-4 w-4" />
+              Logout
+            </button>
+          </div>
           <div className="grid gap-4 2xl:grid-cols-[1fr_420px] 2xl:items-center">
             <div>
               <p className="text-sm font-black text-violet-600">{activeTabLabel}</p>

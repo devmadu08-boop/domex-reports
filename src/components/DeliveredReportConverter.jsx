@@ -219,7 +219,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
   reportPageRefs.current = [];
 
   return (
-    <section className="grid gap-4 md:gap-5">
+    <section className="delivered-converter-section grid min-w-0 gap-4 md:gap-5">
       <div className="glass-panel p-3 md:p-4">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
@@ -374,7 +374,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           </table>
         </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 md:grid-cols-3">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <ActionButton label="Save Rider Report" icon={Upload} onClick={saveDeliveredReport} disabled={entries.length === 0} tone="blue" />
           <ActionButton label="Load Saved" icon={RotateCcw} onClick={loadSavedDeliveredReport} disabled={!reportDate} tone="dark" />
           <ActionButton label="Delete Saved" icon={Trash2} onClick={deleteSavedDeliveredReport} disabled={!reportDate} tone="red" />
@@ -388,7 +388,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
             highlight={hasMultiplePdfPages}
           />
           <SendToWhatsAppButton reportRef={reportRef} reportTitle="Delivered Collection Report" reportType="delivered" reportDate={reportDate} disabled={entries.length === 0} />
-          <div className="rounded-2xl border border-white/70 bg-white/55 px-4 py-3 text-right sm:col-span-2 md:col-span-1">
+          <div className="rounded-2xl border border-white/70 bg-white/55 px-4 py-3 text-right sm:col-span-2 lg:col-span-1">
             <p className="text-xs font-black uppercase text-blue-950/60">Total Value</p>
             <p className="text-2xl font-black text-[#071537]">{formatMoney(totalValue)}</p>
             {!includeSpecialTracking && specialValue > 0 && (
@@ -403,7 +403,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
         )}
       </div>
 
-      <div className="rounded-3xl border border-white/70 bg-white/55 p-2 shadow-xl md:overflow-x-auto md:p-0">
+      <div className="delivered-preview-card rounded-3xl border border-white/70 bg-white/55 p-2 shadow-xl md:overflow-x-auto md:p-0">
         <div ref={reportRef} className="delivered-preview-stack mobile-a4-preview">
           {reportPages.map((page, pageIndex) => (
             <DeliveredCollectionReportPage
