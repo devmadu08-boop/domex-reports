@@ -259,8 +259,13 @@ textarea {
 }
 
 .glass-sidebar {
-  min-height: calc(100dvh - 40px);
+  position: sticky;
+  top: 20px;
+  height: calc(100dvh - 40px);
+  min-height: 0;
+  max-height: calc(100dvh - 40px);
   flex-direction: column;
+  overflow: hidden;
   border: 1px solid #d3c0f9;
   border-radius: 32px;
   background:
@@ -271,6 +276,17 @@ textarea {
     18px 18px 42px rgba(126, 85, 223, 0.24),
     inset 9px 9px 20px rgba(96, 69, 174, 0.16),
     inset -9px -9px 20px rgba(229, 216, 255, 0.45);
+}
+
+.sidebar-nav {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-width: none;
+}
+
+.sidebar-nav::-webkit-scrollbar {
+  display: none;
 }
 
 .main-dashboard-surface {

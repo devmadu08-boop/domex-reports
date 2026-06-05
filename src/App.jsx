@@ -665,7 +665,7 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell app-background pb-24 text-[#15143b] 2xl:grid 2xl:grid-cols-[260px_1fr] 2xl:gap-5 2xl:p-5 2xl:pb-5">
+    <div className="app-shell app-background pb-24 text-[#15143b] 2xl:grid 2xl:grid-cols-[260px_1fr] 2xl:items-start 2xl:gap-5 2xl:p-5 2xl:pb-5">
       {notice && (
         <div className="fixed right-4 top-4 z-50 max-w-sm rounded-[22px] border border-white/70 bg-violet-600 px-5 py-3 text-sm font-black text-white shadow-2xl shadow-violet-300/50">
           {notice}
@@ -684,7 +684,7 @@ export default function App() {
           </div>
         </div>
 
-        <nav className="mt-7 grid gap-3">
+        <nav className="sidebar-nav mt-7 grid gap-3">
           {visibleTabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
