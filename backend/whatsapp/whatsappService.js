@@ -29,7 +29,7 @@ async function readConfig() {
     const content = await fs.readFile(configPath, "utf8");
     return normalizeConfig(JSON.parse(content));
   } catch {
-    return { defaultGroupJid: "", defaultGroupJids: [] };
+    return { defaultGroupJid: "", defaultGroupJids: [], convertDefaultGroupJid: "", convertDefaultGroupJids: [] };
   }
 }
 
@@ -60,10 +60,13 @@ function normalizeRecipientJid(phoneNumber) {
 
 function normalizeConfig(config = {}) {
   const defaultGroupJids = normalizeGroupJids(config.defaultGroupJids?.length ? config.defaultGroupJids : config.defaultGroupJid);
+  const convertDefaultGroupJids = normalizeGroupJids(config.convertDefaultGroupJids?.length ? config.convertDefaultGroupJids : config.convertDefaultGroupJid);
   return {
     ...config,
     defaultGroupJid: defaultGroupJids[0] || "",
     defaultGroupJids,
+    convertDefaultGroupJid: convertDefaultGroupJids[0] || "",
+    convertDefaultGroupJids,
   };
 }
 
@@ -128,6 +131,8 @@ export async function getWhatsAppStatus() {
     hasQr: Boolean(currentQrDataUrl),
     defaultGroupJid: config.defaultGroupJid || "",
     defaultGroupJids: config.defaultGroupJids || [],
+    convertDefaultGroupJid: config.convertDefaultGroupJid || "",
+    convertDefaultGroupJids: config.convertDefaultGroupJids || [],
   };
 }
 
@@ -191,15 +196,20 @@ export async function saveDefaultGroupJids(groupJids) {
   return writeConfig(normalizeConfig({ ...(await readConfig()), defaultGroupJid: nextGroupJids[0], defaultGroupJids: nextGroupJids }));
 }
 
-export async function sendReportToDefaultGroup({ imageDataUrl, caption }) {
+export async function saveConvertDefaultGroupJids(groupJids) {
+  const nextGroupJids = normalizeGroupJids(groupJids);
+  if (!nextGroupJids.length) throw new Error("At least one Convert Report group JID is required.");
+  return writeConfig(normalizeConfig({ ...(await readConfig()), convertDefaultGroupJid: nextGroupJids[0], convertDefaultGroupJids: nextGroupJids }));
+}
+
+async function sendReportToGroups({ imageDataUrl, caption, groupJids, missingGroupMessage }) {
   if (!socket || connectionState !== "connected") {
     throw new Error("WhatsApp is not connected. Scan QR from Settings.");
   }
 
-  const config = await readConfig();
-  const defaultGroupJids = normalizeGroupJids(config.defaultGroupJids?.length ? config.defaultGroupJids : config.defaultGroupJid);
-  if (!defaultGroupJids.length) {
-    throw new Error("Default WhatsApp groups are not selected. Select groups in Settings.");
+  const targetGroupJids = normalizeGroupJids(groupJids);
+  if (!targetGroupJids.length) {
+    throw new Error(missingGroupMessage || "Default WhatsApp groups are not selected. Select groups in Settings.");
   }
 
   if (!imageDataUrl?.startsWith("data:image/png;base64,")) {
@@ -207,7 +217,7 @@ export async function sendReportToDefaultGroup({ imageDataUrl, caption }) {
   }
 
   const imageBuffer = Buffer.from(imageDataUrl.split(",")[1], "base64");
-  for (const groupJid of defaultGroupJids) {
+  for (const groupJid of targetGroupJids) {
     await socket.sendMessage(groupJid, {
       image: imageBuffer,
       caption,
@@ -216,11 +226,33 @@ export async function sendReportToDefaultGroup({ imageDataUrl, caption }) {
 
   return {
     ok: true,
-    groupJid: defaultGroupJids[0],
-    groupJids: defaultGroupJids,
-    sentCount: defaultGroupJids.length,
+    groupJid: targetGroupJids[0],
+    groupJids: targetGroupJids,
+    sentCount: targetGroupJids.length,
     sentAt: new Date().toISOString(),
   };
+}
+
+export async function sendReportToDefaultGroup({ imageDataUrl, caption }) {
+  const config = await readConfig();
+  const defaultGroupJids = normalizeGroupJids(config.defaultGroupJids?.length ? config.defaultGroupJids : config.defaultGroupJid);
+  return sendReportToGroups({
+    imageDataUrl,
+    caption,
+    groupJids: defaultGroupJids,
+    missingGroupMessage: "Default WhatsApp groups are not selected. Select groups in Settings.",
+  });
+}
+
+export async function sendReportToConvertDefaultGroup({ imageDataUrl, caption }) {
+  const config = await readConfig();
+  const convertDefaultGroupJids = normalizeGroupJids(config.convertDefaultGroupJids?.length ? config.convertDefaultGroupJids : config.convertDefaultGroupJid);
+  return sendReportToGroups({
+    imageDataUrl,
+    caption,
+    groupJids: convertDefaultGroupJids,
+    missingGroupMessage: "Convert Report default WhatsApp groups are not selected. Select them in Settings.",
+  });
 }
 
 export async function sendReportToRecipient({ phoneNumber, imageDataUrl, caption }) {

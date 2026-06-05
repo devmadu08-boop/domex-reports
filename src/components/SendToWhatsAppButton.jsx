@@ -1,7 +1,7 @@
 import { MessageCircle } from "lucide-react";
 import { useState } from "react";
 import { getSettings } from "../services/reportStorage.js";
-import { sendReportToWhatsApp } from "../services/whatsappApi.js";
+import { sendConvertReportToWhatsApp, sendReportToWhatsApp } from "../services/whatsappApi.js";
 import { captureElementAsPngDataUrl } from "../utils/exportReports.js";
 
 export default function SendToWhatsAppButton({ reportRef, reportTitle, reportDate, reportType = "courier", disabled, compact = false }) {
@@ -14,7 +14,8 @@ export default function SendToWhatsAppButton({ reportRef, reportTitle, reportDat
 
     try {
       const imageDataUrl = await captureElementAsPngDataUrl(reportRef.current);
-      const result = await sendReportToWhatsApp({
+      const sendAction = reportType === "delivered" ? sendConvertReportToWhatsApp : sendReportToWhatsApp;
+      const result = await sendAction({
         imageDataUrl,
         caption: buildCaption(reportType, reportTitle, reportDate),
       });

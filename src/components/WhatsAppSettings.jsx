@@ -6,6 +6,7 @@ import {
   getWhatsAppStatus,
   logoutWhatsApp,
   reconnectWhatsApp,
+  saveConvertWhatsAppGroup,
   saveDefaultWhatsAppGroup,
 } from "../services/whatsappApi.js";
 
@@ -38,6 +39,7 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [groups, setGroups] = useState([]);
   const [selectedGroups, setSelectedGroups] = useState([]);
+  const [selectedConvertGroups, setSelectedConvertGroups] = useState([]);
   const [captionTemplates, setCaptionTemplates] = useState(settings.whatsappCaptionTemplates || {});
   const [customTemplates, setCustomTemplates] = useState(settings.whatsappCustomCaptionTemplates || {});
   const [loading, setLoading] = useState(false);
@@ -59,7 +61,9 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
       const nextStatus = await getWhatsAppStatus();
       setStatus(nextStatus);
       const savedGroups = nextStatus.defaultGroupJids?.length ? nextStatus.defaultGroupJids : [nextStatus.defaultGroupJid].filter(Boolean);
+      const savedConvertGroups = nextStatus.convertDefaultGroupJids?.length ? nextStatus.convertDefaultGroupJids : [nextStatus.convertDefaultGroupJid].filter(Boolean);
       setSelectedGroups((current) => (current.length ? current : savedGroups));
+      setSelectedConvertGroups((current) => (current.length ? current : savedConvertGroups));
 
       if (!nextStatus.connected) {
         const qr = await getWhatsAppQr();
@@ -99,12 +103,26 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
     }, "Default WhatsApp groups saved.");
   }
 
+  async function handleSaveConvertGroup() {
+    await runAction(async () => {
+      await saveConvertWhatsAppGroup(selectedConvertGroups);
+    }, "Convert Report default WhatsApp groups saved.");
+  }
+
   function toggleGroup(jid) {
     setSelectedGroups((current) => (current.includes(jid) ? current.filter((item) => item !== jid) : [...current, jid]));
   }
 
+  function toggleConvertGroup(jid) {
+    setSelectedConvertGroups((current) => (current.includes(jid) ? current.filter((item) => item !== jid) : [...current, jid]));
+  }
+
   function clearSelectedGroups() {
     setSelectedGroups([]);
+  }
+
+  function clearSelectedConvertGroups() {
+    setSelectedConvertGroups([]);
   }
 
   function updateTemplate(type, value) {
@@ -147,7 +165,10 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
   const savedMissingGroups = selectedGroups
     .filter((jid) => !groups.some((group) => group.jid === jid))
     .map((jid) => ({ jid, name: jid, participants: 0 }));
-  const groupOptions = [...groups, ...savedMissingGroups];
+  const savedMissingConvertGroups = selectedConvertGroups
+    .filter((jid) => !groups.some((group) => group.jid === jid) && !savedMissingGroups.some((group) => group.jid === jid))
+    .map((jid) => ({ jid, name: jid, participants: 0 }));
+  const groupOptions = [...groups, ...savedMissingGroups, ...savedMissingConvertGroups];
 
   return (
     <div className="glass-panel p-4 lg:col-span-2">
@@ -265,6 +286,22 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
           </div>
 
           <div className="whatsapp-settings-card">
+            <GroupSelector
+              title="Convert Report Default Groups"
+              helper="Every delivered convert report can be sent to these groups with the rider name in the caption."
+              groups={groupOptions}
+              selectedGroups={selectedConvertGroups}
+              loading={loading}
+              connected={connected}
+              onFetchGroups={handleFetchGroups}
+              onToggleGroup={toggleConvertGroup}
+              onClear={clearSelectedConvertGroups}
+              onSave={handleSaveConvertGroup}
+              saveLabel="Save Convert Groups"
+            />
+          </div>
+
+          <div className="whatsapp-settings-card">
             <div className="mb-3">
               <p className="text-sm font-black text-[#071537]">Report Message Templates</p>
               <p className="text-xs font-semibold text-blue-950/60">Use {"{date}"} and {"{title}"} in the WhatsApp caption.</p>
@@ -302,6 +339,86 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function GroupSelector({
+  title,
+  helper,
+  groups,
+  selectedGroups,
+  loading,
+  connected,
+  onFetchGroups,
+  onToggleGroup,
+  onClear,
+  onSave,
+  saveLabel,
+}) {
+  return (
+    <>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-black text-[#071537]">{title}</p>
+          <p className="text-xs font-semibold text-blue-950/60">{helper}</p>
+        </div>
+        <button type="button" disabled={loading || !connected} onClick={onFetchGroups} className="secondary-action disabled:opacity-50">
+          <Users className="h-5 w-5" />
+          Fetch Groups
+        </button>
+      </div>
+
+      <div className="grid gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/70 bg-white/70 px-4 py-3 shadow-inner">
+          <p className="text-sm font-black text-blue-950">
+            {selectedGroups.length ? `${selectedGroups.length} group${selectedGroups.length === 1 ? "" : "s"} selected` : "No groups selected"}
+          </p>
+          {selectedGroups.length > 0 && (
+            <button type="button" onClick={onClear} className="text-xs font-black text-red-600 hover:text-red-700">
+              Clear selection
+            </button>
+          )}
+        </div>
+
+        <div className="grid max-h-72 gap-2 overflow-y-auto rounded-2xl border border-emerald-100 bg-white/50 p-2">
+          {groups.length ? (
+            groups.map((group) => {
+              const checked = selectedGroups.includes(group.jid);
+              return (
+                <label
+                  key={`${title}-${group.jid}`}
+                  className={`flex cursor-pointer items-center gap-3 rounded-2xl border px-4 py-3 transition ${
+                    checked ? "border-emerald-300 bg-emerald-50 shadow-lg shadow-emerald-100" : "border-white/70 bg-white/75 hover:border-blue-200"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => onToggleGroup(group.jid)}
+                    className="h-5 w-5 rounded border-blue-200 text-emerald-600 focus:ring-emerald-400"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-black text-[#071537]">{group.name || group.jid}</span>
+                    <span className="block truncate text-xs font-semibold text-blue-950/55">
+                      {group.participants ? `${group.participants} participants` : group.jid}
+                    </span>
+                  </span>
+                </label>
+              );
+            })
+          ) : (
+            <div className="rounded-2xl border border-dashed border-blue-200 bg-white/70 px-4 py-5 text-center text-sm font-bold text-blue-950/60">
+              Fetch groups to select WhatsApp report destinations.
+            </div>
+          )}
+        </div>
+
+        <button type="button" disabled={loading || !selectedGroups.length} onClick={onSave} className="primary-action primary-action-green disabled:opacity-50">
+          <Save className="h-5 w-5" />
+          {saveLabel}
+        </button>
+      </div>
+    </>
   );
 }
 

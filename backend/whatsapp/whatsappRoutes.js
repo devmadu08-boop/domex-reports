@@ -5,7 +5,9 @@ import {
   getWhatsAppStatus,
   logoutWhatsApp,
   reconnectWhatsApp,
+  saveConvertDefaultGroupJids,
   saveDefaultGroupJids,
+  sendReportToConvertDefaultGroup,
   sendReportToDefaultGroup,
   sendReportToRecipient,
 } from "./whatsappService.js";
@@ -66,9 +68,26 @@ router.post("/default-group", async (request, response) => {
   }
 });
 
+router.post("/convert-default-group", async (request, response) => {
+  try {
+    const config = await saveConvertDefaultGroupJids(request.body.groupJids || request.body.groupJid);
+    response.json(config);
+  } catch (error) {
+    sendError(response, error);
+  }
+});
+
 router.post("/send-report", async (request, response) => {
   try {
     response.json(await sendReportToDefaultGroup(request.body));
+  } catch (error) {
+    sendError(response, error);
+  }
+});
+
+router.post("/send-convert-report", async (request, response) => {
+  try {
+    response.json(await sendReportToConvertDefaultGroup(request.body));
   } catch (error) {
     sendError(response, error);
   }

@@ -69,8 +69,24 @@ export function saveDefaultWhatsAppGroup(groupJids) {
   });
 }
 
+export function saveConvertWhatsAppGroup(groupJids) {
+  return requestJson("/convert-default-group", {
+    method: "POST",
+    body: JSON.stringify({
+      groupJids: Array.isArray(groupJids) ? groupJids : [groupJids].filter(Boolean),
+    }),
+  });
+}
+
 export function sendReportToWhatsApp({ imageDataUrl, caption }) {
   return requestJson("/send-report", {
+    method: "POST",
+    body: JSON.stringify({ imageDataUrl, caption }),
+  });
+}
+
+export function sendConvertReportToWhatsApp({ imageDataUrl, caption }) {
+  return requestJson("/send-convert-report", {
     method: "POST",
     body: JSON.stringify({ imageDataUrl, caption }),
   });

@@ -3,7 +3,7 @@ import { FileDown, Image, Plus, RotateCcw, Trash2, Upload } from "lucide-react";
 import { todayIso } from "../utils/date.js";
 import { captureElementAsPngDataUrl, exportElementAsPng, exportElementsAsPortraitPdf } from "../utils/exportReports.js";
 import { deleteDeliveredReport, getDeliveredReport, getDeliveredRiderNames, getSettings, saveDeliveredReport as saveDeliveredReportByRider, saveSettings } from "../services/reportStorage.js";
-import { sendReportToWhatsAppRecipient } from "../services/whatsappApi.js";
+import { sendConvertReportToWhatsApp, sendReportToWhatsAppRecipient } from "../services/whatsappApi.js";
 import SendToWhatsAppButton from "./SendToWhatsAppButton.jsx";
 
 const emptyEntry = {
@@ -195,10 +195,15 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           throw new Error("This rider has no saved WhatsApp number. Add it in Settings first.");
         }
         const imageDataUrl = await captureElementAsPngDataUrl(reportRef.current);
+        const riderCaption = `Delivered Collection Report - ${reportDate}\nRider: ${riderName || "-"}\nSent automatically from Daily Report System`;
         await sendReportToWhatsAppRecipient({
           phoneNumber: exportPrompt.riderPhone,
           imageDataUrl,
-          caption: `Delivered Collection Report - ${reportDate}\nRider: ${riderName || "-"}\nSent automatically from Daily Report System`,
+          caption: riderCaption,
+        });
+        await sendConvertReportToWhatsApp({
+          imageDataUrl,
+          caption: `${riderCaption}\n\nDefault group copy for rider: ${riderName || "-"}`,
         });
       }
 
@@ -207,7 +212,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
         saveSettings({ deliveredExportAutoWhatsApp: nextAutoWhatsApp });
       }
 
-      setExportStatus(sendToRiderWhatsApp ? "Export complete and sent to rider WhatsApp." : "Export complete.");
+      setExportStatus(sendToRiderWhatsApp ? "Export complete and sent to rider WhatsApp + Convert default group." : "Export complete.");
       window.setTimeout(() => setExportPrompt(null), 900);
     } catch (error) {
       setExportStatus(error.message || "Export failed.");
@@ -387,7 +392,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
             tone="red"
             highlight={hasMultiplePdfPages}
           />
-          <SendToWhatsAppButton reportRef={reportRef} reportTitle="Delivered Collection Report" reportType="delivered" reportDate={reportDate} disabled={entries.length === 0} />
+          <SendToWhatsAppButton reportRef={reportRef} reportTitle={`Delivered Collection Report - ${riderName || "-"}`} reportType="delivered" reportDate={reportDate} disabled={entries.length === 0} />
           <div className="rounded-2xl border border-white/70 bg-white/55 px-4 py-3 text-right sm:col-span-2 lg:col-span-1">
             <p className="text-xs font-black uppercase text-blue-950/60">Total Value</p>
             <p className="text-2xl font-black text-[#071537]">{formatMoney(totalValue)}</p>
