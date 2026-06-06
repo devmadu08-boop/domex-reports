@@ -22,6 +22,9 @@ async function requestJson(path, options = {}) {
       if (path === "/send-report-to-recipient") {
         throw new Error("Rider WhatsApp send API was not found. Update/pull the WhatsApp backend on the VPS and restart it.");
       }
+      if (path === "/convert-default-group" || path === "/send-convert-report") {
+        throw new Error("Convert Report WhatsApp group API was not found. Pull the latest GitHub code on the VPS and restart the backend.");
+      }
       throw new Error("WhatsApp API was not found. On Vercel, deploy the WhatsApp backend separately and set VITE_WHATSAPP_API_BASE_URL.");
     }
     if (response.status === 502) {

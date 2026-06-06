@@ -387,6 +387,7 @@ export function getSettings() {
     cloudLastSyncedAt: "",
     deliveredRiderWhatsAppNumbers: {},
     deliveredExportAutoWhatsApp: false,
+    convertDefaultGroupJids: [],
     ...savedSettings,
     whatsappCaptionTemplates: {
       ...DEFAULT_WHATSAPP_CAPTION_TEMPLATES,

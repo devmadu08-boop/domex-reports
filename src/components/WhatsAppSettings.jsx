@@ -39,7 +39,7 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [groups, setGroups] = useState([]);
   const [selectedGroups, setSelectedGroups] = useState([]);
-  const [selectedConvertGroups, setSelectedConvertGroups] = useState([]);
+  const [selectedConvertGroups, setSelectedConvertGroups] = useState(settings.convertDefaultGroupJids || []);
   const [captionTemplates, setCaptionTemplates] = useState(settings.whatsappCaptionTemplates || {});
   const [customTemplates, setCustomTemplates] = useState(settings.whatsappCustomCaptionTemplates || {});
   const [loading, setLoading] = useState(false);
@@ -54,7 +54,8 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
   useEffect(() => {
     setCaptionTemplates(settings.whatsappCaptionTemplates || {});
     setCustomTemplates(settings.whatsappCustomCaptionTemplates || {});
-  }, [settings.whatsappCaptionTemplates, settings.whatsappCustomCaptionTemplates]);
+    setSelectedConvertGroups((current) => (current.length ? current : settings.convertDefaultGroupJids || []));
+  }, [settings.whatsappCaptionTemplates, settings.whatsappCustomCaptionTemplates, settings.convertDefaultGroupJids]);
 
   async function refreshStatus() {
     try {
@@ -63,7 +64,7 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
       const savedGroups = nextStatus.defaultGroupJids?.length ? nextStatus.defaultGroupJids : [nextStatus.defaultGroupJid].filter(Boolean);
       const savedConvertGroups = nextStatus.convertDefaultGroupJids?.length ? nextStatus.convertDefaultGroupJids : [nextStatus.convertDefaultGroupJid].filter(Boolean);
       setSelectedGroups((current) => (current.length ? current : savedGroups));
-      setSelectedConvertGroups((current) => (current.length ? current : savedConvertGroups));
+      setSelectedConvertGroups((current) => (current.length ? current : savedConvertGroups.length ? savedConvertGroups : settings.convertDefaultGroupJids || []));
 
       if (!nextStatus.connected) {
         const qr = await getWhatsAppQr();
@@ -104,9 +105,25 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
   }
 
   async function handleSaveConvertGroup() {
-    await runAction(async () => {
+    setLoading(true);
+    setMessage("");
+    try {
       await saveConvertWhatsAppGroup(selectedConvertGroups);
-    }, "Convert Report default WhatsApp groups saved.");
+      await onSaveSettings({
+        ...settings,
+        convertDefaultGroupJids: selectedConvertGroups,
+      });
+      setMessage("Convert Report default WhatsApp groups saved.");
+      await refreshStatus();
+    } catch (error) {
+      await onSaveSettings({
+        ...settings,
+        convertDefaultGroupJids: selectedConvertGroups,
+      });
+      setMessage(`${error.message} Convert group selection was saved in app settings, but update/restart the VPS WhatsApp backend to send to that group.`);
+    } finally {
+      setLoading(false);
+    }
   }
 
   function toggleGroup(jid) {
