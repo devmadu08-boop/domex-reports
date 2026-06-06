@@ -103,6 +103,11 @@ export default function SettingsPage({
           <Field label="Company Header" value={draftSettings.companyName || ""} onChange={(value) => updateSetting("companyName", value)} />
           <Field label="Branch Name" value={draftSettings.branchName || ""} onChange={(value) => updateSetting("branchName", value)} placeholder="Example: Middeniya" />
           <Field label="Stable Operation Target" type="number" value={draftSettings.operationTarget || ""} onChange={(value) => updateSetting("operationTarget", value)} />
+          <Field label="Backup WhatsApp Number" value={draftSettings.backupWhatsappNumber || ""} onChange={(value) => updateSetting("backupWhatsappNumber", value)} placeholder="947XXXXXXXX" />
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 p-3 text-sm font-bold text-blue-950/75">
+          Backup JSON file will be sent automatically every day at 08:00 to this WhatsApp number when the backend is running.
         </div>
 
         <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-2xl border border-white/70 bg-white/55 p-3">

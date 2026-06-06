@@ -21,11 +21,16 @@ export default function AllInOneReports({ companyName = "Domestic Express (pvt) 
   const [period, setPeriod] = useState("month");
   const [selectedDate, setSelectedDate] = useState(todayIso());
   const [selectedMonth, setSelectedMonth] = useState(todayIso().slice(0, 7));
+  const [customStartDate, setCustomStartDate] = useState(todayIso());
+  const [customEndDate, setCustomEndDate] = useState(todayIso());
   const [sectionFilter, setSectionFilter] = useState("all");
   const [status, setStatus] = useState("");
   const pageRefs = useRef([]);
 
-  const range = useMemo(() => getDateRange(period, period === "month" ? selectedMonth : selectedDate), [period, selectedDate, selectedMonth]);
+  const range = useMemo(
+    () => getDateRange(period, period === "month" ? selectedMonth : selectedDate, customStartDate, customEndDate),
+    [period, selectedDate, selectedMonth, customStartDate, customEndDate],
+  );
   const reports = useMemo(() => getAllReports().filter((report) => report.date >= range.start && report.date <= range.end), [range.end, range.start]);
   const sections = useMemo(() => buildReportSections(reports, sectionFilter), [reports, sectionFilter]);
   const pages = useMemo(() => buildPages(sections), [sections]);
@@ -98,16 +103,25 @@ export default function AllInOneReports({ companyName = "Domestic Express (pvt) 
               <option value="day">Day to Day</option>
               <option value="week">Weekly</option>
               <option value="month">Monthly</option>
+              <option value="custom">Custom Date Range</option>
             </select>
           </FieldShell>
 
-          <FieldShell label={period === "month" ? "Report Month" : "Report Date"} icon={CalendarDays}>
-            {period === "month" ? (
+          <FieldShell label={period === "month" ? "Report Month" : period === "custom" ? "Start Date" : "Report Date"} icon={CalendarDays}>
+            {period === "custom" ? (
+              <input className="report-filter-input" type="date" value={customStartDate} onChange={(event) => setCustomStartDate(event.target.value)} />
+            ) : period === "month" ? (
               <input className="report-filter-input" type="month" value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)} />
             ) : (
               <input className="report-filter-input" type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} />
             )}
           </FieldShell>
+
+          {period === "custom" && (
+            <FieldShell label="End Date" icon={CalendarDays}>
+              <input className="report-filter-input" type="date" value={customEndDate} onChange={(event) => setCustomEndDate(event.target.value)} />
+            </FieldShell>
+          )}
 
           <FieldShell label="Section" icon={Search}>
             <select className="report-filter-input" value={sectionFilter} onChange={(event) => setSectionFilter(event.target.value)}>
@@ -385,7 +399,13 @@ function cell(value) {
   return `<td>${escapeHtml(value)}</td>`;
 }
 
-function getDateRange(period, value) {
+function getDateRange(period, value, customStartDate, customEndDate) {
+  if (period === "custom") {
+    const start = customStartDate <= customEndDate ? customStartDate : customEndDate;
+    const end = customStartDate <= customEndDate ? customEndDate : customStartDate;
+    return { start, end, label: `${displayDate(start)} - ${displayDate(end)}`, fileLabel: `${start}_to_${end}` };
+  }
+
   if (period === "month") {
     const [year, month] = String(value || todayIso().slice(0, 7)).split("-").map(Number);
     const start = makeIsoDate(year, month, 1);

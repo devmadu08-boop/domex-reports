@@ -1,7 +1,7 @@
 import cors from "cors";
 import express from "express";
 import whatsappRoutes from "./whatsapp/whatsappRoutes.js";
-import { startWhatsAppClient } from "./whatsapp/whatsappService.js";
+import { startDailyBackupScheduler, startWhatsAppClient } from "./whatsapp/whatsappService.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -36,3 +36,4 @@ app.listen(port, () => {
 startWhatsAppClient().catch((error) => {
   console.error("[whatsapp-startup]", error);
 });
+startDailyBackupScheduler();

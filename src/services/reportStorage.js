@@ -388,6 +388,7 @@ export function getSettings() {
     deliveredRiderWhatsAppNumbers: {},
     deliveredExportAutoWhatsApp: false,
     convertDefaultGroupJids: [],
+    backupWhatsappNumber: "",
     ...savedSettings,
     whatsappCaptionTemplates: {
       ...DEFAULT_WHATSAPP_CAPTION_TEMPLATES,

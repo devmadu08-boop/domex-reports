@@ -64,9 +64,10 @@ import {
   deleteUserAccount,
   setActiveBranch,
   shouldRunWeeklyBackup,
+  createBackupData,
 } from "./services/reportStorage.js";
 import { downloadSnapshotFromFirestore, downloadUsersFromFirestore, saveWeeklyBackupToFirestore, subscribeToFirestoreSnapshot, uploadLocalSnapshotToFirestore, uploadUsersToFirestore } from "./services/cloudSync.js";
-import { getBackendHealth } from "./services/whatsappApi.js";
+import { getBackendHealth, saveWhatsAppBackupConfig, syncWhatsAppBackupSnapshot } from "./services/whatsappApi.js";
 import { todayIso, displayDate } from "./utils/date.js";
 import { exportBothAsPdf, exportElementAsPdf, exportElementAsPng } from "./utils/exportReports.js";
 
@@ -169,6 +170,7 @@ export default function App() {
   const lastCloudUpdateRef = useRef("");
   const bootstrappedCloudRef = useRef(false);
   const unsavedDraftUpdatedAtRef = useRef("");
+  const backupSyncTimerRef = useRef(null);
   const syncClientIdRef = useRef(getSyncClientId());
 
   const visibleTabs = useMemo(() => tabs.filter((tab) => !tab.adminOnly || session?.role === "admin"), [session?.role]);
@@ -218,6 +220,24 @@ export default function App() {
 
     return () => window.clearTimeout(timer);
   }, [pendingHistoryDownload, selectedDate, activeTab, courierRows, operation]);
+
+  useEffect(() => {
+    if (!session?.branchName) return undefined;
+
+    function scheduleBackupSync() {
+      window.clearTimeout(backupSyncTimerRef.current);
+      backupSyncTimerRef.current = window.setTimeout(() => {
+        syncBackupSnapshotToBackend();
+      }, 1200);
+    }
+
+    scheduleBackupSync();
+    const unsubscribe = addDataChangeListener(scheduleBackupSync);
+    return () => {
+      window.clearTimeout(backupSyncTimerRef.current);
+      unsubscribe();
+    };
+  }, [session?.branchName, settings.backupWhatsappNumber]);
 
   useEffect(() => {
     if (!session?.branchName) return undefined;
@@ -522,6 +542,33 @@ export default function App() {
       setCloudStatus(`Settings synced to Firestore: ${new Date(snapshot.cloudUpdatedAt).toLocaleTimeString()}`);
     } catch (error) {
       setCloudStatus(error.message || "Settings Firestore sync failed.");
+    }
+
+    syncBackupConfigToBackend(savedSettings);
+  }
+
+  async function syncBackupConfigToBackend(savedSettings = getSettings()) {
+    if (!savedSettings.backupWhatsappNumber) return;
+    try {
+      await saveWhatsAppBackupConfig({
+        phoneNumber: savedSettings.backupWhatsappNumber,
+        snapshot: createBackupData(),
+      });
+    } catch {
+      // WhatsApp backend may be offline on local/Vercel. The app still keeps the setting in Firebase/local storage.
+    }
+  }
+
+  async function syncBackupSnapshotToBackend() {
+    const savedSettings = getSettings();
+    if (!savedSettings.backupWhatsappNumber) return;
+    try {
+      await syncWhatsAppBackupSnapshot({
+        phoneNumber: savedSettings.backupWhatsappNumber,
+        snapshot: createBackupData(),
+      });
+    } catch {
+      // Background sync must stay quiet to avoid interrupting report entry.
     }
   }
 

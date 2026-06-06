@@ -6,7 +6,10 @@ import {
   logoutWhatsApp,
   reconnectWhatsApp,
   saveConvertDefaultGroupJids,
+  saveBackupConfig,
   saveDefaultGroupJids,
+  saveLatestBackupSnapshot,
+  sendBackupToWhatsApp,
   sendReportToConvertDefaultGroup,
   sendReportToDefaultGroup,
   sendReportToRecipient,
@@ -96,6 +99,30 @@ router.post("/send-convert-report", async (request, response) => {
 router.post("/send-report-to-recipient", async (request, response) => {
   try {
     response.json(await sendReportToRecipient(request.body));
+  } catch (error) {
+    sendError(response, error);
+  }
+});
+
+router.post("/backup-config", async (request, response) => {
+  try {
+    response.json(await saveBackupConfig(request.body));
+  } catch (error) {
+    sendError(response, error);
+  }
+});
+
+router.post("/backup-snapshot", async (request, response) => {
+  try {
+    response.json(await saveLatestBackupSnapshot(request.body));
+  } catch (error) {
+    sendError(response, error);
+  }
+});
+
+router.post("/send-backup-now", async (_request, response) => {
+  try {
+    response.json(await sendBackupToWhatsApp({ force: true }));
   } catch (error) {
     sendError(response, error);
   }

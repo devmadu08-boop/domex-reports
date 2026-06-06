@@ -25,6 +25,9 @@ async function requestJson(path, options = {}) {
       if (path === "/convert-default-group" || path === "/send-convert-report") {
         throw new Error("Convert Report WhatsApp group API was not found. Pull the latest GitHub code on the VPS and restart the backend.");
       }
+      if (path.startsWith("/backup") || path === "/send-backup-now") {
+        throw new Error("WhatsApp backup API was not found. Pull the latest GitHub code on the VPS and restart the backend.");
+      }
       throw new Error("WhatsApp API was not found. On Vercel, deploy the WhatsApp backend separately and set VITE_WHATSAPP_API_BASE_URL.");
     }
     if (response.status === 502) {
@@ -100,4 +103,22 @@ export function sendReportToWhatsAppRecipient({ phoneNumber, imageDataUrl, capti
     method: "POST",
     body: JSON.stringify({ phoneNumber, imageDataUrl, caption }),
   });
+}
+
+export function saveWhatsAppBackupConfig({ phoneNumber, snapshot }) {
+  return requestJson("/backup-config", {
+    method: "POST",
+    body: JSON.stringify({ phoneNumber, snapshot }),
+  });
+}
+
+export function syncWhatsAppBackupSnapshot({ phoneNumber, snapshot }) {
+  return requestJson("/backup-snapshot", {
+    method: "POST",
+    body: JSON.stringify({ phoneNumber, snapshot }),
+  });
+}
+
+export function sendWhatsAppBackupNow() {
+  return requestJson("/send-backup-now", { method: "POST" });
 }

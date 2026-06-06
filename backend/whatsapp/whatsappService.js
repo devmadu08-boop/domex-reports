@@ -18,6 +18,7 @@ let currentQrDataUrl = "";
 let connectionState = "disconnected";
 let connectedNumber = "";
 let reconnecting = false;
+let backupSchedulerStarted = false;
 
 async function ensureDataDir() {
   await fs.mkdir(dataDir, { recursive: true });
@@ -37,6 +38,41 @@ async function writeConfig(config) {
   await ensureDataDir();
   await fs.writeFile(configPath, JSON.stringify(config, null, 2));
   return config;
+}
+
+function buildBackupFileName(date = new Date()) {
+  const stamp = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Colombo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  })
+    .formatToParts(date)
+    .reduce((acc, part) => ({ ...acc, [part.type]: part.value }), {});
+  return `Daily_Courier_Backup_${stamp.year}-${stamp.month}-${stamp.day}_${stamp.hour}-${stamp.minute}-${stamp.second}.json`;
+}
+
+function getColomboClock() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Colombo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
+    .formatToParts(new Date())
+    .reduce((acc, part) => ({ ...acc, [part.type]: part.value }), {});
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    hour: Number(parts.hour),
+    minute: Number(parts.minute),
+  };
 }
 
 function normalizePhone(jid) {
@@ -67,6 +103,9 @@ function normalizeConfig(config = {}) {
     defaultGroupJids,
     convertDefaultGroupJid: convertDefaultGroupJids[0] || "",
     convertDefaultGroupJids,
+    backupWhatsappNumber: String(config.backupWhatsappNumber || ""),
+    latestBackupSnapshot: config.latestBackupSnapshot || null,
+    lastDailyBackupDate: config.lastDailyBackupDate || "",
   };
 }
 
@@ -133,6 +172,9 @@ export async function getWhatsAppStatus() {
     defaultGroupJids: config.defaultGroupJids || [],
     convertDefaultGroupJid: config.convertDefaultGroupJid || "",
     convertDefaultGroupJids: config.convertDefaultGroupJids || [],
+    backupWhatsappNumber: config.backupWhatsappNumber || "",
+    hasBackupSnapshot: Boolean(config.latestBackupSnapshot),
+    lastDailyBackupDate: config.lastDailyBackupDate || "",
   };
 }
 
@@ -281,4 +323,87 @@ export async function sendReportToRecipient({ phoneNumber, imageDataUrl, caption
     sentCount: 1,
     sentAt: new Date().toISOString(),
   };
+}
+
+export async function saveBackupConfig({ phoneNumber, snapshot }) {
+  const config = await readConfig();
+  const nextConfig = normalizeConfig({
+    ...config,
+    backupWhatsappNumber: String(phoneNumber || config.backupWhatsappNumber || "").trim(),
+    latestBackupSnapshot: snapshot || config.latestBackupSnapshot || null,
+  });
+  await writeConfig(nextConfig);
+  return {
+    ok: true,
+    backupWhatsappNumber: nextConfig.backupWhatsappNumber,
+    hasBackupSnapshot: Boolean(nextConfig.latestBackupSnapshot),
+    lastDailyBackupDate: nextConfig.lastDailyBackupDate || "",
+  };
+}
+
+export async function saveLatestBackupSnapshot({ snapshot, phoneNumber }) {
+  const config = await readConfig();
+  const nextConfig = normalizeConfig({
+    ...config,
+    backupWhatsappNumber: String(phoneNumber || config.backupWhatsappNumber || "").trim(),
+    latestBackupSnapshot: snapshot || config.latestBackupSnapshot || null,
+  });
+  await writeConfig(nextConfig);
+  return {
+    ok: true,
+    backupWhatsappNumber: nextConfig.backupWhatsappNumber,
+    hasBackupSnapshot: Boolean(nextConfig.latestBackupSnapshot),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export async function sendBackupToWhatsApp({ force = false } = {}) {
+  if (!socket || connectionState !== "connected") {
+    throw new Error("WhatsApp is not connected. Scan QR from Settings.");
+  }
+
+  const config = await readConfig();
+  const recipientJid = normalizeRecipientJid(config.backupWhatsappNumber);
+  if (!recipientJid) {
+    throw new Error("Backup WhatsApp number is required.");
+  }
+  if (!config.latestBackupSnapshot) {
+    throw new Error("No backup snapshot is available yet. Open the app once after saving reports.");
+  }
+
+  const clock = getColomboClock();
+  if (!force && config.lastDailyBackupDate === clock.date) {
+    return { ok: true, skipped: true, reason: "Daily backup already sent.", sentDate: clock.date };
+  }
+
+  const snapshot = {
+    ...config.latestBackupSnapshot,
+    whatsappBackupSentAt: new Date().toISOString(),
+    whatsappBackupDate: clock.date,
+  };
+  const backupText = JSON.stringify(snapshot, null, 2);
+  const fileName = buildBackupFileName();
+
+  await socket.sendMessage(recipientJid, {
+    document: Buffer.from(backupText, "utf8"),
+    mimetype: "application/json",
+    fileName,
+    caption: `Daily Courier Report System backup\nDate: ${clock.date}\nTime: 08:00\nReports: Courier Performance, Operation, Delivered Collection`,
+  });
+
+  await writeConfig(normalizeConfig({ ...config, lastDailyBackupDate: clock.date }));
+  return { ok: true, sentAt: new Date().toISOString(), fileName, recipientJid };
+}
+
+export function startDailyBackupScheduler() {
+  if (backupSchedulerStarted) return;
+  backupSchedulerStarted = true;
+
+  setInterval(() => {
+    const clock = getColomboClock();
+    if (clock.hour !== 8 || clock.minute !== 0) return;
+    sendBackupToWhatsApp({ force: false }).catch((error) => {
+      console.error("[whatsapp-backup-scheduler]", error.message || error);
+    });
+  }, 60 * 1000);
 }
