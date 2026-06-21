@@ -19,6 +19,7 @@
     "jspdf": "latest",
     "lucide-react": "latest",
     "pino": "^10.3.1",
+    "playwright-core": "^1.61.0",
     "qrcode": "^1.5.4",
     "react": "latest",
     "react-dom": "latest",

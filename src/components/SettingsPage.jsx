@@ -1,6 +1,7 @@
-import { Cloud, CloudDownload, CloudUpload, Download, RotateCcw, Save, Settings, Trash2, Upload, UserPlus } from "lucide-react";
+import { Bot, Cloud, CloudDownload, CloudUpload, Download, RotateCcw, Save, Settings, Trash2, Upload, UserPlus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { downloadBackupFile, getAllDeliveredRiderNames, restoreBackupFile } from "../services/reportStorage.js";
+import { getDomexAutomationStatus, saveDomexAutomationConfig } from "../services/domexAutomationApi.js";
 import WhatsAppSettings from "./WhatsAppSettings.jsx";
 
 export default function SettingsPage({
@@ -19,11 +20,22 @@ export default function SettingsPage({
   const [newRiderName, setNewRiderName] = useState("");
   const [newRiderPhone, setNewRiderPhone] = useState("");
   const [restoreStatus, setRestoreStatus] = useState("");
+  const [domexConfig, setDomexConfig] = useState({ username: "", password: "", branchName: "Middeniya" });
+  const [domexStatus, setDomexStatus] = useState("");
   const fileInputRef = useRef(null);
 
   useEffect(() => {
     setDraftSettings(settings);
   }, [settings]);
+
+  useEffect(() => {
+    getDomexAutomationStatus()
+      .then((status) => {
+        setDomexConfig({ username: status.username || "", password: "", branchName: status.branchName || "Middeniya" });
+        setDomexStatus(status.configured ? "DOMEX automation login is configured." : "Enter the DOMEX login details.");
+      })
+      .catch((error) => setDomexStatus(error.message));
+  }, []);
 
   function updateSetting(field, value) {
     setDraftSettings((current) => ({ ...current, [field]: value }));
@@ -31,6 +43,17 @@ export default function SettingsPage({
 
   function handleSaveSettings() {
     onSaveSettings(draftSettings);
+  }
+
+  async function handleSaveDomexConfig() {
+    setDomexStatus("Saving DOMEX automation settings...");
+    try {
+      const status = await saveDomexAutomationConfig(domexConfig);
+      setDomexConfig((current) => ({ ...current, password: "" }));
+      setDomexStatus(status.configured ? "DOMEX automation settings saved on the VPS." : "DOMEX automation is not configured.");
+    } catch (error) {
+      setDomexStatus(error.message || "Could not save DOMEX automation settings.");
+    }
   }
 
   function handleSaveCourierName() {
@@ -143,6 +166,30 @@ export default function SettingsPage({
 
       <div className="grid gap-5 lg:grid-cols-2">
         <WhatsAppSettings settings={settings} onSaveSettings={onSaveSettings} />
+
+        <div className="glass-panel p-4 lg:col-span-2">
+          <div className="mb-4 flex items-center gap-3">
+            <span className="grid h-11 w-11 place-items-center rounded-2xl bg-blue-100 text-blue-700 shadow-inner">
+              <Bot className="h-6 w-6" />
+            </span>
+            <div>
+              <h3 className="text-lg font-black text-[#071537]">DOMEX Delivered Report Automation</h3>
+              <p className="text-sm font-semibold text-blue-950/65">Credentials are stored only on the VPS backend and are used to download Rider Wise CSV reports.</p>
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <Field label="DOMEX Username" value={domexConfig.username} onChange={(value) => setDomexConfig((current) => ({ ...current, username: value }))} />
+            <Field label="DOMEX Password" type="password" value={domexConfig.password} onChange={(value) => setDomexConfig((current) => ({ ...current, password: value }))} placeholder="Leave blank to keep saved password" />
+            <Field label="DOMEX Branch Name" value={domexConfig.branchName} onChange={(value) => setDomexConfig((current) => ({ ...current, branchName: value }))} placeholder="Middeniya" />
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button type="button" onClick={handleSaveDomexConfig} className="primary-action primary-action-blue">
+              <Save className="h-5 w-5" />
+              Save DOMEX Login
+            </button>
+            {domexStatus && <p className="rounded-2xl bg-white/60 px-4 py-3 text-sm font-black text-blue-950">{domexStatus}</p>}
+          </div>
+        </div>
 
         <div className="glass-panel p-4">
           <h3 className="mb-3 text-lg font-black text-[#071537]">Saved Courier Names</h3>

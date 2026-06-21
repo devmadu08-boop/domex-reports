@@ -51,6 +51,32 @@ Then open Settings in the app:
 
 WhatsApp auth/session files are stored in `backend/data/` and are ignored by Git.
 
+## DOMEX Delivered Report Automation
+
+The Convert Report page can download the Rider Wise Delivered CSV directly from the DOMEX staff portal through the VPS backend.
+
+Requirements:
+
+- Google Chrome or Microsoft Edge installed on the VPS
+- Latest project code and dependencies (`git pull` and `npm install`)
+- The Node backend and Cloudflare tunnel kept running
+
+Setup:
+
+1. Open the app Settings page.
+2. Find `DOMEX Delivered Report Automation`.
+3. Enter the DOMEX username, password, and branch name, then save.
+4. Open Convert Report, select the rider and date, then click `Fetch from DOMEX`.
+
+Credentials are stored only in `backend/data/domex-automation-config.json` on the VPS. The entire `backend/data/` directory is ignored by Git. Environment variables can be used instead:
+
+```text
+DOMEX_USERNAME=your-username
+DOMEX_PASSWORD=your-password
+DOMEX_BRANCH_NAME=Middeniya
+DOMEX_BROWSER_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
+```
+
 ### Vercel Deployment Note
 
 The Vite frontend can be deployed on Vercel, but the Baileys WhatsApp backend needs an always-running Node.js server because it keeps a WhatsApp socket/session alive. Vercel static/serverless deployment will return `404` for `/api/whatsapp/status` unless a backend is hosted separately.

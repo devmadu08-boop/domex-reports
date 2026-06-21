@@ -1,5 +1,6 @@
 import cors from "cors";
 import express from "express";
+import domexAutomationRoutes from "./domex/domexAutomationRoutes.js";
 import whatsappRoutes from "./whatsapp/whatsappRoutes.js";
 import { startDailyBackupScheduler, startWhatsAppClient } from "./whatsapp/whatsappService.js";
 
@@ -28,6 +29,7 @@ app.get("/api/health", (_request, response) => {
 });
 
 app.use("/api/whatsapp", whatsappRoutes);
+app.use("/api/domex", domexAutomationRoutes);
 
 app.listen(port, () => {
   console.log(`Daily Report backend running at http://127.0.0.1:${port}`);

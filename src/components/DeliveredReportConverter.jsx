@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileDown, Image, Plus, RotateCcw, Trash2, Upload } from "lucide-react";
+import { CloudDownload, FileDown, Image, Plus, RotateCcw, Trash2, Upload } from "lucide-react";
 import { todayIso } from "../utils/date.js";
 import { captureElementAsPngDataUrl, exportElementAsPng, exportElementsAsPortraitPdf } from "../utils/exportReports.js";
-import { deleteDeliveredReport, getDeliveredReport, getDeliveredRiderNames, getSettings, saveDeliveredReport as saveDeliveredReportByRider, saveSettings } from "../services/reportStorage.js";
+import { deleteDeliveredReport, getAllDeliveredRiderNames, getDeliveredReport, getDeliveredRiderNames, getSettings, saveDeliveredReport as saveDeliveredReportByRider, saveSettings } from "../services/reportStorage.js";
 import { sendConvertReportToWhatsApp, sendReportToWhatsAppRecipient } from "../services/whatsappApi.js";
+import { fetchDomexDeliveredCsv } from "../services/domexAutomationApi.js";
 import SendToWhatsAppButton from "./SendToWhatsAppButton.jsx";
 
 const emptyEntry = {
@@ -25,6 +26,8 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
   const [rememberSendChoice, setRememberSendChoice] = useState(false);
   const [exportStatus, setExportStatus] = useState("");
   const [exportingDelivered, setExportingDelivered] = useState(false);
+  const [domexLoading, setDomexLoading] = useState(false);
+  const [domexStatus, setDomexStatus] = useState("");
   const reportRef = useRef(null);
   const reportPageRefs = useRef([]);
 
@@ -33,7 +36,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
   }, [reportDate]);
 
   const riderOptions = useMemo(() => {
-    return [...new Set([...savedRiderNames, riderName].filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    return [...new Set([...getAllDeliveredRiderNames(), ...savedRiderNames, riderName].filter(Boolean))].sort((a, b) => a.localeCompare(b));
   }, [savedRiderNames, riderName]);
 
   const specialValue = entries.reduce((sum, entry) => (isSpecialTrackingNo(entry.trackingNo) ? sum + parseMoney(entry.value) : sum), 0);
@@ -57,6 +60,35 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
     setBranchName(parsed.branchName);
     if (parsed.reportDate) setReportDate(parsed.reportDate);
     event.target.value = "";
+  }
+
+  async function handleDomexFetch() {
+    if (!riderName) {
+      setDomexStatus("Select a saved rider before fetching the DOMEX report.");
+      return;
+    }
+
+    setDomexLoading(true);
+    setDomexStatus("Logging in to DOMEX and downloading the Rider Wise CSV...");
+    try {
+      const result = await fetchDomexDeliveredCsv({
+        riderName,
+        reportDate,
+        branchName: branchName || defaultBranchName || "Middeniya",
+      });
+      const parsed = parseDeliveredCsv(result.csvText || "");
+      if (!parsed.entries.length) throw new Error("The downloaded DOMEX CSV has no delivered rows for this rider/date.");
+      setEntries(parsed.entries);
+      setFileName(result.fileName || `DOMEX_Delivered_${reportDate}.csv`);
+      setBranchName(parsed.branchName || result.branchName || branchName || defaultBranchName);
+      setRiderName(parsed.riderName || riderName);
+      setIncludeSpecialTracking(false);
+      setDomexStatus(`DOMEX report loaded successfully: ${parsed.entries.length} tracking rows.`);
+    } catch (error) {
+      setDomexStatus(error.message || "Could not download the DOMEX delivered report.");
+    } finally {
+      setDomexLoading(false);
+    }
   }
 
   function updateEntry(index, field, value) {
@@ -256,6 +288,22 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           <RiderSelect riderName={riderName} riderOptions={riderOptions} onChange={handleRiderSelect} savedCount={savedRiderNames.length} />
           <Field label="Branch Name" value={branchName} onChange={setBranchName} placeholder="Optional" />
         </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
+          <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-950/75">
+            Select the rider and report date, then fetch the Rider Wise Delivered CSV directly from DOMEX.
+          </div>
+          <button
+            type="button"
+            onClick={handleDomexFetch}
+            disabled={domexLoading || !riderName}
+            className="primary-action primary-action-blue min-h-14 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <CloudDownload className="h-5 w-5" />
+            {domexLoading ? "Fetching DOMEX..." : "Fetch from DOMEX"}
+          </button>
+        </div>
+        {domexStatus && <p className="mt-3 rounded-2xl bg-white/65 px-4 py-3 text-sm font-black text-blue-950">{domexStatus}</p>}
 
         <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-2xl border border-white/70 bg-white/55 p-3">
           <input
