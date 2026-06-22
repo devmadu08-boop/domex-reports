@@ -53,6 +53,7 @@ export async function downloadRiderDeliveredCsv({ riderName, reportDate, branchN
   automationRunning = true;
 
   let browser;
+  let page;
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "domex-delivered-"));
   try {
     const config = await readConfig();
@@ -68,18 +69,20 @@ export async function downloadRiderDeliveredCsv({ riderName, reportDate, branchN
       args: ["--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage"],
     });
     const context = await browser.newContext({ acceptDownloads: true });
-    const page = await context.newPage();
-    page.setDefaultTimeout(30000);
+    page = await context.newPage();
+    page.setDefaultTimeout(45000);
 
     await page.goto(loginUrl, { waitUntil: "domcontentloaded" });
     await fillLogin(page, username, password);
-    await Promise.all([
-      page.waitForLoadState("networkidle").catch(() => undefined),
-      clickFirstVisible(page, ["button:has-text('Sign In')", "button[type='submit']", "input[type='submit']"]),
-    ]);
+    await clickFirstVisible(page, ["button:has-text('Sign In')", "button[type='submit']", "input[type='submit']"]);
+    await waitForSuccessfulLogin(page);
 
-    await page.goto(deliveredReportUrl, { waitUntil: "networkidle" });
-    await page.getByText("Rider Wise", { exact: true }).click();
+    await page.goto(deliveredReportUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForLoadState("networkidle").catch(() => undefined);
+    if (page.url().toLowerCase().includes("/authentication/login")) {
+      throw new Error("DOMEX redirected back to the login page. Check the saved username/password.");
+    }
+    await clickRiderWiseTab(page);
 
     await selectDropdownNearLabel(page, "Branch Name:", selectedBranch);
     await selectDropdownNearLabel(page, "Vehicle No:", "All");
@@ -113,7 +116,8 @@ export async function downloadRiderDeliveredCsv({ riderName, reportDate, branchN
       downloadedAt: new Date().toISOString(),
     };
   } catch (error) {
-    throw new Error(`DOMEX automation failed: ${error.message}`);
+    const diagnostics = await saveDebugArtifacts(page).catch(() => ({ url: "unknown", title: "unknown" }));
+    throw new Error(`DOMEX automation failed: ${error.message} [page=${diagnostics.url}; title=${diagnostics.title}]`);
   } finally {
     automationRunning = false;
     await browser?.close().catch(() => undefined);
@@ -147,6 +151,49 @@ async function fillLogin(page, username, password) {
   const passwordInput = page.locator("input[type='password']").first();
   await usernameInput.fill(username);
   await passwordInput.fill(password);
+}
+
+async function waitForSuccessfulLogin(page) {
+  try {
+    await page.waitForURL(
+      (url) => !url.pathname.toLowerCase().includes("/authentication/login"),
+      { timeout: 45000, waitUntil: "domcontentloaded" },
+    );
+  } catch {
+    const loginMessage = await page
+      .locator("[role='alert'], .alert, .toast, .validation-message, .text-danger")
+      .allTextContents()
+      .then((items) => items.map((item) => item.trim()).filter(Boolean).join(" "))
+      .catch(() => "");
+    throw new Error(loginMessage ? `DOMEX login failed: ${loginMessage}` : "DOMEX login did not complete. Check the saved credentials or portal availability.");
+  }
+}
+
+async function clickRiderWiseTab(page) {
+  const candidates = [
+    page.getByRole("tab", { name: "Rider Wise", exact: false }),
+    page.getByText("Rider Wise", { exact: false }),
+    page.locator("a, button, [role='tab']").filter({ hasText: "Rider Wise" }),
+  ];
+  for (const candidate of candidates) {
+    const count = await candidate.count();
+    for (let index = 0; index < count; index += 1) {
+      const item = candidate.nth(index);
+      if (await item.isVisible().catch(() => false)) {
+        await item.click();
+        return;
+      }
+    }
+  }
+  throw new Error("Rider Wise tab was not found on the Delivered Reports page.");
+}
+
+async function saveDebugArtifacts(page) {
+  if (!page) return { url: "unknown", title: "unknown" };
+  await fs.mkdir(dataDir, { recursive: true });
+  await page.screenshot({ path: path.join(dataDir, "domex-automation-debug.png"), fullPage: true }).catch(() => undefined);
+  await fs.writeFile(path.join(dataDir, "domex-automation-debug.html"), await page.content(), "utf8").catch(() => undefined);
+  return { url: page.url(), title: await page.title().catch(() => "unknown") };
 }
 
 async function clickFirstVisible(page, selectors) {
