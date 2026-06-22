@@ -29,8 +29,26 @@ export function saveDomexAutomationConfig(config) {
 }
 
 export function fetchDomexDeliveredCsv({ riderName, reportDate, branchName }) {
-  return requestDomex("/delivered-csv", {
+  return startAndWaitForDomexJob({ riderName, reportDate, branchName });
+}
+
+async function startAndWaitForDomexJob(payload) {
+  const started = await requestDomex("/delivered-csv/start", {
     method: "POST",
-    body: JSON.stringify({ riderName, reportDate, branchName }),
+    body: JSON.stringify(payload),
   });
+  if (!started.jobId) throw new Error("DOMEX automation did not return a job ID.");
+
+  const deadline = Date.now() + 4 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await wait(2000);
+    const job = await requestDomex(`/delivered-csv/jobs/${started.jobId}`);
+    if (job.status === "complete") return job.result;
+    if (job.status === "failed") throw new Error(job.error || "DOMEX automation failed.");
+  }
+  throw new Error("DOMEX automation timed out after four minutes.");
+}
+
+function wait(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
