@@ -4,7 +4,7 @@ A simple React + Vite web app for entering daily courier branch data and exporti
 
 ## Features
 
-- Dashboard with today's date, quick actions, and saved date history
+- Dashboard with today's date, quick actions, and saved date historys
 - Saved courier name list for faster daily entry
 - Branch Courier Performance report with automatic Delivery % calculation
 - Operation Report with Inward/Outward wording and grouped table headings
