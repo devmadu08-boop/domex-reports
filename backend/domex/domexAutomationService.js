@@ -66,16 +66,25 @@ export async function downloadRiderDeliveredCsv({ riderName, reportDate, branchN
     browser = await chromium.launch({
       headless: true,
       executablePath: await findBrowserExecutable(),
-      args: ["--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage"],
+      args: ["--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
     });
-    const context = await browser.newContext({ acceptDownloads: true });
+    const context = await browser.newContext({
+      acceptDownloads: true,
+      locale: "en-US",
+      viewport: { width: 1366, height: 768 },
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    });
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+    });
     page = await context.newPage();
     page.setDefaultTimeout(45000);
 
     await page.goto(loginUrl, { waitUntil: "domcontentloaded" });
+    const loginRequests = captureLoginRequests(page);
     await fillLogin(page, username, password);
     await clickFirstVisible(page, ["button:has-text('Sign In')", "button[type='submit']", "input[type='submit']"]);
-    await waitForSuccessfulLogin(page);
+    await waitForSuccessfulLogin(page, loginRequests);
 
     await page.goto(deliveredReportUrl, { waitUntil: "domcontentloaded" });
     await page.waitForLoadState("networkidle").catch(() => undefined);
@@ -153,19 +162,46 @@ async function fillLogin(page, username, password) {
   await passwordInput.fill(password);
 }
 
-async function waitForSuccessfulLogin(page) {
+function captureLoginRequests(page) {
+  const requests = [];
+  page.on("response", (response) => {
+    if (response.request().method() !== "POST") return;
+    requests.push({ status: response.status(), url: response.url() });
+  });
+  return requests;
+}
+
+async function waitForSuccessfulLogin(page, loginRequests) {
   try {
-    await page.waitForURL(
-      (url) => !url.pathname.toLowerCase().includes("/authentication/login"),
-      { timeout: 45000, waitUntil: "domcontentloaded" },
+    await page.waitForFunction(
+      () => {
+        if (!location.pathname.toLowerCase().includes("/authentication/login")) return true;
+        const storageKeys = [...Object.keys(localStorage), ...Object.keys(sessionStorage)];
+        return storageKeys.some((key) => /token|auth|user/i.test(key));
+      },
+      undefined,
+      { timeout: 45000 },
     );
+    await page.waitForTimeout(800);
   } catch {
     const loginMessage = await page
       .locator("[role='alert'], .alert, .toast, .validation-message, .text-danger")
       .allTextContents()
       .then((items) => items.map((item) => item.trim()).filter(Boolean).join(" "))
       .catch(() => "");
-    throw new Error(loginMessage ? `DOMEX login failed: ${loginMessage}` : "DOMEX login did not complete. Check the saved credentials or portal availability.");
+    const requestSummary = loginRequests.length
+      ? loginRequests.map((item) => `${item.status} ${safeUrlPath(item.url)}`).join(", ")
+      : "no login POST response detected";
+    throw new Error(loginMessage ? `DOMEX login failed: ${loginMessage}` : `DOMEX login did not complete (${requestSummary}). Check the saved credentials or portal availability.`);
+  }
+}
+
+function safeUrlPath(value) {
+  try {
+    const url = new URL(value);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return String(value || "unknown").split("?")[0];
   }
 }
 
