@@ -2,6 +2,9 @@ import { get, onValue, ref, serverTimestamp, set } from "firebase/database";
 import { realtimeDb } from "./firebase.js";
 import { createBackupData, getActiveBranch, getUsers } from "./reportStorage.js";
 
+const ENCODED_KEY_PREFIX = "__firebase_key__";
+const INVALID_FIREBASE_KEY = /[.#$\[\]\/]/;
+
 function safeFirebaseKey(value) {
   return String(value || "default")
     .trim()
@@ -13,8 +16,37 @@ function cloudReportRef(branchName = getActiveBranch()) {
   return ref(realtimeDb, `reportSystems/domexDailyCourier_${safeFirebaseKey(branchName)}`);
 }
 
+function encodeFirebaseKey(key) {
+  const value = String(key);
+  if (value && !INVALID_FIREBASE_KEY.test(value) && !value.startsWith(ENCODED_KEY_PREFIX)) return value;
+  return `${ENCODED_KEY_PREFIX}${encodeURIComponent(value).replace(/\./g, "%2E")}`;
+}
+
+function decodeFirebaseKey(key) {
+  if (!key.startsWith(ENCODED_KEY_PREFIX)) return key;
+  try {
+    return decodeURIComponent(key.slice(ENCODED_KEY_PREFIX.length));
+  } catch {
+    return key;
+  }
+}
+
+function transformObjectKeys(value, transformKey) {
+  if (Array.isArray(value)) return value.map((item) => transformObjectKeys(item, transformKey));
+  if (!value || typeof value !== "object") return value;
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [transformKey(key), transformObjectKeys(item, transformKey)]),
+  );
+}
+
 function toFirebaseJson(value) {
-  return JSON.parse(JSON.stringify(value));
+  const jsonValue = JSON.parse(JSON.stringify(value));
+  return transformObjectKeys(jsonValue, encodeFirebaseKey);
+}
+
+function fromFirebaseJson(value) {
+  return transformObjectKeys(value, decodeFirebaseKey);
 }
 
 export async function uploadLocalSnapshotToFirebase(reason = "manual", sourceClientId = "") {
@@ -55,7 +87,7 @@ export async function saveWeeklyBackupToFirebase() {
 export async function downloadSnapshotFromFirebase() {
   const cloudSnapshot = await get(cloudReportRef());
   if (!cloudSnapshot.exists()) return null;
-  return cloudSnapshot.val()?.snapshot || null;
+  return fromFirebaseJson(cloudSnapshot.val()?.snapshot || null);
 }
 
 export function subscribeToFirebaseSnapshot(onSnapshotData, onError) {
@@ -63,7 +95,7 @@ export function subscribeToFirebaseSnapshot(onSnapshotData, onError) {
     cloudReportRef(),
     (cloudSnapshot) => {
       if (!cloudSnapshot.exists()) return;
-      onSnapshotData(cloudSnapshot.val()?.snapshot || null);
+      onSnapshotData(fromFirebaseJson(cloudSnapshot.val()?.snapshot || null));
     },
     onError,
   );
@@ -79,5 +111,5 @@ export async function uploadUsersToFirebase() {
 export async function downloadUsersFromFirebase() {
   const usersSnapshot = await get(ref(realtimeDb, "reportSystemAdmin/users"));
   if (!usersSnapshot.exists()) return [];
-  return usersSnapshot.val()?.users || [];
+  return fromFirebaseJson(usersSnapshot.val()?.users || []);
 }
