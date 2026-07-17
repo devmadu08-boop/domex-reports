@@ -6,6 +6,7 @@ import { startDailyBackupScheduler, startWhatsAppClient } from "./whatsapp/whats
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
+const host = process.env.HOST || "127.0.0.1";
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
   .split(",")
   .map((origin) => origin.trim())
@@ -33,8 +34,8 @@ app.get("/api/health", (_request, response) => {
 app.use("/api/whatsapp", whatsappRoutes);
 app.use("/api/domex", domexAutomationRoutes);
 
-app.listen(port, () => {
-  console.log(`Daily Report backend running at http://127.0.0.1:${port}`);
+app.listen(port, host, () => {
+  console.log(`Daily Report backend running at http://${host}:${port}`);
 });
 
 startWhatsAppClient().catch((error) => {

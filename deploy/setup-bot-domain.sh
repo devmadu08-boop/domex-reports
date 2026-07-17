@@ -51,5 +51,6 @@ nginx -t
 systemctl reload nginx
 
 env PATH="/usr/local/bin:/usr/bin:/bin" pm2 startup systemd -u madu --hp /home/madu
+systemctl start pm2-madu
 
 echo "Deployment root setup completed for https://${DOMAIN_NAME}."
