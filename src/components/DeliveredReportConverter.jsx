@@ -3,13 +3,22 @@ import { CloudDownload, FileDown, Image, Plus, RotateCcw, Trash2, Upload } from 
 import { todayIso } from "../utils/date.js";
 import { captureElementAsPngDataUrl, exportElementAsPng, exportElementsAsPortraitPdf } from "../utils/exportReports.js";
 import { deleteDeliveredReport, getAllDeliveredRiderNames, getDeliveredReport, getDeliveredRiderNames, getSettings, saveDeliveredReport as saveDeliveredReportByRider, saveSettings } from "../services/reportStorage.js";
-import { sendConvertReportToWhatsApp, sendReportToWhatsAppRecipient } from "../services/whatsappApi.js";
+import { sendConvertReportToWhatsApp, sendReportToWhatsAppRecipient, sendTextToWhatsAppRecipient } from "../services/whatsappApi.js";
 import { fetchDomexDeliveredCsv } from "../services/domexAutomationApi.js";
+import { normalizeRiderName, normalizeTrackingNo, parseDeliveredCsv, parseRescheduleCsv, reconcileDeliveredTracking } from "../utils/deliveredReconciliation.js";
+import { parseOutForDeliveryPdf } from "../utils/outForDeliveryPdf.js";
+import DeliveredReconciliationPanel from "./DeliveredReconciliationPanel.jsx";
 import SendToWhatsAppButton from "./SendToWhatsAppButton.jsx";
 
 const emptyEntry = {
   trackingNo: "",
   value: "",
+};
+
+const emptySources = {
+  outForDelivery: null,
+  delivered: null,
+  reschedule: null,
 };
 
 export default function DeliveredReportConverter({ onSaved, companyName = "Domestic Express (pvt) ltd", defaultBranchName = "" }) {
@@ -28,6 +37,10 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
   const [exportingDelivered, setExportingDelivered] = useState(false);
   const [domexLoading, setDomexLoading] = useState(false);
   const [domexStatus, setDomexStatus] = useState("");
+  const [sources, setSources] = useState(emptySources);
+  const [reconciliation, setReconciliation] = useState(null);
+  const [reconciliationStatus, setReconciliationStatus] = useState("");
+  const [reminderSending, setReminderSending] = useState(false);
   const reportRef = useRef(null);
   const reportPageRefs = useRef([]);
 
@@ -47,22 +60,107 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
   const reportPages = useMemo(() => paginateDeliveredEntries(entries), [entries]);
   const pageCount = reportPages.length || 1;
   const hasMultiplePdfPages = pageCount > 1;
+  const canFinalizeReport = entries.length > 0 && Boolean(reconciliation?.checkedAt);
+
+  async function handleOutForDeliveryUpload(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setReconciliationStatus("Reading Out for Delivery PDF...");
+    try {
+      const parsed = await parseOutForDeliveryPdf(file);
+      setSources({
+        outForDelivery: {
+          fileName: file.name,
+          count: parsed.trackingNumbers.length,
+          trackingNumbers: parsed.trackingNumbers,
+          riderName: parsed.riderName,
+          pageCount: parsed.pageCount,
+        },
+        delivered: null,
+        reschedule: null,
+      });
+      setEntries([]);
+      setRiderName(parsed.riderName || "");
+      setFileName("");
+      setReconciliation(null);
+      setReconciliationStatus(`Out for Delivery loaded: ${parsed.trackingNumbers.length} tracking numbers.`);
+    } catch (error) {
+      setReconciliationStatus(error.message || "Could not read Out for Delivery PDF.");
+    } finally {
+      event.target.value = "";
+    }
+  }
 
   async function handleCsvUpload(event) {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const text = await file.text();
-    const parsed = parseDeliveredCsv(text);
-    setFileName(file.name);
-    setEntries(parsed.entries);
-    setRiderName(parsed.riderName);
-    setBranchName(parsed.branchName);
-    if (parsed.reportDate) setReportDate(parsed.reportDate);
-    event.target.value = "";
+    setReconciliationStatus("Reading Delivered CSV...");
+    try {
+      const parsed = parseDeliveredCsv(await file.text());
+      assertRiderMatches(sources.outForDelivery?.riderName, parsed.riderName);
+      setFileName(file.name);
+      setEntries(parsed.entries);
+      setRiderName(parsed.riderName);
+      setBranchName(parsed.branchName);
+      if (parsed.reportDate) setReportDate(parsed.reportDate);
+      setSources((current) => ({
+        ...current,
+        delivered: { fileName: file.name, count: parsed.entries.length, trackingNumbers: parsed.trackingNumbers },
+        reschedule: null,
+      }));
+      setReconciliation(null);
+      setReconciliationStatus(`Delivered report loaded: ${parsed.entries.length} tracking numbers for ${parsed.riderName}.`);
+    } catch (error) {
+      setReconciliationStatus(error.message || "Could not read Delivered CSV.");
+    } finally {
+      event.target.value = "";
+    }
+  }
+
+  async function handleRescheduleUpload(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setReconciliationStatus("Matching Reschedule CSV to the delivered rider...");
+    try {
+      const parsed = parseRescheduleCsv(await file.text(), riderName);
+      const rescheduleSource = { fileName: file.name, count: parsed.trackingNumbers.length, trackingNumbers: parsed.trackingNumbers };
+      const nextSources = { ...sources, reschedule: rescheduleSource };
+      const nextReconciliation = createReconciliation({
+        outTracking: sources.outForDelivery.trackingNumbers,
+        deliveredEntries: entries,
+        rescheduledTracking: parsed.trackingNumbers,
+        nextSources,
+        previous: getDeliveredReport(reportDate, riderName)?.reconciliation,
+      });
+
+      setSources(nextSources);
+      setReconciliation(nextReconciliation);
+      persistDeliveredData(nextReconciliation, { sourceFiles: nextSources });
+      setSavedRiderNames(getDeliveredRiderNames(reportDate));
+      onSaved?.();
+
+      const unresolvedCount = unresolvedMissing(nextReconciliation).length;
+      setReconciliationStatus(
+        unresolvedCount
+          ? `Reconciliation saved. ${unresolvedCount} missing parcel${unresolvedCount === 1 ? "" : "s"} found.`
+          : "Reconciliation saved. Every Out for Delivery parcel is accounted for.",
+      );
+      if (unresolvedCount) await sendMissingReminder(nextReconciliation, { automatic: true, sourceFiles: nextSources });
+    } catch (error) {
+      setReconciliationStatus(error.message || "Could not reconcile Reschedule CSV.");
+    } finally {
+      event.target.value = "";
+    }
   }
 
   async function handleDomexFetch() {
+    if (!sources.outForDelivery) {
+      setDomexStatus("Upload the Out for Delivery PDF first.");
+      return;
+    }
     if (!riderName) {
       setDomexStatus("Select a saved rider before fetching the DOMEX report.");
       return;
@@ -78,10 +176,21 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
       });
       const parsed = parseDeliveredCsv(result.csvText || "");
       if (!parsed.entries.length) throw new Error("The downloaded DOMEX CSV has no delivered rows for this rider/date.");
+      assertRiderMatches(sources.outForDelivery?.riderName, parsed.riderName);
       setEntries(parsed.entries);
       setFileName(result.fileName || `DOMEX_Delivered_${reportDate}.csv`);
       setBranchName(parsed.branchName || result.branchName || branchName || defaultBranchName);
       setRiderName(parsed.riderName || riderName);
+      setSources((current) => ({
+        ...current,
+        delivered: {
+          fileName: result.fileName || `DOMEX_Delivered_${reportDate}.csv`,
+          count: parsed.entries.length,
+          trackingNumbers: parsed.trackingNumbers,
+        },
+        reschedule: null,
+      }));
+      setReconciliation(null);
       setIncludeSpecialTracking(false);
       setDomexStatus(`DOMEX report loaded successfully: ${parsed.entries.length} tracking rows.`);
     } catch (error) {
@@ -92,27 +201,33 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
   }
 
   function updateEntry(index, field, value) {
-    setEntries((current) => current.map((entry, itemIndex) => (itemIndex === index ? { ...entry, [field]: value } : entry)));
+    const nextEntries = entries.map((entry, itemIndex) => (itemIndex === index ? { ...entry, [field]: value } : entry));
+    setEntries(nextEntries);
+    refreshReconciliation(nextEntries);
   }
 
   function deleteEntry(index) {
-    setEntries((current) => current.filter((_, itemIndex) => itemIndex !== index));
+    const nextEntries = entries.filter((_, itemIndex) => itemIndex !== index);
+    setEntries(nextEntries);
+    refreshReconciliation(nextEntries);
   }
 
   function addEntry() {
     if (!newEntry.trackingNo.trim() && !newEntry.value.trim()) return;
-    setEntries((current) => [
-      ...current,
+    const nextEntries = [
+      ...entries,
       {
         trackingNo: newEntry.trackingNo.trim(),
         value: normalizeMoney(newEntry.value),
       },
-    ]);
+    ];
+    setEntries(nextEntries);
+    refreshReconciliation(nextEntries);
     setNewEntry(emptyEntry);
   }
 
   function clearAll() {
-    if (!entries.length && !riderName && !branchName && !fileName) return;
+    if (!entries.length && !riderName && !branchName && !fileName && !sources.outForDelivery) return;
     if (!confirm("Clear converted delivered report data?")) return;
     setEntries([]);
     setRiderName("");
@@ -120,6 +235,9 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
     setFileName("");
     setIncludeSpecialTracking(false);
     setNewEntry(emptyEntry);
+    setSources(emptySources);
+    setReconciliation(null);
+    setReconciliationStatus("");
   }
 
   function saveDeliveredReport() {
@@ -127,13 +245,11 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
       alert("Please enter or upload Rider Name before saving.");
       return;
     }
-    saveDeliveredReportByRider(reportDate, riderName, {
-      riderName,
-      branchName,
-      entries,
-      includeSpecialTracking,
-      fileName,
-    });
+    if (!reconciliation?.checkedAt) {
+      alert("Upload and reconcile all three required files before saving the rider report.");
+      return;
+    }
+    persistDeliveredData(reconciliation, { sourceFiles: sources });
     setSavedRiderNames(getDeliveredRiderNames(reportDate));
     onSaved?.();
   }
@@ -144,6 +260,9 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
     setEntries(saved.entries || []);
     setIncludeSpecialTracking(Boolean(saved.includeSpecialTracking));
     setFileName(saved.fileName || "Saved delivered report");
+    setReconciliation(saved.reconciliation || null);
+    setSources(saved.sourceFiles?.outForDelivery ? saved.sourceFiles : sourcesFromReconciliation(saved.reconciliation));
+    setReconciliationStatus(saved.reconciliation ? "Saved reconciliation loaded." : "This older report needs all three source files before its next export.");
   }
 
   function handleRiderSelect(name) {
@@ -182,7 +301,97 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
     setBranchName("");
     setFileName("");
     setIncludeSpecialTracking(false);
+    setSources(emptySources);
+    setReconciliation(null);
+    setReconciliationStatus("");
     onSaved?.();
+  }
+
+  function persistDeliveredData(nextReconciliation, overrides = {}) {
+    return saveDeliveredReportByRider(reportDate, riderName, {
+      riderName,
+      branchName,
+      entries: overrides.entries || entries,
+      includeSpecialTracking,
+      fileName: overrides.fileName || fileName,
+      sourceFiles: overrides.sourceFiles || sources,
+      reconciliation: nextReconciliation,
+    });
+  }
+
+  function refreshReconciliation(nextEntries) {
+    if (!sources.outForDelivery || !sources.reschedule) return;
+    const nextSources = {
+      ...sources,
+      delivered: {
+        ...(sources.delivered || {}),
+        count: nextEntries.length,
+        trackingNumbers: nextEntries.map((entry) => normalizeTrackingNo(entry.trackingNo)).filter(Boolean),
+      },
+    };
+    const nextReconciliation = createReconciliation({
+      outTracking: sources.outForDelivery.trackingNumbers,
+      deliveredEntries: nextEntries,
+      rescheduledTracking: sources.reschedule.trackingNumbers,
+      nextSources,
+      previous: reconciliation,
+    });
+    setSources(nextSources);
+    setReconciliation(nextReconciliation);
+    setReconciliationStatus("Reconciliation refreshed after delivered row changes. Save the rider report to keep the update.");
+  }
+
+  function updateMissingStatus(trackingNo, status) {
+    if (!reconciliation) return;
+    const missingParcels = reconciliation.missingParcels.map((item) =>
+      item.trackingNo === trackingNo
+        ? { ...item, status, foundAt: status === "found" ? new Date().toISOString() : "" }
+        : item,
+    );
+    const nextReconciliation = withBalancedStatus({ ...reconciliation, missingParcels, updatedAt: new Date().toISOString() });
+    setReconciliation(nextReconciliation);
+    persistDeliveredData(nextReconciliation);
+    setReconciliationStatus(status === "found" ? `${trackingNo} marked as found and saved.` : `${trackingNo} reopened as missing.`);
+    onSaved?.();
+  }
+
+  async function sendMissingReminder(nextReconciliation = reconciliation, { automatic = false, sourceFiles = sources } = {}) {
+    const missing = unresolvedMissing(nextReconciliation);
+    if (!missing.length) return;
+
+    const settings = getSettings();
+    const riderPhone = findRiderPhone(settings.deliveredRiderWhatsAppNumbers, riderName);
+    if (!riderPhone) {
+      setReconciliationStatus(`Missing parcels saved. Add a WhatsApp number for ${riderName} in Settings to send the reminder.`);
+      return;
+    }
+
+    const signature = missing.map((item) => item.trackingNo).sort().join("|");
+    if (automatic && nextReconciliation.reminderSignature === signature) {
+      setReconciliationStatus("Missing parcels saved. This reminder was already sent.");
+      return;
+    }
+
+    setReminderSending(true);
+    try {
+      await sendTextToWhatsAppRecipient({
+        phoneNumber: riderPhone,
+        message: buildMissingReminderMessage({ reportDate, riderName, missing }),
+      });
+      const updated = {
+        ...nextReconciliation,
+        reminderSentAt: new Date().toISOString(),
+        reminderSignature: signature,
+      };
+      setReconciliation(updated);
+      persistDeliveredData(updated, { sourceFiles });
+      setReconciliationStatus(`Missing parcel reminder sent to ${riderName}.`);
+      onSaved?.();
+    } catch (error) {
+      setReconciliationStatus(`Missing parcels are saved, but WhatsApp reminder failed: ${error.message || "Unknown error"}`);
+    } finally {
+      setReminderSending(false);
+    }
   }
 
   async function handlePdfExport() {
@@ -244,7 +453,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
         saveSettings({ deliveredExportAutoWhatsApp: nextAutoWhatsApp });
       }
 
-      setExportStatus(sendToRiderWhatsApp ? "Export complete and sent to rider WhatsApp + Convert default group." : "Export complete.");
+      setExportStatus(sendToRiderWhatsApp ? "Export complete and sent to rider WhatsApp + Delivered Report default group." : "Export complete.");
       window.setTimeout(() => setExportPrompt(null), 900);
     } catch (error) {
       setExportStatus(error.message || "Export failed.");
@@ -261,9 +470,9 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-xs font-black uppercase tracking-wide text-emerald-700">Standalone Tool</p>
-            <h2 className="text-xl font-black text-[#071537] md:text-2xl">Convert Delivered Report</h2>
+            <h2 className="text-xl font-black text-[#071537] md:text-2xl">Delivered Report</h2>
             <p className="mt-1 text-sm font-semibold text-blue-950/70">
-              CSV upload එකෙන් Tracking No, Value, Rider Name auto detect කරලා A4 portrait collection report එකක් හදයි.
+              Upload and reconcile the three required files, then generate the rider collection report with Delivered tracking numbers and values.
             </p>
           </div>
           <button
@@ -276,12 +485,18 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           </button>
         </div>
 
-        <label className="mb-4 flex min-h-24 cursor-pointer flex-col items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-blue-300 bg-white/55 p-4 text-center transition hover:bg-blue-50/70 md:min-h-28">
-          <Upload className="h-8 w-8 text-blue-700" />
-          <span className="text-base font-black text-[#071537]">Upload Rider Wise Delivered CSV</span>
-          <span className="text-sm font-semibold text-blue-950/65">{fileName || "Choose CSV file"}</span>
-          <input type="file" accept=".csv,text/csv" onChange={handleCsvUpload} className="hidden" />
-        </label>
+        <DeliveredReconciliationPanel
+          sources={sources}
+          reconciliation={reconciliation}
+          reminderStatus={reconciliationStatus}
+          reminderSending={reminderSending}
+          onOutForDeliveryUpload={handleOutForDeliveryUpload}
+          onDeliveredUpload={handleCsvUpload}
+          onRescheduleUpload={handleRescheduleUpload}
+          onMarkFound={(trackingNo) => updateMissingStatus(trackingNo, "found")}
+          onMarkMissing={(trackingNo) => updateMissingStatus(trackingNo, "missing")}
+          onSendReminder={() => sendMissingReminder()}
+        />
 
         <div className="grid gap-3 md:grid-cols-3">
           <Field label="Report Date" type="date" value={reportDate} onChange={setReportDate} />
@@ -296,7 +511,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           <button
             type="button"
             onClick={handleDomexFetch}
-            disabled={domexLoading || !riderName}
+            disabled={domexLoading || !riderName || !sources.outForDelivery}
             className="primary-action primary-action-blue min-h-14 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <CloudDownload className="h-5 w-5" />
@@ -428,19 +643,19 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
         </div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <ActionButton label="Save Rider Report" icon={Upload} onClick={saveDeliveredReport} disabled={entries.length === 0} tone="blue" />
+          <ActionButton label="Save Rider Report" icon={Upload} onClick={saveDeliveredReport} disabled={!canFinalizeReport} tone="blue" />
           <ActionButton label="Load Saved" icon={RotateCcw} onClick={loadSavedDeliveredReport} disabled={!reportDate} tone="dark" />
           <ActionButton label="Delete Saved" icon={Trash2} onClick={deleteSavedDeliveredReport} disabled={!reportDate} tone="red" />
-          <ActionButton label="Export A4 PNG" icon={Image} onClick={() => openExportPrompt("png")} disabled={entries.length === 0} tone="green" />
+          <ActionButton label="Export A4 PNG" icon={Image} onClick={() => openExportPrompt("png")} disabled={!canFinalizeReport} tone="green" />
           <ActionButton
             label={`Export A4 PDF${hasMultiplePdfPages ? ` (${pageCount} pages)` : ""}`}
             icon={FileDown}
             onClick={() => openExportPrompt("pdf")}
-            disabled={entries.length === 0}
+            disabled={!canFinalizeReport}
             tone="red"
             highlight={hasMultiplePdfPages}
           />
-          <SendToWhatsAppButton reportRef={reportRef} reportTitle={`Delivered Collection Report - ${riderName || "-"}`} reportType="delivered" reportDate={reportDate} disabled={entries.length === 0} />
+          <SendToWhatsAppButton reportRef={reportRef} reportTitle={`Delivered Collection Report - ${riderName || "-"}`} reportType="delivered" reportDate={reportDate} disabled={!canFinalizeReport} />
           <div className="rounded-2xl border border-white/70 bg-white/55 px-4 py-3 text-right sm:col-span-2 lg:col-span-1">
             <p className="text-xs font-black uppercase text-blue-950/60">Total Value</p>
             <p className="text-2xl font-black text-[#071537]">{formatMoney(totalValue)}</p>
@@ -611,100 +826,91 @@ function paginateDeliveredEntries(entries) {
   return pages;
 }
 
-function parseDeliveredCsv(text) {
-  const rows = parseCsv(text);
-  const metadata = {};
-  let headerIndex = -1;
-
-  rows.forEach((row, index) => {
-    if (row.includes("Tracking No") && row.includes("Value") && row.includes("Rider Name")) {
-      headerIndex = index;
-    }
-    if (row.length >= 2 && headerIndex === -1) {
-      metadata[row[0]] = row[1];
-    }
-  });
-
-  if (headerIndex === -1) {
-    return { entries: [], riderName: "", branchName: "", reportDate: "" };
+function assertRiderMatches(outForDeliveryRider, deliveredRider) {
+  const outKey = normalizeRiderName(outForDeliveryRider);
+  const deliveredKey = normalizeRiderName(deliveredRider);
+  if (outKey && deliveredKey && outKey !== deliveredKey) {
+    throw new Error(`Rider mismatch: Out for Delivery is ${outForDeliveryRider}, but Delivered CSV is ${deliveredRider}.`);
   }
+}
 
-  const header = rows[headerIndex].map((item) => item.trim());
-  const trackingIndex = header.indexOf("Tracking No");
-  const valueIndex = header.indexOf("Value");
-  const riderIndex = header.indexOf("Rider Name");
-  const branchIndex = header.indexOf("Delivered Branch");
-  const dateIndex = header.indexOf("Delivered Date");
-
-  const dataRows = rows.slice(headerIndex + 1).filter((row) => row.length > 1 && row[trackingIndex]);
-  const entries = dataRows.map((row) => ({
-    trackingNo: row[trackingIndex]?.trim() || "",
-    value: normalizeMoney(row[valueIndex] || "0"),
+function createReconciliation({ outTracking, deliveredEntries, rescheduledTracking, nextSources, previous }) {
+  const deliveredTracking = deliveredEntries.map((entry) => normalizeTrackingNo(entry.trackingNo)).filter(Boolean);
+  const result = reconcileDeliveredTracking({
+    outForDeliveryTracking: outTracking,
+    deliveredTracking,
+    rescheduledTracking,
+  });
+  const previousMissing = new Map((previous?.missingParcels || []).map((item) => [normalizeTrackingNo(item.trackingNo), item]));
+  const detectedAt = new Date().toISOString();
+  const missingParcels = result.missing.map((trackingNo) => ({
+    trackingNo,
+    status: previousMissing.get(trackingNo)?.status || "missing",
+    detectedAt: previousMissing.get(trackingNo)?.detectedAt || detectedAt,
+    foundAt: previousMissing.get(trackingNo)?.foundAt || "",
   }));
 
-  const riderNames = uniqueValues(dataRows.map((row) => cleanName(row[riderIndex])));
-  const branches = uniqueValues(dataRows.map((row) => row[branchIndex]?.trim()));
-  const firstDate = dataRows[0]?.[dateIndex];
+  return withBalancedStatus({
+    ...result,
+    missingParcels,
+    outForDeliveryTracking: [...new Set(outTracking.map(normalizeTrackingNo).filter(Boolean))],
+    deliveredTracking: [...new Set(deliveredTracking)],
+    rescheduledTracking: [...new Set(rescheduledTracking.map(normalizeTrackingNo).filter(Boolean))],
+    sourceFileNames: {
+      outForDelivery: nextSources.outForDelivery?.fileName || "",
+      delivered: nextSources.delivered?.fileName || "",
+      reschedule: nextSources.reschedule?.fileName || "",
+    },
+    checkedAt: detectedAt,
+    reminderSentAt: previous?.reminderSentAt || "",
+    reminderSignature: previous?.reminderSignature || "",
+  });
+}
 
+function withBalancedStatus(reconciliation) {
   return {
-    entries,
-    riderName: riderNames.length === 1 ? riderNames[0] : riderNames.join(", "),
-    branchName: branches.length === 1 ? branches[0] : metadata.CompanyName || "",
-    reportDate: parseCsvDate(firstDate || metadata.TimeStamp),
+    ...reconciliation,
+    balanced:
+      unresolvedMissing(reconciliation).length === 0 &&
+      (reconciliation.extraDelivered?.length || 0) === 0 &&
+      (reconciliation.extraRescheduled?.length || 0) === 0 &&
+      (reconciliation.deliveredAndRescheduled?.length || 0) === 0,
   };
 }
 
-function parseCsv(text) {
-  const rows = [];
-  let row = [];
-  let field = "";
-  let inQuotes = false;
-
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    const nextChar = text[index + 1];
-
-    if (char === '"' && inQuotes && nextChar === '"') {
-      field += '"';
-      index += 1;
-    } else if (char === '"') {
-      inQuotes = !inQuotes;
-    } else if (char === "," && !inQuotes) {
-      row.push(field);
-      field = "";
-    } else if ((char === "\n" || char === "\r") && !inQuotes) {
-      if (char === "\r" && nextChar === "\n") index += 1;
-      row.push(field);
-      rows.push(row);
-      row = [];
-      field = "";
-    } else {
-      field += char;
-    }
-  }
-
-  if (field || row.length) {
-    row.push(field);
-    rows.push(row);
-  }
-
-  return rows.map((items) => items.map((item) => item.trim()));
+function unresolvedMissing(reconciliation) {
+  return (reconciliation?.missingParcels || []).filter((item) => item.status !== "found");
 }
 
-function parseCsvDate(value) {
-  if (!value) return "";
-  const match = String(value).match(/^(\d{2})\/(\d{2})\/(\d{4})|^(\d{4})-(\d{2})-(\d{2})/);
-  if (!match) return "";
-  if (match[1]) return `${match[3]}-${match[1]}-${match[2]}`;
-  return `${match[4]}-${match[5]}-${match[6]}`;
+function sourcesFromReconciliation(reconciliation) {
+  if (!reconciliation) return emptySources;
+  return {
+    outForDelivery: {
+      fileName: reconciliation.sourceFileNames?.outForDelivery || "Saved Out for Delivery PDF",
+      count: reconciliation.outForDeliveryTracking?.length || 0,
+      trackingNumbers: reconciliation.outForDeliveryTracking || [],
+    },
+    delivered: {
+      fileName: reconciliation.sourceFileNames?.delivered || "Saved Delivered CSV",
+      count: reconciliation.deliveredTracking?.length || 0,
+      trackingNumbers: reconciliation.deliveredTracking || [],
+    },
+    reschedule: {
+      fileName: reconciliation.sourceFileNames?.reschedule || "Saved Reschedule CSV",
+      count: reconciliation.rescheduledTracking?.length || 0,
+      trackingNumbers: reconciliation.rescheduledTracking || [],
+    },
+  };
 }
 
-function uniqueValues(values) {
-  return [...new Set(values.filter(Boolean))];
+function findRiderPhone(numbers = {}, riderName) {
+  const riderKey = normalizeRiderName(riderName);
+  return Object.entries(numbers).find(([name]) => normalizeRiderName(name) === riderKey)?.[1] || "";
 }
 
-function cleanName(value) {
-  return String(value || "").replaceAll("_", " ").replace(/\s+/g, " ").trim();
+function buildMissingReminderMessage({ reportDate, riderName, missing }) {
+  const trackingList = missing.map((item, index) => `${index + 1}. *${item.trackingNo}*`).join("\n");
+  return `⚠️ *Missing Parcel Reminder*\n\n📅 Date: *${reportDate}*\n🛵 Rider: *${riderName}*\n📦 Missing: *${missing.length}*\n\n${trackingList}\n\n_Please check these parcels and inform the branch._`;
 }
 
 function isSpecialTrackingNo(value) {

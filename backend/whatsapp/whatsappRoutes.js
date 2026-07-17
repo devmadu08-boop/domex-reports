@@ -13,6 +13,7 @@ import {
   sendReportToConvertDefaultGroup,
   sendReportToDefaultGroup,
   sendReportToRecipient,
+  sendTextToRecipient,
 } from "./whatsappService.js";
 
 const router = express.Router();
@@ -99,6 +100,14 @@ router.post("/send-convert-report", async (request, response) => {
 router.post("/send-report-to-recipient", async (request, response) => {
   try {
     response.json(await sendReportToRecipient(request.body));
+  } catch (error) {
+    sendError(response, error);
+  }
+});
+
+router.post("/send-text-to-recipient", async (request, response) => {
+  try {
+    response.json(await sendTextToRecipient(request.body));
   } catch (error) {
     sendError(response, error);
   }

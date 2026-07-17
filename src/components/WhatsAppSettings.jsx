@@ -113,7 +113,7 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
         ...settings,
         convertDefaultGroupJids: selectedConvertGroups,
       });
-      setMessage("Convert Report default WhatsApp groups saved.");
+      setMessage("Delivered Report default WhatsApp groups saved.");
       await refreshStatus();
     } catch (error) {
       await onSaveSettings({
@@ -304,8 +304,8 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
 
           <div className="whatsapp-settings-card">
             <GroupSelector
-              title="Convert Report Default Groups"
-              helper="Every delivered convert report can be sent to these groups with the rider name in the caption."
+              title="Delivered Report Default Groups"
+              helper="Every rider delivered report can be sent to these groups with the rider name in the caption."
               groups={groupOptions}
               selectedGroups={selectedConvertGroups}
               loading={loading}

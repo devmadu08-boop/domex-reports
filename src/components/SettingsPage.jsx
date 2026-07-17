@@ -220,7 +220,7 @@ export default function SettingsPage({
         <div className="glass-panel p-4">
           <h3 className="mb-3 text-lg font-black text-[#071537]">Delivered Rider WhatsApp Numbers</h3>
           <p className="mb-4 text-sm font-semibold text-blue-950/65">
-            Convert Delivered Report එකේ saved rider names සඳහා WhatsApp number save කරන්න.
+            Delivered Report එකේ saved rider names සඳහා WhatsApp number save කරන්න.
           </p>
 
           <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">

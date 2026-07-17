@@ -22,8 +22,11 @@ async function requestJson(path, options = {}) {
       if (path === "/send-report-to-recipient") {
         throw new Error("Rider WhatsApp send API was not found. Update/pull the WhatsApp backend on the VPS and restart it.");
       }
+      if (path === "/send-text-to-recipient") {
+        throw new Error("Rider reminder API was not found. Update the WhatsApp backend on the VPS and restart it.");
+      }
       if (path === "/convert-default-group" || path === "/send-convert-report") {
-        throw new Error("Convert Report WhatsApp group API was not found. Pull the latest GitHub code on the VPS and restart the backend.");
+        throw new Error("Delivered Report WhatsApp group API was not found. Pull the latest GitHub code on the VPS and restart the backend.");
       }
       if (path.startsWith("/backup") || path === "/send-backup-now") {
         throw new Error("WhatsApp backup API was not found. Pull the latest GitHub code on the VPS and restart the backend.");
@@ -102,6 +105,13 @@ export function sendReportToWhatsAppRecipient({ phoneNumber, imageDataUrl, capti
   return requestJson("/send-report-to-recipient", {
     method: "POST",
     body: JSON.stringify({ phoneNumber, imageDataUrl, caption }),
+  });
+}
+
+export function sendTextToWhatsAppRecipient({ phoneNumber, message }) {
+  return requestJson("/send-text-to-recipient", {
+    method: "POST",
+    body: JSON.stringify({ phoneNumber, message }),
   });
 }
 

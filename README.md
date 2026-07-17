@@ -53,7 +53,7 @@ WhatsApp auth/session files are stored in `backend/data/` and are ignored by Git
 
 ## DOMEX Delivered Report Automation
 
-The Convert Report page can download the Rider Wise Delivered CSV directly from the DOMEX staff portal through the VPS backend.
+The Delivered Report page reconciles an Out for Delivery PDF, a rider Delivered CSV, and the branch Reschedule CSV before creating the existing collection-value report.
 
 Requirements:
 
@@ -66,7 +66,8 @@ Setup:
 1. Open the app Settings page.
 2. Find `DOMEX Delivered Report Automation`.
 3. Enter the DOMEX username, password, and branch name, then save.
-4. Open Convert Report, select the rider and date, then click `Fetch from DOMEX`.
+4. Open Delivered Report and upload the Out for Delivery PDF.
+5. Upload or fetch the Rider Wise Delivered CSV, then upload the Reschedule CSV.
 
 Credentials are stored only in `backend/data/domex-automation-config.json` on the VPS. The entire `backend/data/` directory is ignored by Git. Environment variables can be used instead:
 

@@ -240,7 +240,7 @@ export async function saveDefaultGroupJids(groupJids) {
 
 export async function saveConvertDefaultGroupJids(groupJids) {
   const nextGroupJids = normalizeGroupJids(groupJids);
-  if (!nextGroupJids.length) throw new Error("At least one Convert Report group JID is required.");
+  if (!nextGroupJids.length) throw new Error("At least one Delivered Report group JID is required.");
   return writeConfig(normalizeConfig({ ...(await readConfig()), convertDefaultGroupJid: nextGroupJids[0], convertDefaultGroupJids: nextGroupJids }));
 }
 
@@ -293,7 +293,7 @@ export async function sendReportToConvertDefaultGroup({ imageDataUrl, caption })
     imageDataUrl,
     caption,
     groupJids: convertDefaultGroupJids,
-    missingGroupMessage: "Convert Report default WhatsApp groups are not selected. Select them in Settings.",
+    missingGroupMessage: "Delivered Report default WhatsApp groups are not selected. Select them in Settings.",
   });
 }
 
@@ -317,6 +317,26 @@ export async function sendReportToRecipient({ phoneNumber, imageDataUrl, caption
     caption,
   });
 
+  return {
+    ok: true,
+    recipientJid,
+    sentCount: 1,
+    sentAt: new Date().toISOString(),
+  };
+}
+
+export async function sendTextToRecipient({ phoneNumber, message }) {
+  if (!socket || connectionState !== "connected") {
+    throw new Error("WhatsApp is not connected. Scan QR from Settings.");
+  }
+
+  const recipientJid = normalizeRecipientJid(phoneNumber);
+  if (!recipientJid) throw new Error("Rider WhatsApp number is required.");
+
+  const text = String(message || "").trim();
+  if (!text) throw new Error("Reminder message is required.");
+
+  await socket.sendMessage(recipientJid, { text });
   return {
     ok: true,
     recipientJid,

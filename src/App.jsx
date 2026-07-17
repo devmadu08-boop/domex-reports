@@ -77,7 +77,7 @@ const tabs = [
   { id: "operation", label: "Operation Report", mobileLabel: "Operation", icon: PackageCheck },
   { id: "exports", label: "Export / History", mobileLabel: "Export", icon: History },
   { id: "allReports", label: "All Reports", mobileLabel: "All", icon: FileSpreadsheet },
-  { id: "deliveredConverter", label: "Convert Report", mobileLabel: "Convert", icon: FileText },
+  { id: "deliveredConverter", label: "Delivered Report", mobileLabel: "Delivered", icon: FileText },
   { id: "settings", label: "Settings", mobileLabel: "Settings", icon: Settings },
   { id: "users", label: "User Management", mobileLabel: "Users", icon: ShieldCheck, adminOnly: true },
 ];
@@ -653,7 +653,7 @@ export default function App() {
 
   function handleHistoryDownload(item) {
     if (!item.hasCourier && !item.hasOperation) {
-      showNotice("This date only has rider delivered reports. Open Convert Delivered Report and select rider to export.");
+      showNotice("This date only has rider delivered reports. Open Delivered Report and select a rider to export.");
       setSelectedDate(item.date);
       setActiveTab("deliveredConverter");
       return;
