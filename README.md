@@ -13,8 +13,8 @@ A simple React + Vite web app for entering daily courier branch data and exporti
 - Edit/delete rows and save reports by date in LocalStorage
 - All-in-one JSON backup export and restore
 - Weekly auto backup download when the app is opened
-- Firebase Analytics and Firestore cloud sync
-- Manual cloud upload/download plus optional realtime sync from Settings
+- Firebase Analytics and Realtime Database cloud sync
+- Automatic branch-scoped realtime sync plus manual cloud upload/download recovery actions
 - Export each report as PNG or PDF
 - Export both reports into one A4 landscape PDF
 - Responsive desktop/mobile interface with large office-friendly controls
@@ -115,9 +115,10 @@ The first version uses `localStorage`. The storage code is isolated in `src/serv
 
 Firebase is configured in `src/services/firebase.js`.
 
-To use Firestore sync:
+To use Firebase Realtime Database sync:
 
 1. Open Firebase Console.
-2. Enable Cloud Firestore for the `domex-new-report` project.
-3. Set suitable Firestore security rules for your office use.
-4. Open app Settings and use `Upload Local to Cloud`, `Download Cloud to Local`, or enable `Firestore realtime sync`.
+2. Enable Realtime Database for the `domexrep-e30c4` project.
+3. Configure Realtime Database security rules appropriate for your office deployment.
+4. Branch reports, settings, saved courier names, users, and weekly backups sync automatically after login.
+5. Settings also provides manual `Upload Local to Cloud` and `Download Cloud to Local` recovery actions.

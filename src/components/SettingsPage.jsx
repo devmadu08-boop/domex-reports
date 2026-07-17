@@ -264,7 +264,7 @@ export default function SettingsPage({
         <div className="glass-panel p-4">
           <div className="mb-3 flex items-center gap-2">
             <Cloud className="h-5 w-5 text-blue-700" />
-            <h3 className="text-lg font-black text-[#071537]">Firestore Cloud Sync</h3>
+            <h3 className="text-lg font-black text-[#071537]">Firebase Realtime Sync</h3>
           </div>
           <div className="grid gap-3">
             <button type="button" onClick={onCloudUpload} className="primary-action primary-action-blue">

@@ -1,19 +1,20 @@
 import { initializeApp } from "firebase/app";
 import { getAnalytics, isSupported } from "firebase/analytics";
-import { getFirestore } from "firebase/firestore";
+import { getDatabase } from "firebase/database";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDYotKiRMmeDfmXIi9BfroR-yLgaLd2q6w",
-  authDomain: "domex-new-report.firebaseapp.com",
-  projectId: "domex-new-report",
-  storageBucket: "domex-new-report.firebasestorage.app",
-  messagingSenderId: "555453710182",
-  appId: "1:555453710182:web:aa38472b7f2245fc2bd2a7",
-  measurementId: "G-8J9YKXJVJZ",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyCkhI0fNJed9M-r803cvLyp9w05FtzeqMY",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "domexrep-e30c4.firebaseapp.com",
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL || "https://domexrep-e30c4-default-rtdb.firebaseio.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "domexrep-e30c4",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "domexrep-e30c4.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "841657457035",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:841657457035:web:ddf555c9ae3e53fdfc378e",
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-4KSTD3SGSS",
 };
 
 export const firebaseApp = initializeApp(firebaseConfig);
-export const firestoreDb = getFirestore(firebaseApp);
+export const realtimeDb = getDatabase(firebaseApp);
 export let firebaseAnalytics = null;
 
 isSupported()

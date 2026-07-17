@@ -1,12 +1,23 @@
-import { doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
-import { firestoreDb } from "./firebase.js";
+import { get, onValue, ref, serverTimestamp, set } from "firebase/database";
+import { realtimeDb } from "./firebase.js";
 import { createBackupData, getActiveBranch, getUsers } from "./reportStorage.js";
 
-function cloudReportDoc(branchName = getActiveBranch()) {
-  return doc(firestoreDb, "reportSystems", `domexDailyCourier_${branchName || "default"}`);
+function safeFirebaseKey(value) {
+  return String(value || "default")
+    .trim()
+    .toLowerCase()
+    .replace(/[.#$\[\]\/]/g, "_");
 }
 
-export async function uploadLocalSnapshotToFirestore(reason = "manual", sourceClientId = "") {
+function cloudReportRef(branchName = getActiveBranch()) {
+  return ref(realtimeDb, `reportSystems/domexDailyCourier_${safeFirebaseKey(branchName)}`);
+}
+
+function toFirebaseJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+export async function uploadLocalSnapshotToFirebase(reason = "manual", sourceClientId = "") {
   const snapshot = {
     ...createBackupData(),
     branchName: getActiveBranch(),
@@ -15,19 +26,15 @@ export async function uploadLocalSnapshotToFirestore(reason = "manual", sourceCl
     cloudUpdatedAt: new Date().toISOString(),
   };
 
-  await setDoc(
-    cloudReportDoc(),
-    {
-      snapshot,
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true },
-  );
+  await set(cloudReportRef(), {
+    snapshot: toFirebaseJson(snapshot),
+    updatedAt: serverTimestamp(),
+  });
 
   return snapshot;
 }
 
-export async function saveWeeklyBackupToFirestore() {
+export async function saveWeeklyBackupToFirebase() {
   const date = new Date().toISOString().slice(0, 10);
   const snapshot = {
     ...createBackupData(),
@@ -37,44 +44,40 @@ export async function saveWeeklyBackupToFirestore() {
     cloudUpdatedAt: new Date().toISOString(),
   };
 
-  await setDoc(doc(firestoreDb, "reportSystemWeeklyBackups", `${getActiveBranch() || "default"}_${date}`), {
-    snapshot,
+  await set(ref(realtimeDb, `reportSystemWeeklyBackups/${safeFirebaseKey(getActiveBranch())}_${date}`), {
+    snapshot: toFirebaseJson(snapshot),
     createdAt: serverTimestamp(),
   });
 
   return snapshot;
 }
 
-export async function downloadSnapshotFromFirestore() {
-  const cloudDoc = await getDoc(cloudReportDoc());
-  if (!cloudDoc.exists()) return null;
-  return cloudDoc.data()?.snapshot || null;
+export async function downloadSnapshotFromFirebase() {
+  const cloudSnapshot = await get(cloudReportRef());
+  if (!cloudSnapshot.exists()) return null;
+  return cloudSnapshot.val()?.snapshot || null;
 }
 
-export function subscribeToFirestoreSnapshot(onSnapshotData, onError) {
-  return onSnapshot(
-    cloudReportDoc(),
-    (cloudDoc) => {
-      if (!cloudDoc.exists()) return;
-      onSnapshotData(cloudDoc.data()?.snapshot || null);
+export function subscribeToFirebaseSnapshot(onSnapshotData, onError) {
+  return onValue(
+    cloudReportRef(),
+    (cloudSnapshot) => {
+      if (!cloudSnapshot.exists()) return;
+      onSnapshotData(cloudSnapshot.val()?.snapshot || null);
     },
     onError,
   );
 }
 
-export async function uploadUsersToFirestore() {
-  await setDoc(
-    doc(firestoreDb, "reportSystemAdmin", "users"),
-    {
-      users: getUsers(),
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true },
-  );
+export async function uploadUsersToFirebase() {
+  await set(ref(realtimeDb, "reportSystemAdmin/users"), {
+    users: toFirebaseJson(getUsers()),
+    updatedAt: serverTimestamp(),
+  });
 }
 
-export async function downloadUsersFromFirestore() {
-  const usersDoc = await getDoc(doc(firestoreDb, "reportSystemAdmin", "users"));
-  if (!usersDoc.exists()) return [];
-  return usersDoc.data()?.users || [];
+export async function downloadUsersFromFirebase() {
+  const usersSnapshot = await get(ref(realtimeDb, "reportSystemAdmin/users"));
+  if (!usersSnapshot.exists()) return [];
+  return usersSnapshot.val()?.users || [];
 }

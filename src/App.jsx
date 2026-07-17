@@ -66,7 +66,7 @@ import {
   shouldRunWeeklyBackup,
   createBackupData,
 } from "./services/reportStorage.js";
-import { downloadSnapshotFromFirestore, downloadUsersFromFirestore, saveWeeklyBackupToFirestore, subscribeToFirestoreSnapshot, uploadLocalSnapshotToFirestore, uploadUsersToFirestore } from "./services/cloudSync.js";
+import { downloadSnapshotFromFirebase, downloadUsersFromFirebase, saveWeeklyBackupToFirebase, subscribeToFirebaseSnapshot, uploadLocalSnapshotToFirebase, uploadUsersToFirebase } from "./services/cloudSync.js";
 import { getBackendHealth, saveWhatsAppBackupConfig, syncWhatsAppBackupSnapshot } from "./services/whatsappApi.js";
 import { todayIso, displayDate } from "./utils/date.js";
 import { exportBothAsPdf, exportElementAsPdf, exportElementAsPng } from "./utils/exportReports.js";
@@ -186,7 +186,7 @@ export default function App() {
 
   useEffect(() => {
     if (session?.role !== "admin") return;
-    downloadUsersFromFirestore()
+    downloadUsersFromFirebase()
       .then((cloudUsers) => {
         if (cloudUsers.length) setUsers(replaceUserAccounts(cloudUsers));
       })
@@ -200,7 +200,7 @@ export default function App() {
     if (!firebaseBootstrapped) return;
     if (!shouldRunWeeklyBackup(settings)) return;
     downloadBackupFile("weekly-auto");
-    saveWeeklyBackupToFirestore()
+    saveWeeklyBackupToFirebase()
       .then(() => setCloudStatus("Weekly Firebase backup saved."))
       .catch((error) => setCloudStatus(error.message || "Weekly Firebase backup failed."));
     setSettingsState(markWeeklyBackupComplete());
@@ -248,16 +248,16 @@ export default function App() {
 
     async function bootstrapThenUpload() {
       try {
-        await bootstrapFromFirestore();
+        await bootstrapFromFirebase();
         if (cancelled) return;
-        const snapshot = await uploadLocalSnapshotToFirestore("auto-sync-enabled", syncClientIdRef.current);
+        const snapshot = await uploadLocalSnapshotToFirebase("auto-sync-enabled", syncClientIdRef.current);
         if (cancelled) return;
         lastCloudUpdateRef.current = snapshot.cloudUpdatedAt;
         setCloudStatus(`Firebase synced: ${new Date(snapshot.cloudUpdatedAt).toLocaleTimeString()}`);
         setFirebaseStatus("Firebase connected");
       } catch (error) {
         if (cancelled) return;
-        setCloudStatus(error.message || "Initial Firebase sync failed.");
+        setCloudStatus(error.message || "Initial Firebase Realtime sync failed.");
         setFirebaseStatus("Firebase error");
       } finally {
         if (!cancelled) setFirebaseBootstrapped(true);
@@ -272,18 +272,18 @@ export default function App() {
       window.clearTimeout(realtimeUploadTimerRef.current);
       realtimeUploadTimerRef.current = window.setTimeout(async () => {
         try {
-          const snapshot = await uploadLocalSnapshotToFirestore("realtime-auto", syncClientIdRef.current);
+          const snapshot = await uploadLocalSnapshotToFirebase("realtime-auto", syncClientIdRef.current);
           lastCloudUpdateRef.current = snapshot.cloudUpdatedAt;
           setCloudStatus(`Firebase uploaded: ${new Date(snapshot.cloudUpdatedAt).toLocaleTimeString()}`);
           setFirebaseStatus("Firebase connected");
         } catch (error) {
-          setCloudStatus(error.message || "Firebase upload failed.");
+          setCloudStatus(error.message || "Firebase Realtime upload failed.");
           setFirebaseStatus("Firebase error");
         }
       }, 900);
     });
 
-    const unsubscribeCloud = subscribeToFirestoreSnapshot(
+    const unsubscribeCloud = subscribeToFirebaseSnapshot(
       (snapshot) => {
         if (!snapshot?.reports || snapshot.cloudUpdatedAt === lastCloudUpdateRef.current) return;
         if (snapshot.sourceClientId === syncClientIdRef.current) return;
@@ -303,7 +303,7 @@ export default function App() {
         }
       },
       (error) => {
-        setCloudStatus(error.message || "Firebase sync error.");
+        setCloudStatus(error.message || "Firebase Realtime sync error.");
         setFirebaseStatus("Firebase error");
       },
     );
@@ -349,7 +349,7 @@ export default function App() {
 
   async function handleLogin(branchName, password) {
     try {
-      const cloudUsers = await downloadUsersFromFirestore().catch(() => []);
+      const cloudUsers = await downloadUsersFromFirebase().catch(() => []);
       if (cloudUsers.length) setUsers(replaceUserAccounts(cloudUsers));
       const nextSession = loginWithBranch(branchName, password);
       setFirebaseBootstrapped(false);
@@ -385,12 +385,12 @@ export default function App() {
     return cloudTime >= newestLocalTime;
   }
 
-  async function bootstrapFromFirestore() {
+  async function bootstrapFromFirebase() {
     if (bootstrappedCloudRef.current) return;
     bootstrappedCloudRef.current = true;
 
     try {
-      const snapshot = await downloadSnapshotFromFirestore();
+      const snapshot = await downloadSnapshotFromFirebase();
       if (!snapshot?.reports) return;
 
       lastCloudUpdateRef.current = snapshot.cloudUpdatedAt || "";
@@ -405,7 +405,7 @@ export default function App() {
         setCloudStatus("Firebase sync enabled. Local data is newer.");
       }
     } catch (error) {
-      setCloudStatus(error.message || "Firestore bootstrap failed.");
+      setCloudStatus(error.message || "Firebase Realtime bootstrap failed.");
     } finally {
       applyingRemoteSnapshotRef.current = false;
     }
@@ -535,13 +535,13 @@ export default function App() {
     setOperationForm((current) => ({ ...current, target: savedSettings.operationTarget || "" }));
     showNotice("Settings saved successfully.");
 
-    setCloudStatus("Saving settings to Firestore...");
+    setCloudStatus("Saving settings to Firebase Realtime Database...");
     try {
-      const snapshot = await uploadLocalSnapshotToFirestore("settings-save", syncClientIdRef.current);
+      const snapshot = await uploadLocalSnapshotToFirebase("settings-save", syncClientIdRef.current);
       lastCloudUpdateRef.current = snapshot.cloudUpdatedAt;
-      setCloudStatus(`Settings synced to Firestore: ${new Date(snapshot.cloudUpdatedAt).toLocaleTimeString()}`);
+      setCloudStatus(`Settings synced to Firebase: ${new Date(snapshot.cloudUpdatedAt).toLocaleTimeString()}`);
     } catch (error) {
-      setCloudStatus(error.message || "Settings Firestore sync failed.");
+      setCloudStatus(error.message || "Settings Firebase sync failed.");
     }
 
     syncBackupConfigToBackend(savedSettings);
@@ -581,24 +581,24 @@ export default function App() {
   }
 
   async function handleCloudUpload() {
-    setCloudStatus("Uploading local data to Firestore...");
+    setCloudStatus("Uploading local data to Firebase...");
     try {
-      const snapshot = await uploadLocalSnapshotToFirestore("manual-upload", syncClientIdRef.current);
+      const snapshot = await uploadLocalSnapshotToFirebase("manual-upload", syncClientIdRef.current);
       lastCloudUpdateRef.current = snapshot.cloudUpdatedAt;
       const savedSettings = saveSettings({ cloudLastSyncedAt: snapshot.cloudUpdatedAt });
       setSettingsState(savedSettings);
-      setCloudStatus(`Uploaded to Firestore: ${new Date(snapshot.cloudUpdatedAt).toLocaleString()}`);
-      showNotice("Uploaded to Firestore successfully.");
+      setCloudStatus(`Uploaded to Firebase: ${new Date(snapshot.cloudUpdatedAt).toLocaleString()}`);
+      showNotice("Uploaded to Firebase successfully.");
     } catch (error) {
       setCloudStatus(error.message || "Cloud upload failed.");
     }
   }
 
   async function handleCloudDownload() {
-    if (!confirm("Download Firestore cloud data and replace this device LocalStorage?")) return;
-    setCloudStatus("Downloading Firestore data...");
+    if (!confirm("Download Firebase cloud data and replace this device LocalStorage?")) return;
+    setCloudStatus("Downloading Firebase data...");
     try {
-      const snapshot = await downloadSnapshotFromFirestore();
+      const snapshot = await downloadSnapshotFromFirebase();
       if (!snapshot) {
         setCloudStatus("No cloud data found yet.");
         return;
@@ -607,8 +607,8 @@ export default function App() {
       restoreBackupData(snapshot, { silent: true });
       handleRestoreBackup();
       lastCloudUpdateRef.current = snapshot.cloudUpdatedAt || "";
-      setCloudStatus(`Downloaded from Firestore: ${new Date(snapshot.cloudUpdatedAt || snapshot.exportedAt).toLocaleString()}`);
-      showNotice("Downloaded from Firestore successfully.");
+      setCloudStatus(`Downloaded from Firebase: ${new Date(snapshot.cloudUpdatedAt || snapshot.exportedAt).toLocaleString()}`);
+      showNotice("Downloaded from Firebase successfully.");
     } catch (error) {
       setCloudStatus(error.message || "Cloud download failed.");
     } finally {
@@ -620,7 +620,7 @@ export default function App() {
     try {
       const nextUsers = saveUserAccount(user);
       setUsers(nextUsers);
-      await uploadUsersToFirestore();
+      await uploadUsersToFirebase();
       showNotice("Branch user saved and synced.");
     } catch (error) {
       showNotice(error.message || "Could not save user.");
@@ -632,7 +632,7 @@ export default function App() {
     try {
       const nextUsers = deleteUserAccount(branchName);
       setUsers(nextUsers);
-      await uploadUsersToFirestore();
+      await uploadUsersToFirebase();
       showNotice("Branch user deleted and synced.");
     } catch (error) {
       showNotice(error.message || "Could not delete user.");
