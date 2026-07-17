@@ -1,0 +1,23 @@
+[Unit]
+Description=DOMEX Daily Courier Report backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=madu
+Group=madu
+WorkingDirectory=/home/madu/domex-report-bot
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=3101
+Environment=ALLOWED_ORIGINS=https://bot.domex.work.gd
+ExecStart=/usr/bin/node /home/madu/domex-report-bot/backend/server.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

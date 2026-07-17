@@ -50,7 +50,8 @@ certbot --nginx \
 nginx -t
 systemctl reload nginx
 
-env PATH="/usr/local/bin:/usr/bin:/bin" pm2 startup systemd -u madu --hp /home/madu
-systemctl start pm2-madu
+install -m 0644 "${APP_DIR}/deploy/domex-report-bot.service" /etc/systemd/system/domex-report-bot.service
+systemctl daemon-reload
+systemctl enable --now domex-report-bot.service
 
 echo "Deployment root setup completed for https://${DOMAIN_NAME}."
