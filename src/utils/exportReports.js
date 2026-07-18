@@ -63,6 +63,24 @@ export async function exportElementAsPng(element, reportName, date) {
   link.click();
 }
 
+export async function exportElementsAsPng(elements, reportName, date) {
+  const pageElements = elements.filter(Boolean);
+  if (!pageElements.length) {
+    throw new Error("Report area is not available for export.");
+  }
+
+  for (let index = 0; index < pageElements.length; index += 1) {
+    const canvas = await captureElement(pageElements[index]);
+    const link = document.createElement("a");
+    const pageSuffix = pageElements.length > 1 ? `_Page_${index + 1}` : "";
+    link.download = `${safeFileName(reportName)}_${date}${pageSuffix}.png`;
+    link.href = canvas.toDataURL("image/png", 1);
+    link.click();
+  }
+
+  return { pageCount: pageElements.length };
+}
+
 export async function exportElementAsPdf(element, reportName, date, orientation = "landscape") {
   const canvas = await captureElement(element);
   const pdf = new jsPDF({ orientation, unit: "mm", format: "a4" });

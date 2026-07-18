@@ -20,6 +20,7 @@ const emptyReport = {
   courierRows: [],
   operation: null,
   delivered: {},
+  rescheduleRows: [],
 };
 
 function normalizeDelivered(value) {
@@ -250,6 +251,53 @@ export function saveDeliveredReport(date, riderName, data) {
   return store[date].delivered[cleanRiderName];
 }
 
+export function saveRescheduleRows(rows, fallbackDate) {
+  const normalizedRows = (Array.isArray(rows) ? rows : [])
+    .map((row) => ({
+      trackingNo: String(row.trackingNo || "").trim().replace(/\s+/g, "").toUpperCase(),
+      riderName: String(row.riderName || "").trim(),
+      reason: String(row.reason || "").trim(),
+      reportDate: String(row.reportDate || fallbackDate || "").trim(),
+    }))
+    .filter((row) => row.trackingNo && row.reportDate);
+
+  if (!normalizedRows.length) return [];
+
+  const store = readStore();
+  const rowsByDate = new Map();
+  normalizedRows.forEach((row) => {
+    const dateRows = rowsByDate.get(row.reportDate) || [];
+    dateRows.push(row);
+    rowsByDate.set(row.reportDate, dateRows);
+  });
+
+  rowsByDate.forEach((dateRows, date) => {
+    const current = {
+      ...emptyReport,
+      ...(store[date] || {}),
+    };
+    const merged = new Map(
+      (current.rescheduleRows || []).map((row) => [String(row.trackingNo || "").trim().replace(/\s+/g, "").toUpperCase(), row]),
+    );
+    dateRows.forEach((row) => merged.set(row.trackingNo, row));
+
+    store[date] = {
+      ...current,
+      rescheduleRows: [...merged.values()].sort((a, b) =>
+        a.riderName.localeCompare(b.riderName) || a.trackingNo.localeCompare(b.trackingNo),
+      ),
+      updatedAt: new Date().toISOString(),
+    };
+  });
+
+  writeStore(store);
+  return normalizedRows;
+}
+
+export function getRescheduleRows(date) {
+  return getReportByDate(date).rescheduleRows || [];
+}
+
 export function getDeliveredReport(date, riderName) {
   const cleanRiderName = riderName.trim();
   if (!cleanRiderName) return null;
@@ -287,6 +335,7 @@ export function deleteDeliveredReport(date, riderName) {
   const isEmpty =
     (store[date].courierRows?.length || 0) === 0 &&
     !store[date].operation &&
+    (store[date].rescheduleRows?.length || 0) === 0 &&
     Object.keys(normalizeDelivered(store[date].delivered)).length === 0;
 
   if (isEmpty) {
@@ -303,13 +352,14 @@ export function deleteReportType(date, type) {
   store[date] = {
     ...emptyReport,
     ...store[date],
-    [type]: type === "courierRows" ? [] : type === "delivered" ? {} : null,
+    [type]: type === "courierRows" || type === "rescheduleRows" ? [] : type === "delivered" ? {} : null,
     updatedAt: new Date().toISOString(),
   };
 
   const isEmpty =
     (store[date].courierRows?.length || 0) === 0 &&
     !store[date].operation &&
+    (store[date].rescheduleRows?.length || 0) === 0 &&
     Object.keys(normalizeDelivered(store[date].delivered)).length === 0;
 
   if (isEmpty) {
@@ -330,6 +380,8 @@ export function getReportHistory() {
       deliveredCount: Object.keys(normalizeDelivered(value.delivered)).length,
       deliveredRiders: Object.keys(normalizeDelivered(value.delivered)),
       hasDelivered: Object.keys(normalizeDelivered(value.delivered)).length > 0,
+      rescheduleCount: value.rescheduleRows?.length || 0,
+      hasReschedule: (value.rescheduleRows?.length || 0) > 0,
       updatedAt: value.updatedAt,
     }))
     .sort((a, b) => b.date.localeCompare(a.date));
@@ -343,6 +395,7 @@ export function getAllReports() {
       courierRows: value.courierRows || [],
       operation: value.operation || null,
       delivered: normalizeDelivered(value.delivered),
+      rescheduleRows: value.rescheduleRows || [],
       updatedAt: value.updatedAt,
     }))
     .sort((a, b) => a.date.localeCompare(b.date));

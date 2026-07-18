@@ -100,6 +100,7 @@ export function parseRescheduleCsv(text, selectedRiderName) {
   const header = rows[headerIndex].map((item) => item.trim());
   const trackingIndex = header.indexOf("Tracking No");
   const riderIndex = header.indexOf("Rider Name");
+  const reasonIndex = header.indexOf("Reason");
   const dateIndex = header.indexOf("Created Date");
   const selectedKey = normalizeRiderName(selectedRiderName);
   const allRows = rows
@@ -108,6 +109,7 @@ export function parseRescheduleCsv(text, selectedRiderName) {
     .map((row) => ({
       trackingNo: normalizeTrackingNo(row[trackingIndex]),
       riderName: cleanRiderName(row[riderIndex]),
+      reason: reasonIndex >= 0 ? String(row[reasonIndex] || "").trim() : "",
       reportDate: parseCsvDate(row[dateIndex]),
     }));
   const riderRows = uniqueByTracking(allRows.filter((row) => normalizeRiderName(row.riderName) === selectedKey));

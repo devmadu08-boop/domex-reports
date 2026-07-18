@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CloudDownload, FileDown, Image, Plus, RotateCcw, Trash2, Upload } from "lucide-react";
 import { todayIso } from "../utils/date.js";
 import { captureElementAsPngDataUrl, exportElementAsPng, exportElementsAsPortraitPdf } from "../utils/exportReports.js";
-import { deleteDeliveredReport, getAllDeliveredRiderNames, getDeliveredReport, getDeliveredRiderNames, getSettings, saveDeliveredReport as saveDeliveredReportByRider, saveSettings } from "../services/reportStorage.js";
+import { deleteDeliveredReport, getAllDeliveredRiderNames, getDeliveredReport, getDeliveredRiderNames, getSettings, saveDeliveredReport as saveDeliveredReportByRider, saveRescheduleRows, saveSettings } from "../services/reportStorage.js";
 import { sendConvertReportToWhatsApp, sendReportToWhatsAppRecipient, sendTextToWhatsAppRecipient } from "../services/whatsappApi.js";
 import { fetchDomexDeliveredCsv } from "../services/domexAutomationApi.js";
 import { normalizeRiderName, normalizeTrackingNo, parseDeliveredCsv, parseRescheduleCsv, reconcileDeliveredTracking } from "../utils/deliveredReconciliation.js";
@@ -138,6 +138,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
 
       setSources(nextSources);
       setReconciliation(nextReconciliation);
+      saveRescheduleRows(parsed.riderRows, reportDate);
       persistDeliveredData(nextReconciliation, { sourceFiles: nextSources });
       setSavedRiderNames(getDeliveredRiderNames(reportDate));
       onSaved?.();

@@ -1064,6 +1064,22 @@ textarea {
   position: relative;
 }
 
+.reschedule-report-page {
+  height: 1123px;
+  overflow: hidden;
+}
+
+.reschedule-report-table th,
+.reschedule-report-table td {
+  height: 42px;
+  padding: 6px;
+  font-size: 12px;
+}
+
+.reschedule-report-table td:last-child {
+  text-align: left;
+}
+
 .delivered-continuation-page .delivered-total-row,
 .delivered-continuation-page .delivered-final-only {
   display: none;

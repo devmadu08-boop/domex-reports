@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   BarChart3,
+  CalendarClock,
   CalendarDays,
   CheckCircle2,
   Download,
@@ -33,6 +34,7 @@ import {
 import CourierPerformanceForm, { emptyCourierForm } from "./components/CourierPerformanceForm.jsx";
 import DateSelector from "./components/DateSelector.jsx";
 import DeliveredReportConverter from "./components/DeliveredReportConverter.jsx";
+import RescheduleReport from "./components/RescheduleReport.jsx";
 import ExportButtons from "./components/ExportButtons.jsx";
 import AllInOneReports from "./components/AllInOneReports.jsx";
 import OperationReportForm, { emptyOperationForm } from "./components/OperationReportForm.jsx";
@@ -78,6 +80,7 @@ const tabs = [
   { id: "exports", label: "Export / History", mobileLabel: "Export", icon: History },
   { id: "allReports", label: "All Reports", mobileLabel: "All", icon: FileSpreadsheet },
   { id: "deliveredConverter", label: "Delivered Report", mobileLabel: "Delivered", icon: FileText },
+  { id: "reschedule", label: "Reschedule Report", mobileLabel: "Reschedule", icon: CalendarClock },
   { id: "settings", label: "Settings", mobileLabel: "Settings", icon: Settings },
   { id: "users", label: "User Management", mobileLabel: "Users", icon: ShieldCheck, adminOnly: true },
 ];
@@ -943,6 +946,10 @@ export default function App() {
         )}
 
         {activeTab === "deliveredConverter" && <DeliveredReportConverter onSaved={refreshHistory} companyName={settings.companyName} defaultBranchName={settings.branchName} />}
+
+        {activeTab === "reschedule" && (
+          <RescheduleReport selectedDate={selectedDate} branchName={settings.branchName || "Middeniya"} />
+        )}
 
         {activeTab === "settings" && (
           <SettingsPage

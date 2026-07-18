@@ -55,6 +55,8 @@ WhatsApp auth/session files are stored in `backend/data/` and are ignored by Git
 
 The Delivered Report page reconciles an Out for Delivery PDF, a rider Delivered CSV, and the branch Reschedule CSV before creating the existing collection-value report.
 
+Every rider Reschedule CSV upload also updates the daily Reschedule Report tab. Rows are grouped by date, deduplicated by Tracking No, and can be exported as A4 PNG pages or a multi-page A4 PDF.
+
 Requirements:
 
 - Google Chrome or Microsoft Edge installed on the VPS
