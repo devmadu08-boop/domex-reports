@@ -1256,20 +1256,20 @@ textarea {
   line-height: 1;
 }
 
-.report-wordmark {
-  color: var(--report-gold);
-  font-size: 38px;
-  font-style: italic;
-  font-weight: 950;
-  letter-spacing: 0;
-  line-height: 0.9;
+.report-wordmark-image {
+  display: block;
+  height: 54px;
+  object-fit: contain;
+  object-position: left center;
+  width: 190px;
 }
 
 .report-wordmark-wrap > span {
   color: #ffffff;
-  font-size: 9px;
+  font-size: 7px;
   font-weight: 900;
-  margin-top: 8px;
+  margin-top: 3px;
+  opacity: 0.86;
   text-transform: uppercase;
 }
 
@@ -1541,11 +1541,12 @@ textarea {
   text-align: center;
 }
 
-.report-manager-signature i {
-  border-bottom: 1.5px solid #252525;
+.report-manager-signature img {
   display: block;
-  height: 25px;
-  width: 130px;
+  height: 38px;
+  mix-blend-mode: multiply;
+  object-fit: contain;
+  width: 140px;
 }
 
 .report-manager-signature strong {

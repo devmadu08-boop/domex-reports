@@ -15,7 +15,7 @@ export function BrandedReportHeader({
     <div className="report-whatsapp-only report-whatsapp-header">
       <header className="report-brand-bar">
         <div className="report-wordmark-wrap">
-          <strong className="report-wordmark">DOMEX</strong>
+          <img src="/report-assets/domex-logo.png" alt="DOMEX - We Deliver Islandwide" className="report-wordmark-image" />
           <span>{companyName}</span>
         </div>
         <div className="report-brand-branch">
@@ -61,7 +61,7 @@ export function BrandedReportFooter({ branchName, summaryLabel, summaryValue, sh
         </span>
         {showManager && (
           <span className="report-manager-signature">
-            <i />
+            <img src="/report-assets/branch-manager-signature.png" alt="Branch Manager signature" />
             <strong>Branch Manager</strong>
             <small>Domex {branch} Branch</small>
           </span>

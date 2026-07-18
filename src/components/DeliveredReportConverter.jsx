@@ -792,7 +792,7 @@ function DeliveredCollectionReportPage({ reportRef, reportDate, riderName, branc
         </div>
       </div>
       </div>
-      <BrandedReportFooter branchName={branchName} summaryLabel="Total Collection Value" summaryValue={formatMoney(totalValue)} showManager={false} />
+      <BrandedReportFooter branchName={branchName} summaryLabel="Total Collection Value" summaryValue={formatMoney(totalValue)} />
     </div>
   );
 }

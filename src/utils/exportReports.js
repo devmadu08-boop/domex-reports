@@ -41,6 +41,7 @@ async function captureElement(element, options = {}) {
   document.body.appendChild(exportHost);
 
   try {
+    await waitForImages(exportClone);
     return await html2canvas(exportClone, {
       backgroundColor: "#ffffff",
       scale,
@@ -54,6 +55,22 @@ async function captureElement(element, options = {}) {
   } finally {
     document.body.removeChild(exportHost);
   }
+}
+
+async function waitForImages(element) {
+  const images = Array.from(element.querySelectorAll("img"));
+  await Promise.all(images.map((image) => {
+    if (image.complete) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timeout = window.setTimeout(resolve, 3000);
+      const finish = () => {
+        window.clearTimeout(timeout);
+        resolve();
+      };
+      image.addEventListener("load", finish, { once: true });
+      image.addEventListener("error", finish, { once: true });
+    });
+  }));
 }
 
 export async function captureElementAsPngDataUrl(element, options = {}) {
