@@ -11,6 +11,7 @@ const DEFAULT_WHATSAPP_CAPTION_TEMPLATES = {
   courier: "Branch Courier Performance Report - {date}\nSent automatically from Daily Report System",
   operation: "Operation Report - {date}\nSent automatically from Daily Report System",
   delivered: "Delivered Collection Report - {date}\nSent automatically from Daily Report System",
+  reschedule: "Reschedule Report - {date}\nSent automatically from Daily Report System",
 };
 const DATA_CHANGED_EVENT = "daily-courier-report-data-changed";
 let suppressChangeEvent = false;
@@ -441,6 +442,7 @@ export function getSettings() {
     deliveredRiderWhatsAppNumbers: {},
     deliveredExportAutoWhatsApp: false,
     convertDefaultGroupJids: [],
+    rescheduleDefaultGroupJids: [],
     backupWhatsappNumber: "",
     ...savedSettings,
     whatsappCaptionTemplates: {
@@ -451,6 +453,7 @@ export function getSettings() {
       courier: [],
       operation: [],
       delivered: [],
+      reschedule: [],
       ...(savedSettings.whatsappCustomCaptionTemplates || {}),
     },
   };

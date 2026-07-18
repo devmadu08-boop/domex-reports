@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarClock, FileDown, Image, ListChecks } from "lucide-react";
-import { addDataChangeListener, getRescheduleRows } from "../services/reportStorage.js";
-import { exportElementsAsPng, exportElementsAsPortraitPdf } from "../utils/exportReports.js";
+import { CalendarClock, FileDown, Image, MessageCircle } from "lucide-react";
+import { addDataChangeListener, getRescheduleRows, getSettings } from "../services/reportStorage.js";
+import { sendRescheduleReportToWhatsApp } from "../services/whatsappApi.js";
+import { captureElementAsPngDataUrl, exportElementsAsPng, exportElementsAsPortraitPdf } from "../utils/exportReports.js";
 
 const rowsPerPage = 18;
 
 export default function RescheduleReport({ selectedDate, branchName = "Middeniya" }) {
   const [rows, setRows] = useState(() => getRescheduleRows(selectedDate));
   const [exporting, setExporting] = useState(false);
+  const [sending, setSending] = useState(false);
   const [status, setStatus] = useState("");
   const pageRefs = useRef([]);
 
@@ -36,6 +38,32 @@ export default function RescheduleReport({ selectedDate, branchName = "Middeniya
     }
   }
 
+  async function sendToWhatsApp() {
+    const elements = pageRefs.current.filter(Boolean);
+    setSending(true);
+    setStatus("");
+    try {
+      const settings = getSettings();
+      const template = settings.whatsappCaptionTemplates?.reschedule
+        || "Reschedule Report - {date}\nSent automatically from Daily Report System";
+      const caption = template
+        .replaceAll("{title}", "Reschedule Report")
+        .replaceAll("{date}", selectedDate);
+
+      for (let index = 0; index < elements.length; index += 1) {
+        const imageDataUrl = await captureElementAsPngDataUrl(elements[index]);
+        const pageCaption = elements.length > 1 ? `${caption}\n\nPage: *${index + 1} / ${elements.length}*` : caption;
+        await sendRescheduleReportToWhatsApp({ imageDataUrl, caption: pageCaption });
+      }
+
+      setStatus(`Reschedule Report sent to WhatsApp: ${elements.length} A4 page${elements.length === 1 ? "" : "s"}.`);
+    } catch (error) {
+      setStatus(error.message || "Could not send the Reschedule Report to WhatsApp.");
+    } finally {
+      setSending(false);
+    }
+  }
+
   pageRefs.current = [];
 
   return (
@@ -55,14 +83,17 @@ export default function RescheduleReport({ selectedDate, branchName = "Middeniya
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:min-w-[560px]">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 lg:min-w-[720px]">
             <Summary label="Parcels" value={rows.length} />
             <Summary label="Riders" value={riderCount} />
-            <button type="button" onClick={() => runExport("png")} disabled={exporting || !rows.length} className="primary-action primary-action-blue min-h-12 disabled:cursor-not-allowed disabled:opacity-45">
+            <button type="button" onClick={() => runExport("png")} disabled={exporting || sending || !rows.length} className="primary-action primary-action-blue min-h-12 disabled:cursor-not-allowed disabled:opacity-45">
               <Image className="h-5 w-5" /> PNG
             </button>
-            <button type="button" onClick={() => runExport("pdf")} disabled={exporting || !rows.length} className="primary-action primary-action-green min-h-12 disabled:cursor-not-allowed disabled:opacity-45">
+            <button type="button" onClick={() => runExport("pdf")} disabled={exporting || sending || !rows.length} className="primary-action primary-action-green min-h-12 disabled:cursor-not-allowed disabled:opacity-45">
               <FileDown className="h-5 w-5" /> PDF
+            </button>
+            <button type="button" onClick={sendToWhatsApp} disabled={exporting || sending || !rows.length} className="primary-action primary-action-green col-span-2 min-h-12 disabled:cursor-not-allowed disabled:opacity-45 sm:col-span-1">
+              <MessageCircle className="h-5 w-5" /> {sending ? "Sending..." : "Send to WhatsApp"}
             </button>
           </div>
         </div>

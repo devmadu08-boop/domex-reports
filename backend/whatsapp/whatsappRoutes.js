@@ -8,10 +8,12 @@ import {
   saveConvertDefaultGroupJids,
   saveBackupConfig,
   saveDefaultGroupJids,
+  saveRescheduleDefaultGroupJids,
   saveLatestBackupSnapshot,
   sendBackupToWhatsApp,
   sendReportToConvertDefaultGroup,
   sendReportToDefaultGroup,
+  sendReportToRescheduleDefaultGroup,
   sendReportToRecipient,
   sendTextToRecipient,
 } from "./whatsappService.js";
@@ -81,6 +83,15 @@ router.post("/convert-default-group", async (request, response) => {
   }
 });
 
+router.post("/reschedule-default-group", async (request, response) => {
+  try {
+    const config = await saveRescheduleDefaultGroupJids(request.body.groupJids || request.body.groupJid);
+    response.json(config);
+  } catch (error) {
+    sendError(response, error);
+  }
+});
+
 router.post("/send-report", async (request, response) => {
   try {
     response.json(await sendReportToDefaultGroup(request.body));
@@ -92,6 +103,14 @@ router.post("/send-report", async (request, response) => {
 router.post("/send-convert-report", async (request, response) => {
   try {
     response.json(await sendReportToConvertDefaultGroup(request.body));
+  } catch (error) {
+    sendError(response, error);
+  }
+});
+
+router.post("/send-reschedule-report", async (request, response) => {
+  try {
+    response.json(await sendReportToRescheduleDefaultGroup(request.body));
   } catch (error) {
     sendError(response, error);
   }

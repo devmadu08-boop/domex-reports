@@ -30,7 +30,14 @@ async function readConfig() {
     const content = await fs.readFile(configPath, "utf8");
     return normalizeConfig(JSON.parse(content));
   } catch {
-    return { defaultGroupJid: "", defaultGroupJids: [], convertDefaultGroupJid: "", convertDefaultGroupJids: [] };
+    return {
+      defaultGroupJid: "",
+      defaultGroupJids: [],
+      convertDefaultGroupJid: "",
+      convertDefaultGroupJids: [],
+      rescheduleDefaultGroupJid: "",
+      rescheduleDefaultGroupJids: [],
+    };
   }
 }
 
@@ -97,12 +104,17 @@ function normalizeRecipientJid(phoneNumber) {
 function normalizeConfig(config = {}) {
   const defaultGroupJids = normalizeGroupJids(config.defaultGroupJids?.length ? config.defaultGroupJids : config.defaultGroupJid);
   const convertDefaultGroupJids = normalizeGroupJids(config.convertDefaultGroupJids?.length ? config.convertDefaultGroupJids : config.convertDefaultGroupJid);
+  const rescheduleDefaultGroupJids = normalizeGroupJids(
+    config.rescheduleDefaultGroupJids?.length ? config.rescheduleDefaultGroupJids : config.rescheduleDefaultGroupJid,
+  );
   return {
     ...config,
     defaultGroupJid: defaultGroupJids[0] || "",
     defaultGroupJids,
     convertDefaultGroupJid: convertDefaultGroupJids[0] || "",
     convertDefaultGroupJids,
+    rescheduleDefaultGroupJid: rescheduleDefaultGroupJids[0] || "",
+    rescheduleDefaultGroupJids,
     backupWhatsappNumber: String(config.backupWhatsappNumber || ""),
     latestBackupSnapshot: config.latestBackupSnapshot || null,
     lastDailyBackupDate: config.lastDailyBackupDate || "",
@@ -172,6 +184,8 @@ export async function getWhatsAppStatus() {
     defaultGroupJids: config.defaultGroupJids || [],
     convertDefaultGroupJid: config.convertDefaultGroupJid || "",
     convertDefaultGroupJids: config.convertDefaultGroupJids || [],
+    rescheduleDefaultGroupJid: config.rescheduleDefaultGroupJid || "",
+    rescheduleDefaultGroupJids: config.rescheduleDefaultGroupJids || [],
     backupWhatsappNumber: config.backupWhatsappNumber || "",
     hasBackupSnapshot: Boolean(config.latestBackupSnapshot),
     lastDailyBackupDate: config.lastDailyBackupDate || "",
@@ -244,6 +258,16 @@ export async function saveConvertDefaultGroupJids(groupJids) {
   return writeConfig(normalizeConfig({ ...(await readConfig()), convertDefaultGroupJid: nextGroupJids[0], convertDefaultGroupJids: nextGroupJids }));
 }
 
+export async function saveRescheduleDefaultGroupJids(groupJids) {
+  const nextGroupJids = normalizeGroupJids(groupJids);
+  if (!nextGroupJids.length) throw new Error("At least one Reschedule Report group JID is required.");
+  return writeConfig(normalizeConfig({
+    ...(await readConfig()),
+    rescheduleDefaultGroupJid: nextGroupJids[0],
+    rescheduleDefaultGroupJids: nextGroupJids,
+  }));
+}
+
 async function sendReportToGroups({ imageDataUrl, caption, groupJids, missingGroupMessage }) {
   if (!socket || connectionState !== "connected") {
     throw new Error("WhatsApp is not connected. Scan QR from Settings.");
@@ -294,6 +318,19 @@ export async function sendReportToConvertDefaultGroup({ imageDataUrl, caption })
     caption,
     groupJids: convertDefaultGroupJids,
     missingGroupMessage: "Delivered Report default WhatsApp groups are not selected. Select them in Settings.",
+  });
+}
+
+export async function sendReportToRescheduleDefaultGroup({ imageDataUrl, caption }) {
+  const config = await readConfig();
+  const rescheduleDefaultGroupJids = normalizeGroupJids(
+    config.rescheduleDefaultGroupJids?.length ? config.rescheduleDefaultGroupJids : config.rescheduleDefaultGroupJid,
+  );
+  return sendReportToGroups({
+    imageDataUrl,
+    caption,
+    groupJids: rescheduleDefaultGroupJids,
+    missingGroupMessage: "Reschedule Report default WhatsApp groups are not selected. Select them in Settings.",
   });
 }
 

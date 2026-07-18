@@ -8,6 +8,7 @@ import {
   reconnectWhatsApp,
   saveConvertWhatsAppGroup,
   saveDefaultWhatsAppGroup,
+  saveRescheduleWhatsAppGroup,
 } from "../services/whatsappApi.js";
 
 const templatePresets = {
@@ -32,6 +33,13 @@ const templatePresets = {
     "📌 *Delivered Collection Update*\n📅 {date}\n\nAttached report is ready for review.",
     "👤 *Rider Delivered Collection Summary*\n📅 *{date}*\n\n• Tracking numbers\n• Values\n• Total collection\n\nPlease review.",
   ],
+  reschedule: [
+    "📋 *{title}*\n📅 Date: *{date}*\n\nSent automatically from _Daily Report System_",
+    "🚚 *Daily Reschedule Report*\n🗓️ *{date}*\n\nPlease check the attached rescheduled parcel list.",
+    "✅ *{title}*\nReport Date: *{date}*\n\n_Rider, tracking number and reason details are attached._",
+    "📌 *Reschedule Update*\n📅 {date}\n\nAttached report is ready for branch review.",
+    "🏢 *Branch Reschedule Summary*\n📅 *{date}*\n\nPlease review all rescheduled parcels and reasons.",
+  ],
 };
 
 export default function WhatsAppSettings({ settings, onSaveSettings }) {
@@ -40,6 +48,7 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
   const [groups, setGroups] = useState([]);
   const [selectedGroups, setSelectedGroups] = useState([]);
   const [selectedConvertGroups, setSelectedConvertGroups] = useState(settings.convertDefaultGroupJids || []);
+  const [selectedRescheduleGroups, setSelectedRescheduleGroups] = useState(settings.rescheduleDefaultGroupJids || []);
   const [captionTemplates, setCaptionTemplates] = useState(settings.whatsappCaptionTemplates || {});
   const [customTemplates, setCustomTemplates] = useState(settings.whatsappCustomCaptionTemplates || {});
   const [loading, setLoading] = useState(false);
@@ -55,7 +64,8 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
     setCaptionTemplates(settings.whatsappCaptionTemplates || {});
     setCustomTemplates(settings.whatsappCustomCaptionTemplates || {});
     setSelectedConvertGroups((current) => (current.length ? current : settings.convertDefaultGroupJids || []));
-  }, [settings.whatsappCaptionTemplates, settings.whatsappCustomCaptionTemplates, settings.convertDefaultGroupJids]);
+    setSelectedRescheduleGroups((current) => (current.length ? current : settings.rescheduleDefaultGroupJids || []));
+  }, [settings.whatsappCaptionTemplates, settings.whatsappCustomCaptionTemplates, settings.convertDefaultGroupJids, settings.rescheduleDefaultGroupJids]);
 
   async function refreshStatus() {
     try {
@@ -63,8 +73,14 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
       setStatus(nextStatus);
       const savedGroups = nextStatus.defaultGroupJids?.length ? nextStatus.defaultGroupJids : [nextStatus.defaultGroupJid].filter(Boolean);
       const savedConvertGroups = nextStatus.convertDefaultGroupJids?.length ? nextStatus.convertDefaultGroupJids : [nextStatus.convertDefaultGroupJid].filter(Boolean);
+      const savedRescheduleGroups = nextStatus.rescheduleDefaultGroupJids?.length
+        ? nextStatus.rescheduleDefaultGroupJids
+        : [nextStatus.rescheduleDefaultGroupJid].filter(Boolean);
       setSelectedGroups((current) => (current.length ? current : savedGroups));
       setSelectedConvertGroups((current) => (current.length ? current : savedConvertGroups.length ? savedConvertGroups : settings.convertDefaultGroupJids || []));
+      setSelectedRescheduleGroups((current) => (
+        current.length ? current : savedRescheduleGroups.length ? savedRescheduleGroups : settings.rescheduleDefaultGroupJids || []
+      ));
 
       if (!nextStatus.connected) {
         const qr = await getWhatsAppQr();
@@ -126,6 +142,28 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
     }
   }
 
+  async function handleSaveRescheduleGroup() {
+    setLoading(true);
+    setMessage("");
+    try {
+      await saveRescheduleWhatsAppGroup(selectedRescheduleGroups);
+      await onSaveSettings({
+        ...settings,
+        rescheduleDefaultGroupJids: selectedRescheduleGroups,
+      });
+      setMessage("Reschedule Report default WhatsApp groups saved.");
+      await refreshStatus();
+    } catch (error) {
+      await onSaveSettings({
+        ...settings,
+        rescheduleDefaultGroupJids: selectedRescheduleGroups,
+      });
+      setMessage(`${error.message} Reschedule group selection was saved in app settings, but update/restart the VPS WhatsApp backend to send to that group.`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function toggleGroup(jid) {
     setSelectedGroups((current) => (current.includes(jid) ? current.filter((item) => item !== jid) : [...current, jid]));
   }
@@ -134,12 +172,20 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
     setSelectedConvertGroups((current) => (current.includes(jid) ? current.filter((item) => item !== jid) : [...current, jid]));
   }
 
+  function toggleRescheduleGroup(jid) {
+    setSelectedRescheduleGroups((current) => (current.includes(jid) ? current.filter((item) => item !== jid) : [...current, jid]));
+  }
+
   function clearSelectedGroups() {
     setSelectedGroups([]);
   }
 
   function clearSelectedConvertGroups() {
     setSelectedConvertGroups([]);
+  }
+
+  function clearSelectedRescheduleGroups() {
+    setSelectedRescheduleGroups([]);
   }
 
   function updateTemplate(type, value) {
@@ -185,7 +231,12 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
   const savedMissingConvertGroups = selectedConvertGroups
     .filter((jid) => !groups.some((group) => group.jid === jid) && !savedMissingGroups.some((group) => group.jid === jid))
     .map((jid) => ({ jid, name: jid, participants: 0 }));
-  const groupOptions = [...groups, ...savedMissingGroups, ...savedMissingConvertGroups];
+  const savedMissingRescheduleGroups = selectedRescheduleGroups
+    .filter((jid) => !groups.some((group) => group.jid === jid)
+      && !savedMissingGroups.some((group) => group.jid === jid)
+      && !savedMissingConvertGroups.some((group) => group.jid === jid))
+    .map((jid) => ({ jid, name: jid, participants: 0 }));
+  const groupOptions = [...groups, ...savedMissingGroups, ...savedMissingConvertGroups, ...savedMissingRescheduleGroups];
 
   return (
     <div className="glass-panel p-4 lg:col-span-2">
@@ -319,6 +370,22 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
           </div>
 
           <div className="whatsapp-settings-card">
+            <GroupSelector
+              title="Reschedule Report Default Groups"
+              helper="Daily Reschedule Reports are sent only to the WhatsApp groups selected here."
+              groups={groupOptions}
+              selectedGroups={selectedRescheduleGroups}
+              loading={loading}
+              connected={connected}
+              onFetchGroups={handleFetchGroups}
+              onToggleGroup={toggleRescheduleGroup}
+              onClear={clearSelectedRescheduleGroups}
+              onSave={handleSaveRescheduleGroup}
+              saveLabel="Save Reschedule Groups"
+            />
+          </div>
+
+          <div className="whatsapp-settings-card">
             <div className="mb-3">
               <p className="text-sm font-black text-[#071537]">Report Message Templates</p>
               <p className="text-xs font-semibold text-blue-950/60">Use {"{date}"} and {"{title}"} in the WhatsApp caption.</p>
@@ -344,6 +411,13 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
                 presets={[...templatePresets.delivered, ...(customTemplates.delivered || [])]}
                 onChange={(value) => updateTemplate("delivered", value)}
                 onAddCustom={() => addCustomTemplate("delivered")}
+              />
+              <TemplateField
+                label="Reschedule Report"
+                value={captionTemplates.reschedule || ""}
+                presets={[...templatePresets.reschedule, ...(customTemplates.reschedule || [])]}
+                onChange={(value) => updateTemplate("reschedule", value)}
+                onAddCustom={() => addCustomTemplate("reschedule")}
               />
               <button type="button" onClick={handleSaveTemplates} className="primary-action primary-action-green">
                 <Save className="h-5 w-5" />
