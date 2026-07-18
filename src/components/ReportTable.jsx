@@ -1,12 +1,14 @@
+import { BrandedReportFooter, BrandedReportHeader } from "./ReportBranding.jsx";
+
 export function CourierPerformanceReport({ selectedDate, rows, reportRef, companyName = "Domestic Express (pvt) ltd", branchName = "" }) {
   const displayRows = rows.length > 0 ? rows : Array.from({ length: 5 }, (_, index) => ({ id: `empty-${index}` }));
+  const totalDeliveries = rows.reduce((sum, row) => sum + Number(row.deliveryCount || 0), 0);
 
   return (
-    <div ref={reportRef} className="report-paper w-full min-w-[820px]">
-      <p className="report-company">{companyName}</p>
-      <h2 className="report-title text-2xl">Branch Courier Performance Report</h2>
-      {branchName && <p className="report-branch">Branch: {branchName}</p>}
-      <table className="report-table">
+    <div ref={reportRef} className="report-paper branded-report branded-report-landscape w-full min-w-[820px]">
+      <BrandedReportHeader branchName={branchName} companyName={companyName} accent="Courier" title="Performance Report" date={selectedDate} />
+      <div className="report-branded-content">
+      <table className="report-table branded-data-table">
         <thead>
           <tr>
             <th>Date</th>
@@ -32,6 +34,8 @@ export function CourierPerformanceReport({ selectedDate, rows, reportRef, compan
           ))}
         </tbody>
       </table>
+      </div>
+      <BrandedReportFooter branchName={branchName} summaryLabel="Total Successful Deliveries" summaryValue={totalDeliveries} />
     </div>
   );
 }
@@ -43,11 +47,10 @@ export function OperationReport({ selectedDate, operation, reportRef, companyNam
     (parsePercent(data.sameDayPercent) + parsePercent(data.firstDayPercent)).toFixed(2);
 
   return (
-    <div ref={reportRef} className="report-paper w-full min-w-[820px]">
-      <p className="report-company">{companyName}</p>
-      <h2 className="report-title text-2xl">Operation Report</h2>
-      {branchName && <p className="report-branch">Branch: {branchName}</p>}
-      <table className="report-table">
+    <div ref={reportRef} className="report-paper branded-report branded-report-landscape w-full min-w-[820px]">
+      <BrandedReportHeader branchName={branchName} companyName={companyName} accent="Operation" title="Report" date={selectedDate} />
+      <div className="report-branded-content">
+      <table className="report-table branded-data-table">
         <thead>
           <tr>
             <th rowSpan="2">Date</th>
@@ -86,6 +89,8 @@ export function OperationReport({ selectedDate, operation, reportRef, companyNam
           </tr>
         </tbody>
       </table>
+      </div>
+      <BrandedReportFooter branchName={branchName} summaryLabel="Outward Achievement" summaryValue={data.achievement ? `${data.achievement}%` : "0.00%"} />
     </div>
   );
 }

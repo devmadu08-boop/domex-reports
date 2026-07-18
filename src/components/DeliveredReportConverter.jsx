@@ -8,6 +8,7 @@ import { fetchDomexDeliveredCsv } from "../services/domexAutomationApi.js";
 import { normalizeRiderName, normalizeTrackingNo, parseDeliveredCsv, parseRescheduleCsv, reconcileDeliveredTracking } from "../utils/deliveredReconciliation.js";
 import { parseOutForDeliveryPdf } from "../utils/outForDeliveryPdf.js";
 import DeliveredReconciliationPanel from "./DeliveredReconciliationPanel.jsx";
+import { BrandedReportFooter, BrandedReportHeader } from "./ReportBranding.jsx";
 import SendToWhatsAppButton from "./SendToWhatsAppButton.jsx";
 
 const emptyEntry = {
@@ -436,17 +437,21 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
         if (!exportPrompt.riderPhone) {
           throw new Error("This rider has no saved WhatsApp number. Add it in Settings first.");
         }
-        const imageDataUrl = await captureElementAsPngDataUrl(reportRef.current);
         const riderCaption = `Delivered Collection Report - ${reportDate}\nRider: ${riderName || "-"}\nSent automatically from Daily Report System`;
-        await sendReportToWhatsAppRecipient({
-          phoneNumber: exportPrompt.riderPhone,
-          imageDataUrl,
-          caption: riderCaption,
-        });
-        await sendConvertReportToWhatsApp({
-          imageDataUrl,
-          caption: `${riderCaption}\n\nDefault group copy for rider: ${riderName || "-"}`,
-        });
+        const pageElements = reportPageRefs.current.filter(Boolean);
+        for (let index = 0; index < pageElements.length; index += 1) {
+          const imageDataUrl = await captureElementAsPngDataUrl(pageElements[index]);
+          const pageNote = pageElements.length > 1 ? `\n\nPage: *${index + 1} / ${pageElements.length}*` : "";
+          await sendReportToWhatsAppRecipient({
+            phoneNumber: exportPrompt.riderPhone,
+            imageDataUrl,
+            caption: `${riderCaption}${pageNote}`,
+          });
+          await sendConvertReportToWhatsApp({
+            imageDataUrl,
+            caption: `${riderCaption}\n\nDefault group copy for rider: ${riderName || "-"}${pageNote}`,
+          });
+        }
       }
 
       const nextAutoWhatsApp = Boolean(rememberSendChoice && sendToRiderWhatsApp);
@@ -656,7 +661,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
             tone="red"
             highlight={hasMultiplePdfPages}
           />
-          <SendToWhatsAppButton reportRef={reportRef} reportTitle={`Delivered Collection Report - ${riderName || "-"}`} reportType="delivered" reportDate={reportDate} disabled={!canFinalizeReport} />
+          <SendToWhatsAppButton reportRef={reportRef} reportRefs={reportPageRefs} reportTitle={`Delivered Collection Report - ${riderName || "-"}`} reportType="delivered" reportDate={reportDate} disabled={!canFinalizeReport} />
           <div className="rounded-2xl border border-white/70 bg-white/55 px-4 py-3 text-right sm:col-span-2 lg:col-span-1">
             <p className="text-xs font-black uppercase text-blue-950/60">Total Value</p>
             <p className="text-2xl font-black text-[#071537]">{formatMoney(totalValue)}</p>
@@ -719,17 +724,15 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
 
 function DeliveredCollectionReportPage({ reportRef, reportDate, riderName, branchName, companyName, entries, startIndex, totalValue, includeSpecialTracking, specialValue, pageNumber, pageCount, isFinalPage }) {
   return (
-    <div ref={reportRef} className={`report-paper a4-portrait-report delivered-report-page ${isFinalPage ? "delivered-final-page" : "delivered-continuation-page"}`}>
-      <p className="report-company">{companyName}</p>
-      <h2 className="report-title text-2xl">Delivered Collection Report</h2>
+    <div ref={reportRef} className={`report-paper branded-report a4-portrait-report delivered-report-page ${isFinalPage ? "delivered-final-page" : "delivered-continuation-page"}`}>
+      <BrandedReportHeader branchName={branchName} companyName={companyName} accent="Delivered" title="Collection Report" date={reportDate} pageNumber={pageNumber} pageCount={pageCount} />
+      <div className="report-branded-content">
       <div className="delivered-report-meta">
-        <p>Date: {reportDate}</p>
-        <p className="text-right">Rider Name: {riderName || "-"}</p>
-        {branchName && <p>Branch: {branchName}</p>}
-        <p className="text-right">Page: {pageNumber} / {pageCount}</p>
+        <p>Rider Name</p>
+        <p className="text-right">{riderName || "-"}</p>
       </div>
 
-      <table className="report-table delivered-money-table">
+      <table className="report-table branded-data-table delivered-money-table numbered-report-table">
         <thead>
           <tr>
             <th style={{ width: "56px" }}>No</th>
@@ -745,7 +748,7 @@ function DeliveredCollectionReportPage({ reportRef, reportDate, riderName, branc
           ) : (
             entries.map((entry, index) => (
               <tr key={`${entry.trackingNo}-${index}`} className={isSpecialTrackingNo(entry.trackingNo) ? "special-tracking-muted" : ""}>
-                <td>{startIndex + index + 1}</td>
+                <td><span className="report-row-number">{startIndex + index + 1}</span></td>
                 <td>{entry.trackingNo}</td>
                 <td className="money-cell">{formatMoney(parseMoney(entry.value))}</td>
               </tr>
@@ -778,13 +781,15 @@ function DeliveredCollectionReportPage({ reportRef, reportDate, riderName, branc
           <p>මුදල් ලබාගත් බවට අත්සන</p>
         </div>
       </div>
+      </div>
+      <BrandedReportFooter branchName={branchName} summaryLabel="Total Collection Value" summaryValue={formatMoney(totalValue)} showManager={false} />
     </div>
   );
 }
 
 function paginateDeliveredEntries(entries) {
-  const normalRowsPerPage = 24;
-  const finalRowsPerPage = 18;
+  const normalRowsPerPage = 16;
+  const finalRowsPerPage = 12;
 
   if (!entries.length) {
     return [{ entries: [], startIndex: 0, isFinalPage: true }];
