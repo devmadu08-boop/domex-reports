@@ -7,6 +7,7 @@ import { sendConvertReportToWhatsApp, sendReportToWhatsAppRecipient, sendTextToW
 import { fetchDomexDeliveredCsv } from "../services/domexAutomationApi.js";
 import { normalizeRiderName, normalizeTrackingNo, parseDeliveredCsv, parseRescheduleCsv, reconcileDeliveredTracking } from "../utils/deliveredReconciliation.js";
 import { parseOutForDeliveryPdf } from "../utils/outForDeliveryPdf.js";
+import { buildDeliveredRiderWhatsAppCaption } from "../utils/deliveredRiderWhatsAppTemplates.js";
 import DeliveredReconciliationPanel from "./DeliveredReconciliationPanel.jsx";
 import { BrandedReportFooter, BrandedReportHeader } from "./ReportBranding.jsx";
 import SendToWhatsAppButton from "./SendToWhatsAppButton.jsx";
@@ -437,7 +438,17 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
         if (!exportPrompt.riderPhone) {
           throw new Error("This rider has no saved WhatsApp number. Add it in Settings first.");
         }
-        const riderCaption = `Delivered Collection Report - ${reportDate}\nRider: ${riderName || "-"}\nSent automatically from Daily Report System`;
+        const currentSettings = getSettings();
+        const riderCaption = buildDeliveredRiderWhatsAppCaption({
+          settings: currentSettings,
+          riderName,
+          reportDate,
+          branchName: branchName || defaultBranchName,
+          outForDeliveryCount: reconciliation?.outForDeliveryCount ?? sources.outForDelivery?.count ?? 0,
+          deliveredCount: reconciliation?.deliveredCount ?? sources.delivered?.count ?? entries.length,
+          rescheduleCount: reconciliation?.rescheduledCount ?? sources.reschedule?.count ?? 0,
+          amount: formatMoney(totalValue),
+        });
         const pageElements = reportPageRefs.current.filter(Boolean);
         for (let index = 0; index < pageElements.length; index += 1) {
           const imageDataUrl = await captureElementAsPngDataUrl(pageElements[index], { whatsappBranded: true });

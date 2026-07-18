@@ -1,5 +1,7 @@
 import { LogOut, MessageCircle, Plus, RefreshCw, Save, Users } from "lucide-react";
 import { useEffect, useState } from "react";
+import { getAllDeliveredRiderNames } from "../services/reportStorage.js";
+import { DEFAULT_DELIVERED_RIDER_TEMPLATE, DELIVERED_RIDER_TEMPLATE_PRESETS } from "../utils/deliveredRiderWhatsAppTemplates.js";
 import {
   fetchWhatsAppGroups,
   getWhatsAppQr,
@@ -51,6 +53,9 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
   const [selectedRescheduleGroups, setSelectedRescheduleGroups] = useState(settings.rescheduleDefaultGroupJids || []);
   const [captionTemplates, setCaptionTemplates] = useState(settings.whatsappCaptionTemplates || {});
   const [customTemplates, setCustomTemplates] = useState(settings.whatsappCustomCaptionTemplates || {});
+  const [riderDefaultTemplate, setRiderDefaultTemplate] = useState(settings.deliveredRiderDefaultCaptionTemplate || DEFAULT_DELIVERED_RIDER_TEMPLATE);
+  const [riderTemplates, setRiderTemplates] = useState(settings.deliveredRiderCaptionTemplates || {});
+  const [selectedRider, setSelectedRider] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -63,9 +68,11 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
   useEffect(() => {
     setCaptionTemplates(settings.whatsappCaptionTemplates || {});
     setCustomTemplates(settings.whatsappCustomCaptionTemplates || {});
+    setRiderDefaultTemplate(settings.deliveredRiderDefaultCaptionTemplate || DEFAULT_DELIVERED_RIDER_TEMPLATE);
+    setRiderTemplates(settings.deliveredRiderCaptionTemplates || {});
     setSelectedConvertGroups((current) => (current.length ? current : settings.convertDefaultGroupJids || []));
     setSelectedRescheduleGroups((current) => (current.length ? current : settings.rescheduleDefaultGroupJids || []));
-  }, [settings.whatsappCaptionTemplates, settings.whatsappCustomCaptionTemplates, settings.convertDefaultGroupJids, settings.rescheduleDefaultGroupJids]);
+  }, [settings.whatsappCaptionTemplates, settings.whatsappCustomCaptionTemplates, settings.deliveredRiderDefaultCaptionTemplate, settings.deliveredRiderCaptionTemplates, settings.convertDefaultGroupJids, settings.rescheduleDefaultGroupJids]);
 
   async function refreshStatus() {
     try {
@@ -199,6 +206,8 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
         ...settings,
         whatsappCaptionTemplates: captionTemplates,
         whatsappCustomCaptionTemplates: customTemplates,
+        deliveredRiderDefaultCaptionTemplate: riderDefaultTemplate,
+        deliveredRiderCaptionTemplates: riderTemplates,
       });
       setMessage("WhatsApp message templates saved.");
     } catch (error) {
@@ -225,6 +234,28 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
   }
 
   const connected = Boolean(status?.connected);
+  const riderOptions = [...new Set([
+    ...getAllDeliveredRiderNames(),
+    ...Object.keys(settings.deliveredRiderWhatsAppNumbers || {}),
+    ...Object.keys(riderTemplates || {}),
+  ])].filter(Boolean).sort((a, b) => a.localeCompare(b));
+  const activeRider = selectedRider || riderOptions[0] || "";
+  const activeRiderTemplate = activeRider ? riderTemplates[activeRider] ?? riderDefaultTemplate : riderDefaultTemplate;
+
+  function updateActiveRiderTemplate(value) {
+    if (!activeRider) return;
+    setRiderTemplates((current) => ({ ...current, [activeRider]: value }));
+  }
+
+  function useDefaultForActiveRider() {
+    if (!activeRider) return;
+    setRiderTemplates((current) => {
+      const next = { ...current };
+      delete next[activeRider];
+      return next;
+    });
+    setMessage(`${activeRider} will use the branch default rider template. Click Save Templates to keep it.`);
+  }
   const savedMissingGroups = selectedGroups
     .filter((jid) => !groups.some((group) => group.jid === jid))
     .map((jid) => ({ jid, name: jid, participants: 0 }));
@@ -387,6 +418,57 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
 
           <div className="whatsapp-settings-card">
             <div className="mb-3">
+              <p className="text-sm font-black text-[#071537]">Rider Delivered Message Templates</p>
+              <p className="text-xs font-semibold text-blue-950/60">
+                Presets include emojis and WhatsApp styles. Available fields: {"{date}"}, {"{rider}"}, {"{branch}"}, {"{outForDelivery}"}, {"{delivered}"}, {"{reschedule}"}, {"{amount}"}.
+              </p>
+            </div>
+
+            <div className="grid gap-4">
+              <TemplateField
+                label="Default Rider Template"
+                value={riderDefaultTemplate}
+                presets={DELIVERED_RIDER_TEMPLATE_PRESETS}
+                onChange={setRiderDefaultTemplate}
+              />
+
+              <div className="whatsapp-template-card grid gap-3">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <label className="grid min-w-0 flex-1 gap-2">
+                    <span className="text-sm font-black text-[#071537]">Rider-specific Template</span>
+                    <select
+                      value={activeRider}
+                      onChange={(event) => setSelectedRider(event.target.value)}
+                      className="whatsapp-control h-11 text-sm"
+                    >
+                      {!riderOptions.length && <option value="">Save a rider name/number first</option>}
+                      {riderOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                  </label>
+                  <button type="button" disabled={!activeRider || !(activeRider in riderTemplates)} onClick={useDefaultForActiveRider} className="secondary-action min-h-11 disabled:opacity-45">
+                    Use Default
+                  </button>
+                </div>
+
+                {activeRider && (
+                  <TemplateField
+                    label={`${activeRider}${activeRider in riderTemplates ? " - Custom override" : " - Using default"}`}
+                    value={activeRiderTemplate}
+                    presets={DELIVERED_RIDER_TEMPLATE_PRESETS}
+                    onChange={updateActiveRiderTemplate}
+                  />
+                )}
+              </div>
+
+              <button type="button" onClick={handleSaveTemplates} className="primary-action primary-action-green">
+                <Save className="h-5 w-5" />
+                Save Rider Templates
+              </button>
+            </div>
+          </div>
+
+          <div className="whatsapp-settings-card">
+            <div className="mb-3">
               <p className="text-sm font-black text-[#071537]">Report Message Templates</p>
               <p className="text-xs font-semibold text-blue-950/60">Use {"{date}"} and {"{title}"} in the WhatsApp caption.</p>
             </div>
@@ -517,7 +599,7 @@ function TemplateField({ label, value, presets, onChange, onAddCustom }) {
   return (
     <label className="whatsapp-template-card grid gap-3">
       <span className="text-sm font-black text-[#071537]">{label}</span>
-      <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+      <div className={`grid gap-2 ${onAddCustom ? "md:grid-cols-[1fr_auto]" : ""}`}>
         <select
           value=""
           onChange={(event) => {
@@ -532,10 +614,12 @@ function TemplateField({ label, value, presets, onChange, onAddCustom }) {
             </option>
           ))}
         </select>
-        <button type="button" onClick={onAddCustom} className="secondary-action min-h-11">
-          <Plus className="h-4 w-4" />
-          Add Custom
-        </button>
+        {onAddCustom && (
+          <button type="button" onClick={onAddCustom} className="secondary-action min-h-11">
+            <Plus className="h-4 w-4" />
+            Add Custom
+          </button>
+        )}
       </div>
       <textarea
         value={value}

@@ -1,3 +1,5 @@
+import { DEFAULT_DELIVERED_RIDER_TEMPLATE } from "../utils/deliveredRiderWhatsAppTemplates.js";
+
 const STORAGE_KEY = "daily-courier-report-system-v1";
 const COURIER_NAMES_KEY = "daily-courier-report-system-courier-names-v1";
 const SETTINGS_KEY = "daily-courier-report-system-settings-v1";
@@ -440,6 +442,8 @@ export function getSettings() {
     firestoreRealtimeSync: false,
     cloudLastSyncedAt: "",
     deliveredRiderWhatsAppNumbers: {},
+    deliveredRiderDefaultCaptionTemplate: DEFAULT_DELIVERED_RIDER_TEMPLATE,
+    deliveredRiderCaptionTemplates: {},
     deliveredExportAutoWhatsApp: false,
     convertDefaultGroupJids: [],
     rescheduleDefaultGroupJids: [],
