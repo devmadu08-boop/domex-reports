@@ -17,7 +17,7 @@ export default function SendToWhatsAppButton({ reportRef, reportRefs, reportTitl
       const sendAction = reportType === "delivered" ? sendConvertReportToWhatsApp : sendReportToWhatsApp;
       let groupCount = 1;
       for (let index = 0; index < elements.length; index += 1) {
-        const imageDataUrl = await captureElementAsPngDataUrl(elements[index]);
+        const imageDataUrl = await captureElementAsPngDataUrl(elements[index], { whatsappBranded: true });
         const baseCaption = buildCaption(reportType, reportTitle, reportDate);
         const caption = elements.length > 1 ? `${baseCaption}\n\nPage: *${index + 1} / ${elements.length}*` : baseCaption;
         const result = await sendAction({ imageDataUrl, caption });

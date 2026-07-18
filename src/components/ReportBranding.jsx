@@ -12,7 +12,7 @@ export function BrandedReportHeader({
   const branch = toTitleCase(String(branchName || "Middeniya").trim() || "Middeniya");
 
   return (
-    <>
+    <div className="report-whatsapp-only report-whatsapp-header">
       <header className="report-brand-bar">
         <div className="report-wordmark-wrap">
           <strong className="report-wordmark">DOMEX</strong>
@@ -45,14 +45,14 @@ export function BrandedReportHeader({
           <span><small>Page</small><strong>{pageNumber} / {pageCount}</strong></span>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
 export function BrandedReportFooter({ branchName, summaryLabel, summaryValue, showManager = true }) {
   const branch = toTitleCase(String(branchName || "Middeniya").trim() || "Middeniya");
   return (
-    <footer className="report-branded-footer">
+    <footer className="report-whatsapp-only report-branded-footer">
       <div className="report-summary-panel">
         <span className="report-summary-icon"><PackageCheck aria-hidden="true" /></span>
         <span className="report-summary-copy">

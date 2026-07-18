@@ -7,7 +7,7 @@ function safeFileName(value) {
   return value.replaceAll(" ", "_");
 }
 
-async function captureElement(element) {
+async function captureElement(element, options = {}) {
   if (!element) {
     throw new Error("Report area is not available for export.");
   }
@@ -18,6 +18,12 @@ async function captureElement(element) {
 
   const exportHost = document.createElement("div");
   const exportClone = element.cloneNode(true);
+  if (options.whatsappBranded) {
+    exportClone.classList.add("branded-report");
+    if (!exportClone.classList.contains("a4-portrait-report")) {
+      exportClone.classList.add("branded-report-landscape");
+    }
+  }
   const exportWidth = Math.max(element.scrollWidth, element.getBoundingClientRect().width);
 
   exportHost.style.position = "fixed";
@@ -50,8 +56,8 @@ async function captureElement(element) {
   }
 }
 
-export async function captureElementAsPngDataUrl(element) {
-  const canvas = await captureElement(element);
+export async function captureElementAsPngDataUrl(element, options = {}) {
+  const canvas = await captureElement(element, options);
   return canvas.toDataURL("image/png", 1);
 }
 

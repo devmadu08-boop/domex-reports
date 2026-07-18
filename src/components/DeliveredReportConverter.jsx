@@ -440,7 +440,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
         const riderCaption = `Delivered Collection Report - ${reportDate}\nRider: ${riderName || "-"}\nSent automatically from Daily Report System`;
         const pageElements = reportPageRefs.current.filter(Boolean);
         for (let index = 0; index < pageElements.length; index += 1) {
-          const imageDataUrl = await captureElementAsPngDataUrl(pageElements[index]);
+          const imageDataUrl = await captureElementAsPngDataUrl(pageElements[index], { whatsappBranded: true });
           const pageNote = pageElements.length > 1 ? `\n\nPage: *${index + 1} / ${pageElements.length}*` : "";
           await sendReportToWhatsAppRecipient({
             phoneNumber: exportPrompt.riderPhone,
@@ -724,10 +724,20 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
 
 function DeliveredCollectionReportPage({ reportRef, reportDate, riderName, branchName, companyName, entries, startIndex, totalValue, includeSpecialTracking, specialValue, pageNumber, pageCount, isFinalPage }) {
   return (
-    <div ref={reportRef} className={`report-paper branded-report a4-portrait-report delivered-report-page ${isFinalPage ? "delivered-final-page" : "delivered-continuation-page"}`}>
+    <div ref={reportRef} className={`report-paper a4-portrait-report delivered-report-page ${isFinalPage ? "delivered-final-page" : "delivered-continuation-page"}`}>
       <BrandedReportHeader branchName={branchName} companyName={companyName} accent="Delivered" title="Collection Report" date={reportDate} pageNumber={pageNumber} pageCount={pageCount} />
+      <div className="report-print-only">
+        <p className="report-company">{companyName}</p>
+        <h2 className="report-title text-2xl">Delivered Collection Report</h2>
+        <div className="delivered-report-meta">
+          <p>Date: {reportDate}</p>
+          <p className="text-right">Rider Name: {riderName || "-"}</p>
+          {branchName && <p>Branch: {branchName}</p>}
+          <p className="text-right">Page: {pageNumber} / {pageCount}</p>
+        </div>
+      </div>
       <div className="report-branded-content">
-      <div className="delivered-report-meta">
+      <div className="report-whatsapp-only delivered-report-meta">
         <p>Rider Name</p>
         <p className="text-right">{riderName || "-"}</p>
       </div>
@@ -788,8 +798,8 @@ function DeliveredCollectionReportPage({ reportRef, reportDate, riderName, branc
 }
 
 function paginateDeliveredEntries(entries) {
-  const normalRowsPerPage = 16;
-  const finalRowsPerPage = 12;
+  const normalRowsPerPage = 24;
+  const finalRowsPerPage = 18;
 
   if (!entries.length) {
     return [{ entries: [], startIndex: 0, isFinalPage: true }];

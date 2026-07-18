@@ -5,8 +5,13 @@ export function CourierPerformanceReport({ selectedDate, rows, reportRef, compan
   const totalDeliveries = rows.reduce((sum, row) => sum + Number(row.deliveryCount || 0), 0);
 
   return (
-    <div ref={reportRef} className="report-paper branded-report branded-report-landscape w-full min-w-[820px]">
+    <div ref={reportRef} className="report-paper w-full min-w-[820px]">
       <BrandedReportHeader branchName={branchName} companyName={companyName} accent="Courier" title="Performance Report" date={selectedDate} />
+      <div className="report-print-only">
+        <p className="report-company">{companyName}</p>
+        <h2 className="report-title text-2xl">Branch Courier Performance Report</h2>
+        {branchName && <p className="report-branch">Branch: {branchName}</p>}
+      </div>
       <div className="report-branded-content">
       <table className="report-table branded-data-table">
         <thead>
@@ -47,8 +52,13 @@ export function OperationReport({ selectedDate, operation, reportRef, companyNam
     (parsePercent(data.sameDayPercent) + parsePercent(data.firstDayPercent)).toFixed(2);
 
   return (
-    <div ref={reportRef} className="report-paper branded-report branded-report-landscape w-full min-w-[820px]">
+    <div ref={reportRef} className="report-paper w-full min-w-[820px]">
       <BrandedReportHeader branchName={branchName} companyName={companyName} accent="Operation" title="Report" date={selectedDate} />
+      <div className="report-print-only">
+        <p className="report-company">{companyName}</p>
+        <h2 className="report-title text-2xl">Operation Report</h2>
+        {branchName && <p className="report-branch">Branch: {branchName}</p>}
+      </div>
       <div className="report-branded-content">
       <table className="report-table branded-data-table">
         <thead>

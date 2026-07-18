@@ -1190,6 +1190,18 @@ textarea {
 }
 
 /* Shared DOMEX document styling used by PNG, PDF, and WhatsApp exports. */
+.report-whatsapp-only {
+  display: none !important;
+}
+
+.branded-report .report-whatsapp-only {
+  display: block !important;
+}
+
+.branded-report .report-print-only {
+  display: none !important;
+}
+
 .branded-report {
   --report-maroon: #7b0710;
   --report-red: #a90f19;
@@ -1366,7 +1378,7 @@ textarea {
   line-height: 1.2;
 }
 
-.report-branded-content {
+.branded-report .report-branded-content {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
@@ -1404,7 +1416,7 @@ textarea {
   background: #fffafa;
 }
 
-.report-row-number {
+.branded-report .report-row-number {
   align-items: center;
   background: linear-gradient(145deg, #bd1721, #65050b);
   border-radius: 5px;
@@ -1418,12 +1430,12 @@ textarea {
   padding: 0 5px;
 }
 
-.reschedule-report-table td:nth-child(2) {
+.branded-report .reschedule-report-table td:nth-child(2) {
   font-weight: 800;
   text-align: left;
 }
 
-.reschedule-report-table td:last-child::before {
+.branded-report .reschedule-report-table td:last-child::before {
   color: #e21b2b;
   content: "↻";
   font-size: 18px;
@@ -1432,7 +1444,7 @@ textarea {
   vertical-align: -1px;
 }
 
-.delivered-report-meta {
+.branded-report .delivered-report-meta {
   align-items: center;
   background: #fff4f4;
   border-left: 5px solid var(--report-red);
@@ -1443,13 +1455,13 @@ textarea {
   padding: 8px 12px;
 }
 
-.delivered-report-meta p:first-child {
+.branded-report .delivered-report-meta p:first-child {
   color: #7b0710;
   font-size: 10px;
   text-transform: uppercase;
 }
 
-.delivered-report-meta p:last-child {
+.branded-report .delivered-report-meta p:last-child {
   font-size: 14px;
   font-weight: 900;
 }
@@ -1458,6 +1470,13 @@ textarea {
   background: #fff1d1 !important;
   border-color: #e8b53b;
   color: #69070c;
+}
+
+.branded-report .delivered-money-table th,
+.branded-report .delivered-money-table td {
+  font-size: 10px;
+  height: 24px;
+  padding: 3px 6px;
 }
 
 .report-branded-footer {
