@@ -1,5 +1,5 @@
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
-import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
+import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?worker&url";
 import { findRiderName, findTrackingColumn } from "./outForDeliveryText.js";
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
