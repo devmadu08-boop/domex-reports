@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CloudDownload, FileDown, Image, Plus, RotateCcw, Trash2, Upload } from "lucide-react";
 import { todayIso } from "../utils/date.js";
 import { captureElementAsPngDataUrl, exportElementAsPng, exportElementsAsPortraitPdf } from "../utils/exportReports.js";
-import { deleteDeliveredReport, getAllDeliveredRiderNames, getDeliveredReport, getDeliveredRiderNames, getSettings, saveDeliveredReport as saveDeliveredReportByRider, saveRescheduleRows, saveSettings } from "../services/reportStorage.js";
+import { deleteDeliveredReport, getAllDeliveredRiderNames, getDeliveredReport, getDeliveredRiderNames, getReportByDate, getSettings, saveCourierName, saveDeliveredReport as saveDeliveredReportByRider, saveReportType, saveRescheduleRows, saveSettings } from "../services/reportStorage.js";
 import { sendConvertReportToWhatsApp, sendReportToWhatsAppRecipient, sendTextToWhatsAppRecipient } from "../services/whatsappApi.js";
 import { fetchDomexDeliveredCsv } from "../services/domexAutomationApi.js";
 import { normalizeRiderName, normalizeTrackingNo, parseDeliveredCsv, parseRescheduleCsv, reconcileDeliveredTracking } from "../utils/deliveredReconciliation.js";
@@ -41,6 +41,8 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
   const [domexStatus, setDomexStatus] = useState("");
   const [sources, setSources] = useState(emptySources);
   const [reconciliation, setReconciliation] = useState(null);
+  const [pickupCount, setPickupCount] = useState("");
+  const [reportsGenerated, setReportsGenerated] = useState(false);
   const [reconciliationStatus, setReconciliationStatus] = useState("");
   const [reminderSending, setReminderSending] = useState(false);
   const reportRef = useRef(null);
@@ -62,7 +64,9 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
   const reportPages = useMemo(() => paginateDeliveredEntries(entries), [entries]);
   const pageCount = reportPages.length || 1;
   const hasMultiplePdfPages = pageCount > 1;
-  const canFinalizeReport = entries.length > 0 && Boolean(reconciliation?.checkedAt);
+  const hasValidPickupCount = pickupCount !== "" && Number.isInteger(Number(pickupCount)) && Number(pickupCount) >= 0;
+  const canGenerateReports = entries.length > 0 && Boolean(reconciliation?.checkedAt) && hasValidPickupCount;
+  const canFinalizeReport = canGenerateReports && reportsGenerated;
 
   async function handleOutForDeliveryUpload(event) {
     const file = event.target.files?.[0];
@@ -83,6 +87,8 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
         reschedule: null,
       });
       setEntries([]);
+      setPickupCount("");
+      setReportsGenerated(false);
       setRiderName(parsed.riderName || "");
       setFileName("");
       setReconciliation(null);
@@ -112,6 +118,8 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
         delivered: { fileName: file.name, count: parsed.entries.length, trackingNumbers: parsed.trackingNumbers },
         reschedule: null,
       }));
+      setPickupCount("");
+      setReportsGenerated(false);
       setReconciliation(null);
       setReconciliationStatus(`Delivered report loaded: ${parsed.entries.length} tracking numbers for ${parsed.riderName}.`);
     } catch (error) {
@@ -140,8 +148,10 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
 
       setSources(nextSources);
       setReconciliation(nextReconciliation);
+      setPickupCount("");
+      setReportsGenerated(false);
       saveRescheduleRows(parsed.riderRows, reportDate);
-      persistDeliveredData(nextReconciliation, { sourceFiles: nextSources });
+      persistDeliveredData(nextReconciliation, { sourceFiles: nextSources, pickupCount: "" });
       setSavedRiderNames(getDeliveredRiderNames(reportDate));
       onSaved?.();
 
@@ -151,7 +161,9 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           ? `Reconciliation saved. ${unresolvedCount} missing parcel${unresolvedCount === 1 ? "" : "s"} found.`
           : "Reconciliation saved. Every Out for Delivery parcel is accounted for.",
       );
-      if (unresolvedCount) await sendMissingReminder(nextReconciliation, { automatic: true, sourceFiles: nextSources });
+      if (unresolvedCount) {
+        await sendMissingReminder(nextReconciliation, { automatic: true, sourceFiles: nextSources, savedPickupCount: "" });
+      }
     } catch (error) {
       setReconciliationStatus(error.message || "Could not reconcile Reschedule CSV.");
     } finally {
@@ -194,6 +206,8 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
         reschedule: null,
       }));
       setReconciliation(null);
+      setPickupCount("");
+      setReportsGenerated(false);
       setIncludeSpecialTracking(false);
       setDomexStatus(`DOMEX report loaded successfully: ${parsed.entries.length} tracking rows.`);
     } catch (error) {
@@ -206,12 +220,14 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
   function updateEntry(index, field, value) {
     const nextEntries = entries.map((entry, itemIndex) => (itemIndex === index ? { ...entry, [field]: value } : entry));
     setEntries(nextEntries);
+    setReportsGenerated(false);
     refreshReconciliation(nextEntries);
   }
 
   function deleteEntry(index) {
     const nextEntries = entries.filter((_, itemIndex) => itemIndex !== index);
     setEntries(nextEntries);
+    setReportsGenerated(false);
     refreshReconciliation(nextEntries);
   }
 
@@ -225,6 +241,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
       },
     ];
     setEntries(nextEntries);
+    setReportsGenerated(false);
     refreshReconciliation(nextEntries);
     setNewEntry(emptyEntry);
   }
@@ -237,6 +254,8 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
     setBranchName("");
     setFileName("");
     setIncludeSpecialTracking(false);
+    setPickupCount("");
+    setReportsGenerated(false);
     setNewEntry(emptyEntry);
     setSources(emptySources);
     setReconciliation(null);
@@ -252,15 +271,24 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
       alert("Upload and reconcile all three required files before saving the rider report.");
       return;
     }
+    if (!hasValidPickupCount) {
+      alert("Enter a valid Pickup Count before generating the reports. Zero is allowed.");
+      return;
+    }
     persistDeliveredData(reconciliation, { sourceFiles: sources });
+    const courierRows = upsertCourierPerformanceRow();
+    setReportsGenerated(true);
     setSavedRiderNames(getDeliveredRiderNames(reportDate));
-    onSaved?.();
+    setReconciliationStatus("Delivered Report and Courier Performance Report generated and saved successfully.");
+    onSaved?.({ date: reportDate, courierRows, riderName, message: "Delivered and Courier Performance reports saved successfully." });
   }
 
   function applySavedDeliveredReport(saved) {
     setRiderName(saved.riderName || "");
     setBranchName(saved.branchName || "");
     setEntries(saved.entries || []);
+    setPickupCount(String(saved.pickupCount ?? "0"));
+    setReportsGenerated(true);
     setIncludeSpecialTracking(Boolean(saved.includeSpecialTracking));
     setFileName(saved.fileName || "Saved delivered report");
     setReconciliation(saved.reconciliation || null);
@@ -304,6 +332,8 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
     setBranchName("");
     setFileName("");
     setIncludeSpecialTracking(false);
+    setPickupCount("");
+    setReportsGenerated(false);
     setSources(emptySources);
     setReconciliation(null);
     setReconciliationStatus("");
@@ -316,10 +346,41 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
       branchName,
       entries: overrides.entries || entries,
       includeSpecialTracking,
+      pickupCount: String(overrides.pickupCount ?? pickupCount),
       fileName: overrides.fileName || fileName,
       sourceFiles: overrides.sourceFiles || sources,
       reconciliation: nextReconciliation,
     });
+  }
+
+  function upsertCourierPerformanceRow() {
+    const report = getReportByDate(reportDate);
+    const currentRows = report.courierRows || [];
+    const riderKey = normalizeRiderName(riderName);
+    const existing = currentRows.find((row) => normalizeRiderName(row.courierName) === riderKey);
+    const onRouteCount = reconciliation?.outForDeliveryCount || 0;
+    const deliveryCount = reconciliation?.deliveredCount || 0;
+    const resendCount = reconciliation?.rescheduledCount || 0;
+    const deliveryPercent = onRouteCount > 0 ? ((deliveryCount / onRouteCount) * 100).toFixed(2) : "0.00";
+    const nextRow = {
+      ...(existing || {}),
+      id: existing?.id || createRowId(),
+      courierName: riderName.trim(),
+      onRouteCount: String(onRouteCount),
+      deliveryCount: String(deliveryCount),
+      resendCount: String(resendCount),
+      deliveryPercent,
+      pickupCount: String(Number(pickupCount)),
+      source: "delivered-reconciliation",
+      sourceUpdatedAt: new Date().toISOString(),
+    };
+    const nextRows = existing
+      ? currentRows.map((row) => (row.id === existing.id ? nextRow : row))
+      : [...currentRows, nextRow];
+
+    saveReportType(reportDate, "courierRows", nextRows);
+    saveCourierName(riderName);
+    return nextRows;
   }
 
   function refreshReconciliation(nextEntries) {
@@ -341,6 +402,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
     });
     setSources(nextSources);
     setReconciliation(nextReconciliation);
+    setReportsGenerated(false);
     setReconciliationStatus("Reconciliation refreshed after delivered row changes. Save the rider report to keep the update.");
   }
 
@@ -358,7 +420,10 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
     onSaved?.();
   }
 
-  async function sendMissingReminder(nextReconciliation = reconciliation, { automatic = false, sourceFiles = sources } = {}) {
+  async function sendMissingReminder(
+    nextReconciliation = reconciliation,
+    { automatic = false, sourceFiles = sources, savedPickupCount = pickupCount } = {},
+  ) {
     const missing = unresolvedMissing(nextReconciliation);
     if (!missing.length) return;
 
@@ -387,7 +452,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
         reminderSignature: signature,
       };
       setReconciliation(updated);
-      persistDeliveredData(updated, { sourceFiles });
+      persistDeliveredData(updated, { sourceFiles, pickupCount: savedPickupCount });
       setReconciliationStatus(`Missing parcel reminder sent to ${riderName}.`);
       onSaved?.();
     } catch (error) {
@@ -514,6 +579,54 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           onMarkMissing={(trackingNo) => updateMissingStatus(trackingNo, "missing")}
           onSendReminder={() => sendMissingReminder()}
         />
+
+        {reconciliation && (
+          <div className="mb-5 rounded-3xl border border-amber-200 bg-[#fff7df] p-4 shadow-[10px_10px_24px_rgba(120,80,20,0.12)] md:p-5">
+            <div className="mb-4">
+              <p className="text-xs font-black uppercase text-amber-700">Step 4 - Courier Performance</p>
+              <h3 className="text-lg font-black text-[#071537]">Enter the rider Pickup Count</h3>
+              <p className="mt-1 text-sm font-semibold text-blue-950/65">
+                The other Courier Performance counts are collected automatically from the three uploaded reports.
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <ReadOnlyCount label="On Route Count" value={reconciliation.outForDeliveryCount} helper="Out for Delivery" />
+              <ReadOnlyCount label="Delivery Count" value={reconciliation.deliveredCount} helper="Delivered Report" />
+              <ReadOnlyCount label="Resend Count" value={reconciliation.rescheduledCount} helper="Reschedule Report" />
+              <label className="grid gap-2 rounded-2xl border border-amber-200 bg-white p-3">
+                <span className="text-xs font-black uppercase text-amber-700">Pickup Count</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  inputMode="numeric"
+                  value={pickupCount}
+                  onChange={(event) => {
+                    setPickupCount(event.target.value);
+                    setReportsGenerated(false);
+                  }}
+                  placeholder="Enter pickup count"
+                  className="h-12 w-full rounded-xl border border-amber-200 bg-amber-50 px-3 text-xl font-black text-[#071537] outline-none focus:border-amber-500 focus:ring-4 focus:ring-amber-100"
+                />
+                <span className="text-xs font-bold text-blue-950/55">Manual entry, zero is allowed</span>
+              </label>
+            </div>
+
+            <button
+              type="button"
+              onClick={saveDeliveredReport}
+              disabled={!canGenerateReports}
+              className="primary-action primary-action-green mt-4 min-h-14 w-full disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <Upload className="h-5 w-5" />
+              {reportsGenerated ? "Reports Generated - Save Updates" : "Generate & Save Both Reports"}
+            </button>
+            {!hasValidPickupCount && (
+              <p className="mt-2 text-center text-xs font-black text-amber-800">Enter Pickup Count to enable report generation.</p>
+            )}
+          </div>
+        )}
 
         <div className="grid gap-3 md:grid-cols-3">
           <Field label="Report Date" type="date" value={reportDate} onChange={setReportDate} />
@@ -660,7 +773,6 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
         </div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <ActionButton label="Save Rider Report" icon={Upload} onClick={saveDeliveredReport} disabled={!canFinalizeReport} tone="blue" />
           <ActionButton label="Load Saved" icon={RotateCcw} onClick={loadSavedDeliveredReport} disabled={!reportDate} tone="dark" />
           <ActionButton label="Delete Saved" icon={Trash2} onClick={deleteSavedDeliveredReport} disabled={!reportDate} tone="red" />
           <ActionButton label="Export A4 PNG" icon={Image} onClick={() => openExportPrompt("png")} disabled={!canFinalizeReport} tone="green" />
@@ -688,30 +800,39 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
         )}
       </div>
 
-      <div className="delivered-preview-card rounded-3xl border border-white/70 bg-white/55 p-2 shadow-xl md:overflow-x-auto md:p-0">
-        <div ref={reportRef} className="delivered-preview-stack mobile-a4-preview">
-          {reportPages.map((page, pageIndex) => (
-            <DeliveredCollectionReportPage
-              key={`delivered-page-${pageIndex}`}
-              reportRef={(node) => {
-                if (node) reportPageRefs.current[pageIndex] = node;
-              }}
-              reportDate={reportDate}
-              riderName={riderName}
-              branchName={branchName || defaultBranchName}
-              companyName={companyName}
-              entries={page.entries}
-              startIndex={page.startIndex}
-              totalValue={totalValue}
-              includeSpecialTracking={includeSpecialTracking}
-              specialValue={specialValue}
-              pageNumber={pageIndex + 1}
-              pageCount={pageCount}
-              isFinalPage={page.isFinalPage}
-            />
-          ))}
+      {canFinalizeReport ? (
+        <div className="delivered-preview-card rounded-3xl border border-white/70 bg-white/55 p-2 shadow-xl md:overflow-x-auto md:p-0">
+          <div ref={reportRef} className="delivered-preview-stack mobile-a4-preview">
+            {reportPages.map((page, pageIndex) => (
+              <DeliveredCollectionReportPage
+                key={`delivered-page-${pageIndex}`}
+                reportRef={(node) => {
+                  if (node) reportPageRefs.current[pageIndex] = node;
+                }}
+                reportDate={reportDate}
+                riderName={riderName}
+                branchName={branchName || defaultBranchName}
+                companyName={companyName}
+                entries={page.entries}
+                startIndex={page.startIndex}
+                totalValue={totalValue}
+                includeSpecialTracking={includeSpecialTracking}
+                specialValue={specialValue}
+                pageNumber={pageIndex + 1}
+                pageCount={pageCount}
+                isFinalPage={page.isFinalPage}
+              />
+            ))}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="rounded-3xl border border-dashed border-amber-300 bg-amber-50 px-5 py-10 text-center shadow-inner">
+          <p className="text-lg font-black text-[#071537]">Official report preview is waiting</p>
+          <p className="mt-2 text-sm font-semibold text-blue-950/65">
+            Upload all three files, enter Pickup Count, then select Generate &amp; Save Both Reports.
+          </p>
+        </div>
+      )}
 
       {exportPrompt && (
         <ExportPromptModal
@@ -958,6 +1079,20 @@ function formatMoney(value) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+}
+
+function createRowId() {
+  return globalThis.crypto?.randomUUID?.() || `delivered-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function ReadOnlyCount({ label, value, helper }) {
+  return (
+    <div className="rounded-2xl border border-white bg-white/80 p-3 shadow-inner">
+      <p className="text-xs font-black uppercase text-blue-950/55">{label}</p>
+      <p className="mt-2 text-3xl font-black text-[#071537]">{value || 0}</p>
+      <p className="mt-1 text-xs font-bold text-emerald-700">From {helper}</p>
+    </div>
+  );
 }
 
 function Field({ label, type = "text", value, onChange, placeholder }) {

@@ -418,6 +418,15 @@ export default function App() {
     setHistory(getReportHistory());
   }
 
+  function handleDeliveredReportSaved(result) {
+    refreshHistory();
+    if (result?.date === selectedDate && Array.isArray(result.courierRows)) {
+      setCourierRows(result.courierRows);
+      setCourierNames(getCourierNames());
+    }
+    if (result?.message) showNotice(result.message);
+  }
+
   function loadDate(date) {
     const report = getReportByDate(date);
     const savedSettings = getSettings();
@@ -945,7 +954,7 @@ export default function App() {
           <AllInOneReports companyName={settings.companyName} branchName={settings.branchName || session.branchName} />
         )}
 
-        {activeTab === "deliveredConverter" && <DeliveredReportConverter onSaved={refreshHistory} companyName={settings.companyName} defaultBranchName={settings.branchName} />}
+        {activeTab === "deliveredConverter" && <DeliveredReportConverter onSaved={handleDeliveredReportSaved} companyName={settings.companyName} defaultBranchName={settings.branchName} />}
 
         {activeTab === "reschedule" && (
           <RescheduleReport selectedDate={selectedDate} branchName={settings.branchName || "Middeniya"} />
