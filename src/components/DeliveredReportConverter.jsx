@@ -930,48 +930,31 @@ function DeliveredCollectionReportPage({ reportRef, reportDate, riderName, branc
 }
 
 function paginateDeliveredEntries(entries) {
-  const normalRowsPerPage = 24;
-  const finalRowsPerPage = 18;
+  const rowsPerPage = 20;
 
   if (!entries.length) {
     return [{ entries: [], startIndex: 0, isFinalPage: true }];
   }
 
-  if (entries.length <= finalRowsPerPage) {
+  if (entries.length <= rowsPerPage) {
     return [{ entries, startIndex: 0, isFinalPage: true }];
   }
 
-  const pages = [];
+  const pageCount = Math.ceil(entries.length / rowsPerPage);
+  const basePageSize = Math.floor(entries.length / pageCount);
+  const largerPageCount = entries.length % pageCount;
   let startIndex = 0;
 
-  while (entries.length - startIndex > normalRowsPerPage + finalRowsPerPage) {
-    pages.push({
-      entries: entries.slice(startIndex, startIndex + normalRowsPerPage),
+  return Array.from({ length: pageCount }, (_, pageIndex) => {
+    const pageSize = basePageSize + (pageIndex < largerPageCount ? 1 : 0);
+    const page = {
+      entries: entries.slice(startIndex, startIndex + pageSize),
       startIndex,
-      isFinalPage: false,
-    });
-    startIndex += normalRowsPerPage;
-  }
-
-  if (entries.length - startIndex > finalRowsPerPage) {
-    const remaining = entries.length - startIndex;
-    const take = Math.min(normalRowsPerPage, Math.max(Math.ceil(remaining / 2), remaining - finalRowsPerPage));
-
-    pages.push({
-      entries: entries.slice(startIndex, startIndex + take),
-      startIndex,
-      isFinalPage: false,
-    });
-    startIndex += take;
-  }
-
-  pages.push({
-    entries: entries.slice(startIndex),
-    startIndex,
-    isFinalPage: true,
+      isFinalPage: pageIndex === pageCount - 1,
+    };
+    startIndex += pageSize;
+    return page;
   });
-
-  return pages;
 }
 
 function assertRiderMatches(outForDeliveryRider, deliveredRider) {
