@@ -51,11 +51,10 @@ export default function RescheduleReport({ selectedDate, branchName = "Middeniya
         .replaceAll("{title}", "Reschedule Report")
         .replaceAll("{date}", selectedDate);
 
-      for (let index = 0; index < elements.length; index += 1) {
-        const imageDataUrl = await captureElementAsPngDataUrl(elements[index], { whatsappBranded: true });
-        const pageCaption = elements.length > 1 ? `${caption}\n\nPage: *${index + 1} / ${elements.length}*` : caption;
-        await sendRescheduleReportToWhatsApp({ imageDataUrl, caption: pageCaption });
-      }
+      const imageDataUrls = await Promise.all(
+        elements.map((element) => captureElementAsPngDataUrl(element, { whatsappBranded: true })),
+      );
+      await sendRescheduleReportToWhatsApp({ imageDataUrls, caption });
 
       setStatus(`Reschedule Report sent to WhatsApp: ${elements.length} A4 page${elements.length === 1 ? "" : "s"}.`);
     } catch (error) {

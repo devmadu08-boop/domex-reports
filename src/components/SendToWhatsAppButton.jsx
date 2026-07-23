@@ -15,14 +15,14 @@ export default function SendToWhatsAppButton({ reportRef, reportRefs, reportTitl
     try {
       const elements = reportRefs?.current?.filter(Boolean)?.length ? reportRefs.current.filter(Boolean) : [reportRef.current].filter(Boolean);
       const sendAction = reportType === "delivered" ? sendConvertReportToWhatsApp : sendReportToWhatsApp;
-      let groupCount = 1;
-      for (let index = 0; index < elements.length; index += 1) {
-        const imageDataUrl = await captureElementAsPngDataUrl(elements[index], { whatsappBranded: true });
-        const baseCaption = buildCaption(reportType, reportTitle, reportDate);
-        const caption = elements.length > 1 ? `${baseCaption}\n\nPage: *${index + 1} / ${elements.length}*` : baseCaption;
-        const result = await sendAction({ imageDataUrl, caption });
-        groupCount = result.sentCount || 1;
-      }
+      const imageDataUrls = await Promise.all(
+        elements.map((element) => captureElementAsPngDataUrl(element, { whatsappBranded: true })),
+      );
+      const result = await sendAction({
+        imageDataUrls,
+        caption: buildCaption(reportType, reportTitle, reportDate),
+      });
+      const groupCount = result.sentCount || 1;
       setMessage(`${elements.length} page${elements.length === 1 ? "" : "s"} sent to ${groupCount} WhatsApp group${groupCount === 1 ? "" : "s"} successfully.`);
     } catch (error) {
       setMessage(error.message || "Send failed.");

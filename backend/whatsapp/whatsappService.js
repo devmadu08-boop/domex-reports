@@ -268,7 +268,43 @@ export async function saveRescheduleDefaultGroupJids(groupJids) {
   }));
 }
 
-async function sendReportToGroups({ imageDataUrl, caption, groupJids, missingGroupMessage }) {
+function getReportImageBuffers({ imageDataUrl, imageDataUrls }) {
+  const urls = Array.isArray(imageDataUrls) && imageDataUrls.length
+    ? imageDataUrls
+    : [imageDataUrl].filter(Boolean);
+
+  if (!urls.length || urls.some((url) => !url?.startsWith("data:image/png;base64,"))) {
+    throw new Error("One or more PNG report images are required.");
+  }
+
+  return urls.map((url) => Buffer.from(url.split(",")[1], "base64"));
+}
+
+async function sendReportImages(recipientJid, imageBuffers, caption) {
+  if (imageBuffers.length === 1) {
+    await socket.sendMessage(recipientJid, {
+      image: imageBuffers[0],
+      caption,
+    });
+    return;
+  }
+
+  const albumMessage = await socket.sendMessage(recipientJid, {
+    album: {
+      expectedImageCount: imageBuffers.length,
+    },
+  });
+
+  for (let index = 0; index < imageBuffers.length; index += 1) {
+    await socket.sendMessage(recipientJid, {
+      image: imageBuffers[index],
+      ...(index === 0 && caption ? { caption } : {}),
+      albumParentKey: albumMessage.key,
+    });
+  }
+}
+
+async function sendReportToGroups({ imageDataUrl, imageDataUrls, caption, groupJids, missingGroupMessage }) {
   if (!socket || connectionState !== "connected") {
     throw new Error("WhatsApp is not connected. Scan QR from Settings.");
   }
@@ -278,16 +314,9 @@ async function sendReportToGroups({ imageDataUrl, caption, groupJids, missingGro
     throw new Error(missingGroupMessage || "Default WhatsApp groups are not selected. Select groups in Settings.");
   }
 
-  if (!imageDataUrl?.startsWith("data:image/png;base64,")) {
-    throw new Error("A PNG report image is required.");
-  }
-
-  const imageBuffer = Buffer.from(imageDataUrl.split(",")[1], "base64");
+  const imageBuffers = getReportImageBuffers({ imageDataUrl, imageDataUrls });
   for (const groupJid of targetGroupJids) {
-    await socket.sendMessage(groupJid, {
-      image: imageBuffer,
-      caption,
-    });
+    await sendReportImages(groupJid, imageBuffers, caption);
   }
 
   return {
@@ -295,46 +324,50 @@ async function sendReportToGroups({ imageDataUrl, caption, groupJids, missingGro
     groupJid: targetGroupJids[0],
     groupJids: targetGroupJids,
     sentCount: targetGroupJids.length,
+    mediaCount: imageBuffers.length,
     sentAt: new Date().toISOString(),
   };
 }
 
-export async function sendReportToDefaultGroup({ imageDataUrl, caption }) {
+export async function sendReportToDefaultGroup({ imageDataUrl, imageDataUrls, caption }) {
   const config = await readConfig();
   const defaultGroupJids = normalizeGroupJids(config.defaultGroupJids?.length ? config.defaultGroupJids : config.defaultGroupJid);
   return sendReportToGroups({
     imageDataUrl,
+    imageDataUrls,
     caption,
     groupJids: defaultGroupJids,
     missingGroupMessage: "Default WhatsApp groups are not selected. Select groups in Settings.",
   });
 }
 
-export async function sendReportToConvertDefaultGroup({ imageDataUrl, caption }) {
+export async function sendReportToConvertDefaultGroup({ imageDataUrl, imageDataUrls, caption }) {
   const config = await readConfig();
   const convertDefaultGroupJids = normalizeGroupJids(config.convertDefaultGroupJids?.length ? config.convertDefaultGroupJids : config.convertDefaultGroupJid);
   return sendReportToGroups({
     imageDataUrl,
+    imageDataUrls,
     caption,
     groupJids: convertDefaultGroupJids,
     missingGroupMessage: "Delivered Report default WhatsApp groups are not selected. Select them in Settings.",
   });
 }
 
-export async function sendReportToRescheduleDefaultGroup({ imageDataUrl, caption }) {
+export async function sendReportToRescheduleDefaultGroup({ imageDataUrl, imageDataUrls, caption }) {
   const config = await readConfig();
   const rescheduleDefaultGroupJids = normalizeGroupJids(
     config.rescheduleDefaultGroupJids?.length ? config.rescheduleDefaultGroupJids : config.rescheduleDefaultGroupJid,
   );
   return sendReportToGroups({
     imageDataUrl,
+    imageDataUrls,
     caption,
     groupJids: rescheduleDefaultGroupJids,
     missingGroupMessage: "Reschedule Report default WhatsApp groups are not selected. Select them in Settings.",
   });
 }
 
-export async function sendReportToRecipient({ phoneNumber, imageDataUrl, caption }) {
+export async function sendReportToRecipient({ phoneNumber, imageDataUrl, imageDataUrls, caption }) {
   if (!socket || connectionState !== "connected") {
     throw new Error("WhatsApp is not connected. Scan QR from Settings.");
   }
@@ -344,20 +377,14 @@ export async function sendReportToRecipient({ phoneNumber, imageDataUrl, caption
     throw new Error("Rider WhatsApp number is required.");
   }
 
-  if (!imageDataUrl?.startsWith("data:image/png;base64,")) {
-    throw new Error("A PNG report image is required.");
-  }
-
-  const imageBuffer = Buffer.from(imageDataUrl.split(",")[1], "base64");
-  await socket.sendMessage(recipientJid, {
-    image: imageBuffer,
-    caption,
-  });
+  const imageBuffers = getReportImageBuffers({ imageDataUrl, imageDataUrls });
+  await sendReportImages(recipientJid, imageBuffers, caption);
 
   return {
     ok: true,
     recipientJid,
     sentCount: 1,
+    mediaCount: imageBuffers.length,
     sentAt: new Date().toISOString(),
   };
 }

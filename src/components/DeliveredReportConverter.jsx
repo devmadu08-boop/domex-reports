@@ -567,19 +567,18 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           amount: formatMoney(totalValue),
         });
         const pageElements = reportPageRefs.current.filter(Boolean);
-        for (let index = 0; index < pageElements.length; index += 1) {
-          const imageDataUrl = await captureElementAsPngDataUrl(pageElements[index], { whatsappBranded: true });
-          const pageNote = pageElements.length > 1 ? `\n\nPage: *${index + 1} / ${pageElements.length}*` : "";
-          await sendReportToWhatsAppRecipient({
-            phoneNumber: exportPrompt.riderPhone,
-            imageDataUrl,
-            caption: `${riderCaption}${pageNote}`,
-          });
-          await sendConvertReportToWhatsApp({
-            imageDataUrl,
-            caption: `${riderCaption}\n\nDefault group copy for rider: ${riderName || "-"}${pageNote}`,
-          });
-        }
+        const imageDataUrls = await Promise.all(
+          pageElements.map((element) => captureElementAsPngDataUrl(element, { whatsappBranded: true })),
+        );
+        await sendReportToWhatsAppRecipient({
+          phoneNumber: exportPrompt.riderPhone,
+          imageDataUrls,
+          caption: riderCaption,
+        });
+        await sendConvertReportToWhatsApp({
+          imageDataUrls,
+          caption: `${riderCaption}\n\nDefault group copy for rider: ${riderName || "-"}`,
+        });
       }
 
       const nextAutoWhatsApp = Boolean(rememberSendChoice && sendToRiderWhatsApp);

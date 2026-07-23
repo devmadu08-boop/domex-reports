@@ -99,31 +99,31 @@ export function saveRescheduleWhatsAppGroup(groupJids) {
   });
 }
 
-export function sendReportToWhatsApp({ imageDataUrl, caption }) {
+export function sendReportToWhatsApp({ imageDataUrl, imageDataUrls, caption }) {
   return requestJson("/send-report", {
     method: "POST",
-    body: JSON.stringify({ imageDataUrl, caption }),
+    body: JSON.stringify({ imageDataUrl, imageDataUrls, caption }),
   });
 }
 
-export function sendConvertReportToWhatsApp({ imageDataUrl, caption }) {
+export function sendConvertReportToWhatsApp({ imageDataUrl, imageDataUrls, caption }) {
   return requestJson("/send-convert-report", {
     method: "POST",
-    body: JSON.stringify({ imageDataUrl, caption }),
+    body: JSON.stringify({ imageDataUrl, imageDataUrls, caption }),
   });
 }
 
-export function sendRescheduleReportToWhatsApp({ imageDataUrl, caption }) {
+export function sendRescheduleReportToWhatsApp({ imageDataUrl, imageDataUrls, caption }) {
   return requestJson("/send-reschedule-report", {
     method: "POST",
-    body: JSON.stringify({ imageDataUrl, caption }),
+    body: JSON.stringify({ imageDataUrl, imageDataUrls, caption }),
   });
 }
 
-export function sendReportToWhatsAppRecipient({ phoneNumber, imageDataUrl, caption }) {
+export function sendReportToWhatsAppRecipient({ phoneNumber, imageDataUrl, imageDataUrls, caption }) {
   return requestJson("/send-report-to-recipient", {
     method: "POST",
-    body: JSON.stringify({ phoneNumber, imageDataUrl, caption }),
+    body: JSON.stringify({ phoneNumber, imageDataUrl, imageDataUrls, caption }),
   });
 }
 
