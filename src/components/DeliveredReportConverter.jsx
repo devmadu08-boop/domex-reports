@@ -6,6 +6,7 @@ import { deleteDeliveredReport, getAllDeliveredRiderNames, getDeliveredReport, g
 import { sendConvertReportToWhatsApp, sendReportToWhatsAppRecipient, sendTextToWhatsAppRecipient } from "../services/whatsappApi.js";
 import { fetchDomexDeliveredCsv } from "../services/domexAutomationApi.js";
 import { normalizeRiderName, normalizeTrackingNo, parseDeliveredCsv, parseRescheduleCsv, reconcileDeliveredTracking } from "../utils/deliveredReconciliation.js";
+import { getReconciliationReviewStatus, normalizeReconciliationReview } from "../utils/deliveredReconciliationReview.js";
 import { parseOutForDeliveryPdf } from "../utils/outForDeliveryPdf.js";
 import { buildDeliveredRiderWhatsAppCaption } from "../utils/deliveredRiderWhatsAppTemplates.js";
 import DeliveredReconciliationPanel from "./DeliveredReconciliationPanel.jsx";
@@ -64,8 +65,9 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
   const reportPages = useMemo(() => paginateDeliveredEntries(entries), [entries]);
   const pageCount = reportPages.length || 1;
   const hasMultiplePdfPages = pageCount > 1;
+  const reviewStatus = useMemo(() => getReconciliationReviewStatus(reconciliation), [reconciliation]);
   const hasValidPickupCount = pickupCount !== "" && Number.isInteger(Number(pickupCount)) && Number(pickupCount) >= 0;
-  const canGenerateReports = entries.length > 0 && Boolean(reconciliation?.checkedAt) && hasValidPickupCount;
+  const canGenerateReports = entries.length > 0 && Boolean(reconciliation?.checkedAt) && reviewStatus.ready && hasValidPickupCount;
   const canFinalizeReport = canGenerateReports && reportsGenerated;
 
   async function handleOutForDeliveryUpload(event) {
@@ -271,6 +273,10 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
       alert("Upload and reconcile all three required files before saving the rider report.");
       return;
     }
+    if (!reviewStatus.ready) {
+      alert("Complete the Rescheduled checks, classify unmatched parcels, and resolve any conflicting tracking records before generating the reports.");
+      return;
+    }
     if (!hasValidPickupCount) {
       alert("Enter a valid Pickup Count before generating the reports. Zero is allowed.");
       return;
@@ -291,8 +297,9 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
     setReportsGenerated(true);
     setIncludeSpecialTracking(Boolean(saved.includeSpecialTracking));
     setFileName(saved.fileName || "Saved delivered report");
-    setReconciliation(saved.reconciliation || null);
-    setSources(saved.sourceFiles?.outForDelivery ? saved.sourceFiles : sourcesFromReconciliation(saved.reconciliation));
+    const savedReconciliation = withBalancedStatus(normalizeReconciliationReview(saved.reconciliation));
+    setReconciliation(savedReconciliation);
+    setSources(saved.sourceFiles?.outForDelivery ? saved.sourceFiles : sourcesFromReconciliation(savedReconciliation));
     setReconciliationStatus(saved.reconciliation ? "Saved reconciliation loaded." : "This older report needs all three source files before its next export.");
   }
 
@@ -420,6 +427,49 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
     onSaved?.();
   }
 
+  function updateRescheduledConfirmation(trackingNo, confirmed) {
+    if (!reconciliation) return;
+    const normalizedTrackingNo = normalizeTrackingNo(trackingNo);
+    const rescheduledParcels = reconciliation.rescheduledParcels.map((item) =>
+      item.trackingNo === normalizedTrackingNo
+        ? { ...item, confirmed, confirmedAt: confirmed ? new Date().toISOString() : "" }
+        : item,
+    );
+    saveReconciliationReview({ ...reconciliation, rescheduledParcels }, confirmed ? `${normalizedTrackingNo} confirmed as Rescheduled.` : `${normalizedTrackingNo} confirmation removed.`);
+  }
+
+  function confirmAllRescheduled() {
+    if (!reconciliation) return;
+    const confirmedAt = new Date().toISOString();
+    const rescheduledParcels = reconciliation.rescheduledParcels.map((item) => ({
+      ...item,
+      confirmed: true,
+      confirmedAt: item.confirmedAt || confirmedAt,
+    }));
+    saveReconciliationReview({ ...reconciliation, rescheduledParcels }, "All Rescheduled parcels confirmed.");
+  }
+
+  function updateMissingReason(trackingNo, reason) {
+    if (!reconciliation) return;
+    const normalizedTrackingNo = normalizeTrackingNo(trackingNo);
+    const missingParcels = reconciliation.missingParcels.map((item) =>
+      item.trackingNo === normalizedTrackingNo ? { ...item, reason } : item,
+    );
+    saveReconciliationReview(
+      { ...reconciliation, missingParcels },
+      reason ? `${normalizedTrackingNo} classified as ${reason}.` : `${normalizedTrackingNo} reason cleared.`,
+    );
+  }
+
+  function saveReconciliationReview(nextReconciliation, message) {
+    const reviewed = withBalancedStatus(normalizeReconciliationReview({ ...nextReconciliation, updatedAt: new Date().toISOString() }));
+    setReconciliation(reviewed);
+    setReportsGenerated(false);
+    persistDeliveredData(reviewed);
+    setReconciliationStatus(message);
+    onSaved?.();
+  }
+
   async function sendMissingReminder(
     nextReconciliation = reconciliation,
     { automatic = false, sourceFiles = sources, savedPickupCount = pickupCount } = {},
@@ -512,6 +562,8 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           outForDeliveryCount: reconciliation?.outForDeliveryCount ?? sources.outForDelivery?.count ?? 0,
           deliveredCount: reconciliation?.deliveredCount ?? sources.delivered?.count ?? entries.length,
           rescheduleCount: reconciliation?.rescheduledCount ?? sources.reschedule?.count ?? 0,
+          missrouteCount: reviewStatus.missrouteCount,
+          returnCount: reviewStatus.returnCount,
           amount: formatMoney(totalValue),
         });
         const pageElements = reportPageRefs.current.filter(Boolean);
@@ -577,6 +629,9 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           onRescheduleUpload={handleRescheduleUpload}
           onMarkFound={(trackingNo) => updateMissingStatus(trackingNo, "found")}
           onMarkMissing={(trackingNo) => updateMissingStatus(trackingNo, "missing")}
+          onToggleRescheduled={updateRescheduledConfirmation}
+          onConfirmAllRescheduled={confirmAllRescheduled}
+          onMissingReasonChange={updateMissingReason}
           onSendReminder={() => sendMissingReminder()}
         />
 
@@ -624,6 +679,11 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
             </button>
             {!hasValidPickupCount && (
               <p className="mt-2 text-center text-xs font-black text-amber-800">Enter Pickup Count to enable report generation.</p>
+            )}
+            {!reviewStatus.ready && (
+              <p className="mt-2 text-center text-xs font-black text-red-700">
+                Complete the Rescheduled confirmation and unmatched parcel reasons above to enable report generation.
+              </p>
             )}
           </div>
         )}
@@ -977,13 +1037,15 @@ function createReconciliation({ outTracking, deliveredEntries, rescheduledTracki
   const missingParcels = result.missing.map((trackingNo) => ({
     trackingNo,
     status: previousMissing.get(trackingNo)?.status || "missing",
+    reason: previousMissing.get(trackingNo)?.reason || "",
     detectedAt: previousMissing.get(trackingNo)?.detectedAt || detectedAt,
     foundAt: previousMissing.get(trackingNo)?.foundAt || "",
   }));
 
-  return withBalancedStatus({
+  return withBalancedStatus(normalizeReconciliationReview({
     ...result,
     missingParcels,
+    rescheduledParcels: previous?.rescheduledParcels || [],
     outForDeliveryTracking: [...new Set(outTracking.map(normalizeTrackingNo).filter(Boolean))],
     deliveredTracking: [...new Set(deliveredTracking)],
     rescheduledTracking: [...new Set(rescheduledTracking.map(normalizeTrackingNo).filter(Boolean))],
@@ -995,14 +1057,16 @@ function createReconciliation({ outTracking, deliveredEntries, rescheduledTracki
     checkedAt: detectedAt,
     reminderSentAt: previous?.reminderSentAt || "",
     reminderSignature: previous?.reminderSignature || "",
-  });
+  }));
 }
 
 function withBalancedStatus(reconciliation) {
+  if (!reconciliation) return null;
+  const reviewStatus = getReconciliationReviewStatus(reconciliation);
   return {
     ...reconciliation,
     balanced:
-      unresolvedMissing(reconciliation).length === 0 &&
+      reviewStatus.ready &&
       (reconciliation.extraDelivered?.length || 0) === 0 &&
       (reconciliation.extraRescheduled?.length || 0) === 0 &&
       (reconciliation.deliveredAndRescheduled?.length || 0) === 0,

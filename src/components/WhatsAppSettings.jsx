@@ -420,7 +420,7 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
             <div className="mb-3">
               <p className="text-sm font-black text-[#071537]">Rider Delivered Message Templates</p>
               <p className="text-xs font-semibold text-blue-950/60">
-                Presets include emojis and WhatsApp styles. Available fields: {"{date}"}, {"{rider}"}, {"{branch}"}, {"{outForDelivery}"}, {"{delivered}"}, {"{reschedule}"}, {"{amount}"}.
+                Presets include emojis and WhatsApp styles. Available fields: {"{date}"}, {"{rider}"}, {"{branch}"}, {"{outForDelivery}"}, {"{delivered}"}, {"{reschedule}"}, {"{missroute}"}, {"{return}"}, {"{amount}"}.
               </p>
             </div>
 
