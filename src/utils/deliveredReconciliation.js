@@ -43,7 +43,7 @@ export function normalizeRiderName(value) {
   return String(value || "")
     .replaceAll("_", " ")
     .toUpperCase()
-    .replace(/\b\d{8,}\b/g, " ")
+    .replace(/\b\d{8,}[VX]?\b/g, " ")
     .replace(/[^A-Z0-9]+/g, "");
 }
 

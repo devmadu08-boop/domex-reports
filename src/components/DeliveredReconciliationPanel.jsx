@@ -57,6 +57,10 @@ export default function DeliveredReconciliationPanel({
         />
       </div>
 
+      {!reconciliation && reminderStatus && (
+        <p className="mt-4 rounded-2xl bg-white px-4 py-3 text-sm font-black text-blue-950">{reminderStatus}</p>
+      )}
+
       {reconciliation && (
         <div className="mt-4 grid gap-4">
           <div className={`rounded-2xl border px-4 py-3 ${reconciliation.balanced ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>

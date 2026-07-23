@@ -16,7 +16,7 @@ export function findRiderName(items) {
   const value = items
     .filter((item) => item.x > label.x && Math.abs(item.y - label.y) < 3)
     .sort((a, b) => a.x - b.x)[0]?.text;
-  return String(value || "").replace(/\s+\d{8,}\s*$/, "").trim();
+  return String(value || "").replace(/\s+\d{8,}[VX]?\s*$/i, "").trim();
 }
 
 function normalizeLabel(value) {
