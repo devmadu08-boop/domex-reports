@@ -134,17 +134,17 @@ export function sendTextToWhatsAppRecipient({ phoneNumber, message }) {
   });
 }
 
-export function saveWhatsAppBackupConfig({ phoneNumber, snapshot }) {
+export function saveWhatsAppBackupConfig({ phoneNumber, snapshot, approvalReaction }) {
   return requestJson("/backup-config", {
     method: "POST",
-    body: JSON.stringify({ phoneNumber, snapshot }),
+    body: JSON.stringify({ phoneNumber, snapshot, approvalReaction }),
   });
 }
 
-export function syncWhatsAppBackupSnapshot({ phoneNumber, snapshot }) {
+export function syncWhatsAppBackupSnapshot({ phoneNumber, snapshot, approvalReaction }) {
   return requestJson("/backup-snapshot", {
     method: "POST",
-    body: JSON.stringify({ phoneNumber, snapshot }),
+    body: JSON.stringify({ phoneNumber, snapshot, approvalReaction }),
   });
 }
 

@@ -448,6 +448,7 @@ export function getSettings() {
     convertDefaultGroupJids: [],
     rescheduleDefaultGroupJids: [],
     backupWhatsappNumber: "",
+    rescheduleApprovalReaction: "✅",
     ...savedSettings,
     whatsappCaptionTemplates: {
       ...DEFAULT_WHATSAPP_CAPTION_TEMPLATES,

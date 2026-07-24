@@ -13,6 +13,7 @@ import { renderRescheduleReportImages } from "../reports/rescheduleReportRendere
 const dataDir = path.resolve("backend", "data");
 const authDir = path.join(dataDir, "whatsapp-auth");
 const configPath = path.join(dataDir, "whatsapp-config.json");
+const DEFAULT_RESCHEDULE_APPROVAL_REACTION = "✅";
 
 let socket = null;
 let currentQr = "";
@@ -105,6 +106,19 @@ function normalizeRecipientJid(phoneNumber) {
   return `${internationalDigits}@s.whatsapp.net`;
 }
 
+function normalizeApprovalReaction(value) {
+  const cleanValue = String(value || "").trim();
+  if (!cleanValue) return DEFAULT_RESCHEDULE_APPROVAL_REACTION;
+
+  const firstGrapheme = [...new Intl.Segmenter("en", { granularity: "grapheme" }).segment(cleanValue)][0]?.segment;
+  const isEmoji = firstGrapheme && /[\p{Extended_Pictographic}\p{Emoji_Presentation}\u20E3]/u.test(firstGrapheme);
+  return isEmoji ? firstGrapheme : DEFAULT_RESCHEDULE_APPROVAL_REACTION;
+}
+
+function comparableReaction(value) {
+  return normalizeApprovalReaction(value).replaceAll("\uFE0F", "");
+}
+
 function normalizeConfig(config = {}) {
   const defaultGroupJids = normalizeGroupJids(config.defaultGroupJids?.length ? config.defaultGroupJids : config.defaultGroupJid);
   const convertDefaultGroupJids = normalizeGroupJids(config.convertDefaultGroupJids?.length ? config.convertDefaultGroupJids : config.convertDefaultGroupJid);
@@ -120,6 +134,10 @@ function normalizeConfig(config = {}) {
     rescheduleDefaultGroupJid: rescheduleDefaultGroupJids[0] || "",
     rescheduleDefaultGroupJids,
     backupWhatsappNumber: String(config.backupWhatsappNumber || ""),
+    rescheduleApprovalReaction: normalizeApprovalReaction(
+      config.rescheduleApprovalReaction
+        || config.latestBackupSnapshot?.settings?.rescheduleApprovalReaction,
+    ),
     latestBackupSnapshot: config.latestBackupSnapshot || null,
     lastDailyBackupDate: config.lastDailyBackupDate || "",
     lastRescheduleApprovalDate: config.lastRescheduleApprovalDate || "",
@@ -200,6 +218,7 @@ export async function getWhatsAppStatus() {
     rescheduleDefaultGroupJid: config.rescheduleDefaultGroupJid || "",
     rescheduleDefaultGroupJids: config.rescheduleDefaultGroupJids || [],
     backupWhatsappNumber: config.backupWhatsappNumber || "",
+    rescheduleApprovalReaction: config.rescheduleApprovalReaction,
     hasBackupSnapshot: Boolean(config.latestBackupSnapshot),
     lastDailyBackupDate: config.lastDailyBackupDate || "",
     lastRescheduleApprovalDate: config.lastRescheduleApprovalDate || "",
@@ -433,33 +452,37 @@ export async function sendTextToRecipient({ phoneNumber, message }) {
   };
 }
 
-export async function saveBackupConfig({ phoneNumber, snapshot }) {
+export async function saveBackupConfig({ phoneNumber, snapshot, approvalReaction }) {
   const config = await readConfig();
   const nextConfig = normalizeConfig({
     ...config,
     backupWhatsappNumber: String(phoneNumber || config.backupWhatsappNumber || "").trim(),
+    rescheduleApprovalReaction: approvalReaction || snapshot?.settings?.rescheduleApprovalReaction || config.rescheduleApprovalReaction,
     latestBackupSnapshot: snapshot || config.latestBackupSnapshot || null,
   });
   await writeConfig(nextConfig);
   return {
     ok: true,
     backupWhatsappNumber: nextConfig.backupWhatsappNumber,
+    rescheduleApprovalReaction: nextConfig.rescheduleApprovalReaction,
     hasBackupSnapshot: Boolean(nextConfig.latestBackupSnapshot),
     lastDailyBackupDate: nextConfig.lastDailyBackupDate || "",
   };
 }
 
-export async function saveLatestBackupSnapshot({ snapshot, phoneNumber }) {
+export async function saveLatestBackupSnapshot({ snapshot, phoneNumber, approvalReaction }) {
   const config = await readConfig();
   const nextConfig = normalizeConfig({
     ...config,
     backupWhatsappNumber: String(phoneNumber || config.backupWhatsappNumber || "").trim(),
+    rescheduleApprovalReaction: approvalReaction || snapshot?.settings?.rescheduleApprovalReaction || config.rescheduleApprovalReaction,
     latestBackupSnapshot: snapshot || config.latestBackupSnapshot || null,
   });
   await writeConfig(nextConfig);
   return {
     ok: true,
     backupWhatsappNumber: nextConfig.backupWhatsappNumber,
+    rescheduleApprovalReaction: nextConfig.rescheduleApprovalReaction,
     hasBackupSnapshot: Boolean(nextConfig.latestBackupSnapshot),
     updatedAt: new Date().toISOString(),
   };
@@ -568,6 +591,7 @@ async function createRescheduleApprovalRequest({ force = false } = {}) {
   const imageBuffers = await Promise.all(imagePaths.map((imagePath) => fs.readFile(imagePath)));
   const token = crypto.randomUUID();
   const buttonId = `reschedule-confirm:${clock.date}:${token}`;
+  const approvalReaction = normalizeApprovalReaction(config.rescheduleApprovalReaction);
   const pendingApproval = {
     date: clock.date,
     status: "pending",
@@ -579,13 +603,14 @@ async function createRescheduleApprovalRequest({ force = false } = {}) {
     groupJids,
     rowCount: rows.length,
     pageCount: imagePaths.length,
+    approvalReaction,
     requestedAt: new Date().toISOString(),
   };
 
   const approvalReportMessage = await sendReportImages(
     recipientJid,
     imageBuffers,
-    `${groupCaption}\n\n🔐 *Approval required*\nCheck the report and react with ✅ to send it to ${groupJids.length} assigned group${groupJids.length === 1 ? "" : "s"}.\n\nOnly the ✅ reaction confirms this report.`,
+    `${groupCaption}\n\n🔐 *Approval required*\nCheck the report and react with ${approvalReaction} to send it to ${groupJids.length} assigned group${groupJids.length === 1 ? "" : "s"}.\n\nOnly the ${approvalReaction} reaction confirms this report.`,
   );
 
   const latestConfig = await readConfig();
@@ -617,11 +642,12 @@ async function createRescheduleApprovalRequest({ force = false } = {}) {
 }
 
 async function handleRescheduleApprovalReaction({ key, reaction }) {
-  const reactionText = String(reaction?.text || "").replaceAll("\uFE0F", "");
-  if (reactionText !== "✅" || !key?.id || reaction?.key?.fromMe) return;
+  if (!key?.id || reaction?.key?.fromMe) return;
   const config = await readConfig();
   const pending = config.pendingRescheduleApproval;
   if (!pending || pending.status !== "pending" || pending.approvalMode !== "reaction") return;
+  const approvalReaction = pending.approvalReaction || DEFAULT_RESCHEDULE_APPROVAL_REACTION;
+  if (comparableReaction(reaction?.text) !== comparableReaction(approvalReaction)) return;
   const requestMessageIds = pending.requestMessageIds?.length
     ? pending.requestMessageIds
     : [pending.requestMessageId].filter(Boolean);
@@ -699,7 +725,7 @@ async function confirmPendingRescheduleReport(buttonId, responseJid) {
       pendingRescheduleApproval: failedApproval,
     }));
     await socket.sendMessage(responseJid || pending.recipientJid, {
-      text: `❌ Reschedule Report group send failed.\n${failedApproval.lastError}\n\nReact with ✅ again to retry.`,
+      text: `❌ Reschedule Report group send failed.\n${failedApproval.lastError}\n\nReact with ${pending.approvalReaction || DEFAULT_RESCHEDULE_APPROVAL_REACTION} again to retry.`,
     });
     throw error;
   } finally {
@@ -717,6 +743,7 @@ function sanitizeRescheduleApproval(approval) {
     requestedAt: approval.requestedAt || "",
     confirmedAt: approval.confirmedAt || "",
     sentGroupCount: Number(approval.sentGroupCount || 0),
+    approvalReaction: normalizeApprovalReaction(approval.approvalReaction),
     lastError: approval.lastError || "",
   };
 }

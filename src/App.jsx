@@ -240,7 +240,7 @@ export default function App() {
       window.clearTimeout(backupSyncTimerRef.current);
       unsubscribe();
     };
-  }, [session?.branchName, settings.backupWhatsappNumber]);
+  }, [session?.branchName, settings.backupWhatsappNumber, settings.rescheduleApprovalReaction]);
 
   useEffect(() => {
     if (!session?.branchName) return undefined;
@@ -565,6 +565,7 @@ export default function App() {
       await saveWhatsAppBackupConfig({
         phoneNumber: savedSettings.backupWhatsappNumber,
         snapshot: createBackupData(),
+        approvalReaction: savedSettings.rescheduleApprovalReaction,
       });
     } catch {
       // WhatsApp backend may be offline on local/Vercel. The app still keeps the setting in Firebase/local storage.
@@ -578,6 +579,7 @@ export default function App() {
       await syncWhatsAppBackupSnapshot({
         phoneNumber: savedSettings.backupWhatsappNumber,
         snapshot: createBackupData(),
+        approvalReaction: savedSettings.rescheduleApprovalReaction,
       });
     } catch {
       // Background sync must stay quiet to avoid interrupting report entry.

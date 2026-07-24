@@ -425,7 +425,7 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
               <div>
                 <p className="text-sm font-black text-[#071537]">20:00 Reschedule Approval</p>
                 <p className="text-xs font-semibold leading-5 text-blue-950/60">
-                  Every day at 20:00, today's report goes to the Backup WhatsApp Number. Assigned groups receive it only after the report gets a ✅ reaction.
+                  Every day at 20:00, today's report goes to the Backup WhatsApp Number. Assigned groups receive it only after the report gets a {status?.rescheduleApprovalReaction || settings.rescheduleApprovalReaction || "✅"} reaction.
                 </p>
               </div>
             </div>
@@ -435,6 +435,7 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
               <p>Last scheduled date: <strong>{status?.lastRescheduleApprovalDate || "Not yet"}</strong></p>
               <p>Current report: <strong>{status?.rescheduleApproval?.date || "None"}</strong></p>
               <p>Status: <strong className="capitalize">{status?.rescheduleApproval?.status || "Waiting"}</strong></p>
+              <p>Approval reaction: <strong className="text-xl">{status?.rescheduleApproval?.approvalReaction || status?.rescheduleApprovalReaction || settings.rescheduleApprovalReaction || "✅"}</strong></p>
               {status?.rescheduleApproval?.rowCount > 0 && (
                 <p className="sm:col-span-2">
                   {status.rescheduleApproval.rowCount} rows · {status.rescheduleApproval.pageCount} page{status.rescheduleApproval.pageCount === 1 ? "" : "s"}

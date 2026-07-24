@@ -4,6 +4,15 @@ import { downloadBackupFile, getAllDeliveredRiderNames, restoreBackupFile } from
 import { getDomexAutomationStatus, saveDomexAutomationConfig } from "../services/domexAutomationApi.js";
 import WhatsAppSettings from "./WhatsAppSettings.jsx";
 
+const APPROVAL_REACTION_PRESETS = ["✅", "👍", "❤️", "🚀", "📤"];
+
+function firstGrapheme(value) {
+  const cleanValue = String(value || "").trim();
+  if (!cleanValue) return "";
+  const grapheme = [...new Intl.Segmenter("en", { granularity: "grapheme" }).segment(cleanValue)][0]?.segment || "";
+  return /[\p{Extended_Pictographic}\p{Emoji_Presentation}\u20E3]/u.test(grapheme) ? grapheme : "";
+}
+
 export default function SettingsPage({
   settings,
   onSaveSettings,
@@ -127,10 +136,41 @@ export default function SettingsPage({
           <Field label="Branch Name" value={draftSettings.branchName || ""} onChange={(value) => updateSetting("branchName", value)} placeholder="Example: Middeniya" />
           <Field label="Stable Operation Target" type="number" value={draftSettings.operationTarget || ""} onChange={(value) => updateSetting("operationTarget", value)} />
           <Field label="Backup WhatsApp Number" value={draftSettings.backupWhatsappNumber || ""} onChange={(value) => updateSetting("backupWhatsappNumber", value)} placeholder="947XXXXXXXX" />
+          <div className="md:col-span-2">
+            <span className="mb-2 block text-sm font-black text-[#071537]">Reschedule Approval Reaction</span>
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-violet-200 bg-violet-50 p-3 shadow-inner">
+              {APPROVAL_REACTION_PRESETS.map((reaction) => (
+                <button
+                  key={reaction}
+                  type="button"
+                  title={`Use ${reaction} to approve`}
+                  aria-label={`Use ${reaction} to approve Reschedule Reports`}
+                  aria-pressed={(draftSettings.rescheduleApprovalReaction || "✅") === reaction}
+                  onClick={() => updateSetting("rescheduleApprovalReaction", reaction)}
+                  className={`grid h-12 w-12 place-items-center rounded-xl border text-2xl transition ${
+                    (draftSettings.rescheduleApprovalReaction || "✅") === reaction
+                      ? "border-violet-600 bg-violet-600 shadow-lg shadow-violet-300"
+                      : "border-white bg-white shadow-sm hover:-translate-y-0.5"
+                  }`}
+                >
+                  {reaction}
+                </button>
+              ))}
+              <label className="min-w-[170px] flex-1">
+                <span className="sr-only">Custom approval reaction</span>
+                <input
+                  value={draftSettings.rescheduleApprovalReaction || "✅"}
+                  onChange={(event) => updateSetting("rescheduleApprovalReaction", firstGrapheme(event.target.value) || "✅")}
+                  className="h-12 w-full rounded-xl border border-violet-200 bg-white px-4 text-lg font-black text-[#071537] outline-none focus:border-violet-500 focus:ring-4 focus:ring-violet-100"
+                  placeholder="Custom emoji"
+                />
+              </label>
+            </div>
+          </div>
         </div>
 
         <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 p-3 text-sm font-bold text-blue-950/75">
-          The JSON backup is sent at 08:00. At 20:00, today's Reschedule Report is sent to this number for approval. React with ✅ to send it to the assigned groups.
+          The JSON backup is sent at 08:00. At 20:00, today's Reschedule Report is sent to this number for approval. React with {draftSettings.rescheduleApprovalReaction || "✅"} to send it to the assigned groups.
         </div>
 
         <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-2xl border border-white/70 bg-white/55 p-3">
