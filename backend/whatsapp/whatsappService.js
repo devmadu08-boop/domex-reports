@@ -1,8 +1,7 @@
 import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
-  generateWAMessageFromContent,
-  proto,
+  getAggregateVotesInPollMessage,
   useMultiFileAuthState,
 } from "@whiskeysockets/baileys";
 import crypto from "node:crypto";
@@ -153,6 +152,13 @@ export async function startWhatsAppClient(force = false) {
     for (const message of messages) {
       handleIncomingWhatsAppMessage(message).catch((error) => {
         console.error("[whatsapp-interaction]", error.message || error);
+      });
+    }
+  });
+  socket.ev.on("messages.update", (updates) => {
+    for (const { key, update } of updates) {
+      handleRescheduleApprovalPollUpdate(key, update).catch((error) => {
+        console.error("[whatsapp-approval-poll]", error.message || error);
       });
     }
   });
@@ -585,11 +591,10 @@ async function createRescheduleApprovalRequest({ force = false } = {}) {
     ...(await readConfig()),
     pendingRescheduleApproval: pendingApproval,
   }));
-  let buttonMessage;
+  let approvalMessage;
   try {
-    buttonMessage = await sendRescheduleConfirmButton({
+    approvalMessage = await sendRescheduleConfirmAction({
       recipientJid,
-      buttonId,
       reportDate: clock.date,
       groupCount: groupJids.length,
     });
@@ -609,7 +614,8 @@ async function createRescheduleApprovalRequest({ force = false } = {}) {
   const latestConfig = await readConfig();
   const finalApproval = {
     ...pendingApproval,
-    requestMessageId: buttonMessage.key.id || "",
+    approvalMode: "poll",
+    requestMessageId: approvalMessage.key.id || "",
   };
   await writeConfig(normalizeConfig({
     ...latestConfig,
@@ -629,45 +635,21 @@ async function createRescheduleApprovalRequest({ force = false } = {}) {
   };
 }
 
-async function sendRescheduleConfirmButton({ recipientJid, buttonId, reportDate, groupCount }) {
-  const message = generateWAMessageFromContent(
-    recipientJid,
-    {
-      viewOnceMessage: {
-        message: {
-          messageContextInfo: {
-            deviceListMetadata: {},
-            deviceListMetadataVersion: 2,
-          },
-          interactiveMessage: proto.Message.InteractiveMessage.create({
-            header: proto.Message.InteractiveMessage.Header.create({
-              title: "Reschedule Report Approval",
-              hasMediaAttachment: false,
-            }),
-            body: proto.Message.InteractiveMessage.Body.create({
-              text: `Report date: ${reportDate}\nDestination: ${groupCount} assigned group${groupCount === 1 ? "" : "s"}\n\nSend only after checking the report above.`,
-            }),
-            footer: proto.Message.InteractiveMessage.Footer.create({
-              text: "Daily Courier Report System",
-            }),
-            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
-              buttons: [{
-                name: "quick_reply",
-                buttonParamsJson: JSON.stringify({
-                  display_text: "Send Confirm",
-                  id: buttonId,
-                }),
-              }],
-            }),
-          }),
-        },
-      },
+async function sendRescheduleConfirmAction({ recipientJid, reportDate, groupCount }) {
+  return socket.sendMessage(recipientJid, {
+    poll: {
+      name: [
+        "Reschedule Report Approval",
+        `Date: ${reportDate}`,
+        `Destination: ${groupCount} assigned group${groupCount === 1 ? "" : "s"}`,
+        "",
+        "Select Send Confirm only after checking the report above.",
+      ].join("\n"),
+      values: ["Send Confirm"],
+      selectableCount: 1,
+      toAnnouncementGroup: false,
     },
-    { userJid: socket.user?.id },
-  );
-
-  await socket.relayMessage(recipientJid, message.message, { messageId: message.key.id });
-  return message;
+  });
 }
 
 async function handleIncomingWhatsAppMessage(message) {
@@ -675,6 +657,26 @@ async function handleIncomingWhatsAppMessage(message) {
   const buttonId = getInteractiveResponseId(message.message);
   if (!buttonId?.startsWith("reschedule-confirm:")) return;
   await confirmPendingRescheduleReport(buttonId, message.key?.remoteJid);
+}
+
+async function handleRescheduleApprovalPollUpdate(key, update) {
+  if (!update?.pollUpdates?.length || !key?.id) return;
+  const config = await readConfig();
+  const pending = config.pendingRescheduleApproval;
+  if (!pending || pending.approvalMode !== "poll" || pending.requestMessageId !== key.id) return;
+
+  const votes = getAggregateVotesInPollMessage({
+    message: {
+      pollCreationMessageV3: {
+        options: [{ optionName: "Send Confirm" }],
+      },
+    },
+    pollUpdates: update.pollUpdates,
+  }, socket.user?.id);
+  const confirmed = votes.some((option) => option.name === "Send Confirm" && option.voters.length > 0);
+  if (!confirmed) return;
+
+  await confirmPendingRescheduleReport(pending.buttonId, key.remoteJid);
 }
 
 async function confirmPendingRescheduleReport(buttonId, responseJid) {
