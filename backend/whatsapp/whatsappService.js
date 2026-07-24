@@ -1,8 +1,6 @@
 import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
-  generateWAMessageFromContent,
-  proto,
   useMultiFileAuthState,
 } from "@whiskeysockets/baileys";
 import crypto from "node:crypto";
@@ -148,11 +146,10 @@ export async function startWhatsAppClient(force = false) {
   });
 
   socket.ev.on("creds.update", saveCreds);
-  socket.ev.on("messages.upsert", ({ messages, type }) => {
-    if (type !== "notify") return;
-    for (const message of messages) {
-      handleIncomingWhatsAppMessage(message).catch((error) => {
-        console.error("[whatsapp-interaction]", error.message || error);
+  socket.ev.on("messages.reaction", (reactions) => {
+    for (const reactionUpdate of reactions) {
+      handleRescheduleApprovalReaction(reactionUpdate).catch((error) => {
+        console.error("[whatsapp-approval-reaction]", error.message || error);
       });
     }
   });
@@ -300,11 +297,14 @@ function getReportImageBuffers({ imageDataUrl, imageDataUrls }) {
 
 async function sendReportImages(recipientJid, imageBuffers, caption) {
   if (imageBuffers.length === 1) {
-    await socket.sendMessage(recipientJid, {
+    const imageMessage = await socket.sendMessage(recipientJid, {
       image: imageBuffers[0],
       caption,
     });
-    return;
+    return {
+      primaryKey: imageMessage.key,
+      messageKeys: [imageMessage.key],
+    };
   }
 
   const albumMessage = await socket.sendMessage(recipientJid, {
@@ -312,14 +312,20 @@ async function sendReportImages(recipientJid, imageBuffers, caption) {
       expectedImageCount: imageBuffers.length,
     },
   });
+  const messageKeys = [albumMessage.key];
 
   for (let index = 0; index < imageBuffers.length; index += 1) {
-    await socket.sendMessage(recipientJid, {
+    const imageMessage = await socket.sendMessage(recipientJid, {
       image: imageBuffers[index],
       ...(index === 0 && caption ? { caption } : {}),
       albumParentKey: albumMessage.key,
     });
+    messageKeys.push(imageMessage.key);
   }
+  return {
+    primaryKey: messageKeys[1] || albumMessage.key,
+    messageKeys,
+  };
 }
 
 async function sendReportToGroups({ imageDataUrl, imageDataUrls, caption, groupJids, missingGroupMessage }) {
@@ -576,41 +582,21 @@ async function createRescheduleApprovalRequest({ force = false } = {}) {
     requestedAt: new Date().toISOString(),
   };
 
-  await sendReportImages(
+  const approvalReportMessage = await sendReportImages(
     recipientJid,
     imageBuffers,
-    `${groupCaption}\n\n🔐 *Approval required*\nCheck the report and tap *Send Confirm* to send it to ${groupJids.length} assigned group${groupJids.length === 1 ? "" : "s"}.`,
+    `${groupCaption}\n\n🔐 *Approval required*\nCheck the report and react with ✅ to send it to ${groupJids.length} assigned group${groupJids.length === 1 ? "" : "s"}.\n\nOnly the ✅ reaction confirms this report.`,
   );
-  await writeConfig(normalizeConfig({
-    ...(await readConfig()),
-    pendingRescheduleApproval: pendingApproval,
-  }));
-  let approvalMessage;
-  try {
-    approvalMessage = await sendRescheduleConfirmAction({
-      recipientJid,
-      buttonId,
-      reportDate: clock.date,
-      groupCount: groupJids.length,
-    });
-  } catch (error) {
-    await writeConfig(normalizeConfig({
-      ...(await readConfig()),
-      lastRescheduleApprovalDate: clock.date,
-      pendingRescheduleApproval: {
-        ...pendingApproval,
-        status: "button_failed",
-        lastError: error.message || "Send Confirm button failed.",
-      },
-    }));
-    throw error;
-  }
 
   const latestConfig = await readConfig();
+  const requestMessageIds = approvalReportMessage.messageKeys
+    .map((key) => key?.id || "")
+    .filter(Boolean);
   const finalApproval = {
     ...pendingApproval,
-    approvalMode: "native_flow_v3",
-    requestMessageId: approvalMessage.key.id || "",
+    approvalMode: "reaction",
+    requestMessageId: approvalReportMessage.primaryKey?.id || requestMessageIds[0] || "",
+    requestMessageIds,
   };
   await writeConfig(normalizeConfig({
     ...latestConfig,
@@ -630,65 +616,27 @@ async function createRescheduleApprovalRequest({ force = false } = {}) {
   };
 }
 
-async function sendRescheduleConfirmAction({ recipientJid, buttonId, reportDate, groupCount }) {
-  const message = generateWAMessageFromContent(
-    recipientJid,
-    {
-      interactiveMessage: proto.Message.InteractiveMessage.create({
-        body: proto.Message.InteractiveMessage.Body.create({
-          text: [
-            "*Reschedule Report Approval*",
-            `Date: ${reportDate}`,
-            `Destination: ${groupCount} assigned group${groupCount === 1 ? "" : "s"}`,
-            "",
-            "Check the report above, then tap *Send Confirm*.",
-            "If the button is hidden on this device, reply *SEND CONFIRM*.",
-          ].join("\n"),
-        }),
-        footer: proto.Message.InteractiveMessage.Footer.create({
-          text: "Daily Courier Report System",
-        }),
-        nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
-          buttons: [{
-            name: "quick_reply",
-            buttonParamsJson: JSON.stringify({
-              display_text: "Send Confirm",
-              id: buttonId,
-            }),
-          }],
-          messageParamsJson: JSON.stringify({
-            bottom_sheet: {
-              in_thread_buttons_limit: 1,
-              divider_indices: [0],
-              list_title: "Report approval",
-              button_title: "Send Confirm",
-            },
-          }),
-          messageVersion: 3,
-        }),
-      }),
-    },
-    { userJid: socket.user?.id },
-  );
-  await socket.relayMessage(recipientJid, message.message, { messageId: message.key.id });
-  return message;
-}
-
-async function handleIncomingWhatsAppMessage(message) {
-  if (message.key?.fromMe || !message.message) return;
-  const buttonId = getInteractiveResponseId(message.message);
-  if (buttonId?.startsWith("reschedule-confirm:")) {
-    await confirmPendingRescheduleReport(buttonId, message.key?.remoteJid);
-    return;
-  }
-
-  const text = getIncomingMessageText(message.message).trim().toUpperCase();
-  if (text !== "SEND CONFIRM") return;
+async function handleRescheduleApprovalReaction({ key, reaction }) {
+  const reactionText = String(reaction?.text || "").replaceAll("\uFE0F", "");
+  if (reactionText !== "✅" || !key?.id || reaction?.key?.fromMe) return;
   const config = await readConfig();
   const pending = config.pendingRescheduleApproval;
-  if (!pending || pending.status !== "pending") return;
-  if (normalizeRecipientJid(message.key?.remoteJid) !== normalizeRecipientJid(pending.recipientJid)) return;
-  await confirmPendingRescheduleReport(pending.buttonId, message.key?.remoteJid);
+  if (!pending || pending.status !== "pending" || pending.approvalMode !== "reaction") return;
+  const requestMessageIds = pending.requestMessageIds?.length
+    ? pending.requestMessageIds
+    : [pending.requestMessageId].filter(Boolean);
+  if (!requestMessageIds.includes(key.id)) return;
+  const jidCandidates = [
+    key.remoteJid,
+    key.remoteJidAlt,
+    reaction?.key?.remoteJid,
+    reaction?.key?.remoteJidAlt,
+  ].filter(Boolean);
+  const approvalJid = jidCandidates.find(
+    (jid) => normalizeRecipientJid(jid) === normalizeRecipientJid(pending.recipientJid),
+  );
+  if (!approvalJid) return;
+  await confirmPendingRescheduleReport(pending.buttonId, approvalJid);
 }
 
 async function confirmPendingRescheduleReport(buttonId, responseJid) {
@@ -751,56 +699,12 @@ async function confirmPendingRescheduleReport(buttonId, responseJid) {
       pendingRescheduleApproval: failedApproval,
     }));
     await socket.sendMessage(responseJid || pending.recipientJid, {
-      text: `❌ Reschedule Report group send failed.\n${failedApproval.lastError}\n\nYou can tap *Send Confirm* again to retry.`,
+      text: `❌ Reschedule Report group send failed.\n${failedApproval.lastError}\n\nReact with ✅ again to retry.`,
     });
     throw error;
   } finally {
     rescheduleApprovalSending = false;
   }
-}
-
-function getInteractiveResponseId(messageContent) {
-  let content = messageContent;
-  for (let depth = 0; depth < 5; depth += 1) {
-    const wrapper = content?.ephemeralMessage
-      || content?.viewOnceMessage
-      || content?.viewOnceMessageV2
-      || content?.viewOnceMessageV2Extension
-      || content?.documentWithCaptionMessage;
-    if (!wrapper?.message) break;
-    content = wrapper.message;
-  }
-
-  const paramsJson = content?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-  if (paramsJson) {
-    try {
-      const params = JSON.parse(paramsJson);
-      return params.id || params.button_id || "";
-    } catch {
-      return "";
-    }
-  }
-  return content?.buttonsResponseMessage?.selectedButtonId
-    || content?.templateButtonReplyMessage?.selectedId
-    || "";
-}
-
-function getIncomingMessageText(messageContent) {
-  let content = messageContent;
-  for (let depth = 0; depth < 5; depth += 1) {
-    const wrapper = content?.ephemeralMessage
-      || content?.viewOnceMessage
-      || content?.viewOnceMessageV2
-      || content?.viewOnceMessageV2Extension
-      || content?.documentWithCaptionMessage;
-    if (!wrapper?.message) break;
-    content = wrapper.message;
-  }
-  return content?.conversation
-    || content?.extendedTextMessage?.text
-    || content?.imageMessage?.caption
-    || content?.videoMessage?.caption
-    || "";
 }
 
 function sanitizeRescheduleApproval(approval) {
