@@ -151,3 +151,7 @@ export function syncWhatsAppBackupSnapshot({ phoneNumber, snapshot }) {
 export function sendWhatsAppBackupNow() {
   return requestJson("/send-backup-now", { method: "POST" });
 }
+
+export function sendRescheduleApprovalNow() {
+  return requestJson("/send-reschedule-approval-now", { method: "POST" });
+}

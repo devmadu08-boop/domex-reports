@@ -11,6 +11,7 @@ import {
   saveRescheduleDefaultGroupJids,
   saveLatestBackupSnapshot,
   sendBackupToWhatsApp,
+  sendRescheduleApprovalRequest,
   sendReportToConvertDefaultGroup,
   sendReportToDefaultGroup,
   sendReportToRescheduleDefaultGroup,
@@ -151,6 +152,14 @@ router.post("/backup-snapshot", async (request, response) => {
 router.post("/send-backup-now", async (_request, response) => {
   try {
     response.json(await sendBackupToWhatsApp({ force: true }));
+  } catch (error) {
+    sendError(response, error);
+  }
+});
+
+router.post("/send-reschedule-approval-now", async (_request, response) => {
+  try {
+    response.json(await sendRescheduleApprovalRequest({ force: true }));
   } catch (error) {
     sendError(response, error);
   }

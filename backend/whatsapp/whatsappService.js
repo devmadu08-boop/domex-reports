@@ -1,12 +1,16 @@
 import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
+  generateWAMessageFromContent,
+  proto,
   useMultiFileAuthState,
 } from "@whiskeysockets/baileys";
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import Pino from "pino";
 import QRCode from "qrcode";
+import { renderRescheduleReportImages } from "../reports/rescheduleReportRenderer.js";
 
 const dataDir = path.resolve("backend", "data");
 const authDir = path.join(dataDir, "whatsapp-auth");
@@ -19,6 +23,8 @@ let connectionState = "disconnected";
 let connectedNumber = "";
 let reconnecting = false;
 let backupSchedulerStarted = false;
+let rescheduleApprovalSending = false;
+let rescheduleApprovalRequestRunning = false;
 
 async function ensureDataDir() {
   await fs.mkdir(dataDir, { recursive: true });
@@ -118,6 +124,8 @@ function normalizeConfig(config = {}) {
     backupWhatsappNumber: String(config.backupWhatsappNumber || ""),
     latestBackupSnapshot: config.latestBackupSnapshot || null,
     lastDailyBackupDate: config.lastDailyBackupDate || "",
+    lastRescheduleApprovalDate: config.lastRescheduleApprovalDate || "",
+    pendingRescheduleApproval: config.pendingRescheduleApproval || null,
   };
 }
 
@@ -140,6 +148,14 @@ export async function startWhatsAppClient(force = false) {
   });
 
   socket.ev.on("creds.update", saveCreds);
+  socket.ev.on("messages.upsert", ({ messages, type }) => {
+    if (type !== "notify") return;
+    for (const message of messages) {
+      handleIncomingWhatsAppMessage(message).catch((error) => {
+        console.error("[whatsapp-interaction]", error.message || error);
+      });
+    }
+  });
   socket.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
@@ -189,6 +205,8 @@ export async function getWhatsAppStatus() {
     backupWhatsappNumber: config.backupWhatsappNumber || "",
     hasBackupSnapshot: Boolean(config.latestBackupSnapshot),
     lastDailyBackupDate: config.lastDailyBackupDate || "",
+    lastRescheduleApprovalDate: config.lastRescheduleApprovalDate || "",
+    rescheduleApproval: sanitizeRescheduleApproval(config.pendingRescheduleApproval),
   };
 }
 
@@ -479,15 +497,309 @@ export async function sendBackupToWhatsApp({ force = false } = {}) {
   return { ok: true, sentAt: new Date().toISOString(), fileName, recipientJid };
 }
 
+export async function sendRescheduleApprovalRequest({ force = false } = {}) {
+  if (rescheduleApprovalRequestRunning) {
+    return { ok: true, skipped: true, reason: "A Reschedule Report approval is already being prepared." };
+  }
+  rescheduleApprovalRequestRunning = true;
+  try {
+    return await createRescheduleApprovalRequest({ force });
+  } finally {
+    rescheduleApprovalRequestRunning = false;
+  }
+}
+
+async function createRescheduleApprovalRequest({ force = false } = {}) {
+  if (!socket || connectionState !== "connected") {
+    throw new Error("WhatsApp is not connected. Scan QR from Settings.");
+  }
+
+  const config = await readConfig();
+  const recipientJid = normalizeRecipientJid(config.backupWhatsappNumber);
+  if (!recipientJid) {
+    throw new Error("Backup WhatsApp number is required for Reschedule Report approval.");
+  }
+
+  const groupJids = normalizeGroupJids(
+    config.rescheduleDefaultGroupJids?.length ? config.rescheduleDefaultGroupJids : config.rescheduleDefaultGroupJid,
+  );
+  if (!groupJids.length) {
+    throw new Error("Select at least one Reschedule Report default WhatsApp group in Settings.");
+  }
+
+  const clock = getColomboClock();
+  if (!force && config.lastRescheduleApprovalDate === clock.date) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: "Today's Reschedule Report approval was already sent.",
+      sentDate: clock.date,
+    };
+  }
+
+  const snapshot = config.latestBackupSnapshot;
+  const rows = snapshot?.reports?.[clock.date]?.rescheduleRows || [];
+  if (!rows.length) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: `No Reschedule Report rows are saved for ${clock.date}.`,
+      sentDate: clock.date,
+    };
+  }
+
+  const branchName = snapshot?.settings?.branchName || "Middeniya";
+  const template = snapshot?.settings?.whatsappCaptionTemplates?.reschedule
+    || "📋 *{title}*\n📅 Date: *{date}*\n\nPlease check the attached rescheduled parcel list.";
+  const groupCaption = template
+    .replaceAll("{title}", "Reschedule Report")
+    .replaceAll("{date}", clock.date);
+  const imagePaths = await renderRescheduleReportImages({
+    rows,
+    reportDate: clock.date,
+    branchName,
+  });
+  const imageBuffers = await Promise.all(imagePaths.map((imagePath) => fs.readFile(imagePath)));
+  const token = crypto.randomUUID();
+  const buttonId = `reschedule-confirm:${clock.date}:${token}`;
+  const pendingApproval = {
+    date: clock.date,
+    status: "pending",
+    token,
+    buttonId,
+    recipientJid,
+    imagePaths,
+    groupCaption,
+    groupJids,
+    rowCount: rows.length,
+    pageCount: imagePaths.length,
+    requestedAt: new Date().toISOString(),
+  };
+
+  await sendReportImages(
+    recipientJid,
+    imageBuffers,
+    `${groupCaption}\n\n🔐 *Approval required*\nCheck the report and tap *Send Confirm* to send it to ${groupJids.length} assigned group${groupJids.length === 1 ? "" : "s"}.`,
+  );
+  await writeConfig(normalizeConfig({
+    ...(await readConfig()),
+    pendingRescheduleApproval: pendingApproval,
+  }));
+  let buttonMessage;
+  try {
+    buttonMessage = await sendRescheduleConfirmButton({
+      recipientJid,
+      buttonId,
+      reportDate: clock.date,
+      groupCount: groupJids.length,
+    });
+  } catch (error) {
+    await writeConfig(normalizeConfig({
+      ...(await readConfig()),
+      lastRescheduleApprovalDate: clock.date,
+      pendingRescheduleApproval: {
+        ...pendingApproval,
+        status: "button_failed",
+        lastError: error.message || "Send Confirm button failed.",
+      },
+    }));
+    throw error;
+  }
+
+  const latestConfig = await readConfig();
+  const finalApproval = {
+    ...pendingApproval,
+    requestMessageId: buttonMessage.key.id || "",
+  };
+  await writeConfig(normalizeConfig({
+    ...latestConfig,
+    lastRescheduleApprovalDate: clock.date,
+    pendingRescheduleApproval: finalApproval,
+  }));
+
+  return {
+    ok: true,
+    sentAt: finalApproval.requestedAt,
+    sentDate: clock.date,
+    recipientJid,
+    rowCount: rows.length,
+    pageCount: imagePaths.length,
+    groupCount: groupJids.length,
+    status: "pending",
+  };
+}
+
+async function sendRescheduleConfirmButton({ recipientJid, buttonId, reportDate, groupCount }) {
+  const message = generateWAMessageFromContent(
+    recipientJid,
+    {
+      viewOnceMessage: {
+        message: {
+          messageContextInfo: {
+            deviceListMetadata: {},
+            deviceListMetadataVersion: 2,
+          },
+          interactiveMessage: proto.Message.InteractiveMessage.create({
+            header: proto.Message.InteractiveMessage.Header.create({
+              title: "Reschedule Report Approval",
+              hasMediaAttachment: false,
+            }),
+            body: proto.Message.InteractiveMessage.Body.create({
+              text: `Report date: ${reportDate}\nDestination: ${groupCount} assigned group${groupCount === 1 ? "" : "s"}\n\nSend only after checking the report above.`,
+            }),
+            footer: proto.Message.InteractiveMessage.Footer.create({
+              text: "Daily Courier Report System",
+            }),
+            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
+              buttons: [{
+                name: "quick_reply",
+                buttonParamsJson: JSON.stringify({
+                  display_text: "Send Confirm",
+                  id: buttonId,
+                }),
+              }],
+            }),
+          }),
+        },
+      },
+    },
+    { userJid: socket.user?.id },
+  );
+
+  await socket.relayMessage(recipientJid, message.message, { messageId: message.key.id });
+  return message;
+}
+
+async function handleIncomingWhatsAppMessage(message) {
+  if (message.key?.fromMe || !message.message) return;
+  const buttonId = getInteractiveResponseId(message.message);
+  if (!buttonId?.startsWith("reschedule-confirm:")) return;
+  await confirmPendingRescheduleReport(buttonId, message.key?.remoteJid);
+}
+
+async function confirmPendingRescheduleReport(buttonId, responseJid) {
+  if (rescheduleApprovalSending) return;
+  const config = await readConfig();
+  const pending = config.pendingRescheduleApproval;
+  if (!pending || pending.buttonId !== buttonId) {
+    await socket.sendMessage(responseJid || normalizeRecipientJid(config.backupWhatsappNumber), {
+      text: "⚠️ This Reschedule Report approval is no longer active.",
+    });
+    return;
+  }
+  if (pending.status === "sent") {
+    await socket.sendMessage(responseJid || pending.recipientJid, {
+      text: `✅ The ${pending.date} Reschedule Report was already sent to the assigned groups.`,
+    });
+    return;
+  }
+
+  rescheduleApprovalSending = true;
+  const sendingApproval = { ...pending, status: "sending", sendingAt: new Date().toISOString(), lastError: "" };
+  await writeConfig(normalizeConfig({ ...config, pendingRescheduleApproval: sendingApproval }));
+
+  try {
+    const imageBuffers = await Promise.all(pending.imagePaths.map((imagePath) => fs.readFile(imagePath)));
+    const latestConfig = await readConfig();
+    const groupJids = normalizeGroupJids(
+      latestConfig.rescheduleDefaultGroupJids?.length
+        ? latestConfig.rescheduleDefaultGroupJids
+        : latestConfig.rescheduleDefaultGroupJid || pending.groupJids,
+    );
+    if (!groupJids.length) {
+      throw new Error("No Reschedule Report default WhatsApp groups are currently selected.");
+    }
+    for (const groupJid of groupJids) {
+      await sendReportImages(groupJid, imageBuffers, pending.groupCaption);
+    }
+
+    const sentApproval = {
+      ...sendingApproval,
+      status: "sent",
+      confirmedAt: new Date().toISOString(),
+      sentGroupCount: groupJids.length,
+    };
+    await writeConfig(normalizeConfig({
+      ...(await readConfig()),
+      pendingRescheduleApproval: sentApproval,
+    }));
+    await socket.sendMessage(responseJid || pending.recipientJid, {
+      text: `✅ *Send confirmed*\n${pending.date} Reschedule Report was sent successfully to ${groupJids.length} assigned group${groupJids.length === 1 ? "" : "s"}.`,
+    });
+  } catch (error) {
+    const failedApproval = {
+      ...sendingApproval,
+      status: "pending",
+      lastError: error.message || "Group send failed.",
+    };
+    await writeConfig(normalizeConfig({
+      ...(await readConfig()),
+      pendingRescheduleApproval: failedApproval,
+    }));
+    await socket.sendMessage(responseJid || pending.recipientJid, {
+      text: `❌ Reschedule Report group send failed.\n${failedApproval.lastError}\n\nYou can tap *Send Confirm* again to retry.`,
+    });
+    throw error;
+  } finally {
+    rescheduleApprovalSending = false;
+  }
+}
+
+function getInteractiveResponseId(messageContent) {
+  let content = messageContent;
+  for (let depth = 0; depth < 5; depth += 1) {
+    const wrapper = content?.ephemeralMessage
+      || content?.viewOnceMessage
+      || content?.viewOnceMessageV2
+      || content?.viewOnceMessageV2Extension
+      || content?.documentWithCaptionMessage;
+    if (!wrapper?.message) break;
+    content = wrapper.message;
+  }
+
+  const paramsJson = content?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  if (paramsJson) {
+    try {
+      const params = JSON.parse(paramsJson);
+      return params.id || params.button_id || "";
+    } catch {
+      return "";
+    }
+  }
+  return content?.buttonsResponseMessage?.selectedButtonId
+    || content?.templateButtonReplyMessage?.selectedId
+    || "";
+}
+
+function sanitizeRescheduleApproval(approval) {
+  if (!approval) return null;
+  return {
+    date: approval.date || "",
+    status: approval.status || "",
+    rowCount: Number(approval.rowCount || 0),
+    pageCount: Number(approval.pageCount || 0),
+    requestedAt: approval.requestedAt || "",
+    confirmedAt: approval.confirmedAt || "",
+    sentGroupCount: Number(approval.sentGroupCount || 0),
+    lastError: approval.lastError || "",
+  };
+}
+
 export function startDailyBackupScheduler() {
   if (backupSchedulerStarted) return;
   backupSchedulerStarted = true;
 
   setInterval(() => {
     const clock = getColomboClock();
-    if (clock.hour !== 8 || clock.minute !== 0) return;
-    sendBackupToWhatsApp({ force: false }).catch((error) => {
-      console.error("[whatsapp-backup-scheduler]", error.message || error);
-    });
+    if (clock.hour === 8 && clock.minute === 0) {
+      sendBackupToWhatsApp({ force: false }).catch((error) => {
+        console.error("[whatsapp-backup-scheduler]", error.message || error);
+      });
+    }
+    if (clock.hour === 20) {
+      sendRescheduleApprovalRequest({ force: false }).catch((error) => {
+        console.error("[reschedule-approval-scheduler]", error.message || error);
+      });
+    }
   }, 60 * 1000);
 }

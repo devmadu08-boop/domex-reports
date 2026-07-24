@@ -1,4 +1,4 @@
-import { LogOut, MessageCircle, Plus, RefreshCw, Save, Users } from "lucide-react";
+import { Clock3, LogOut, MessageCircle, Plus, RefreshCw, Save, Send, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getAllDeliveredRiderNames } from "../services/reportStorage.js";
 import { DEFAULT_DELIVERED_RIDER_TEMPLATE, DELIVERED_RIDER_TEMPLATE_PRESETS } from "../utils/deliveredRiderWhatsAppTemplates.js";
@@ -11,6 +11,7 @@ import {
   saveConvertWhatsAppGroup,
   saveDefaultWhatsAppGroup,
   saveRescheduleWhatsAppGroup,
+  sendRescheduleApprovalNow,
 } from "../services/whatsappApi.js";
 
 const templatePresets = {
@@ -166,6 +167,22 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
         rescheduleDefaultGroupJids: selectedRescheduleGroups,
       });
       setMessage(`${error.message} Reschedule group selection was saved in app settings, but update/restart the VPS WhatsApp backend to send to that group.`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSendRescheduleApprovalNow() {
+    setLoading(true);
+    setMessage("");
+    try {
+      const result = await sendRescheduleApprovalNow();
+      setMessage(result.skipped
+        ? result.reason
+        : `Today's Reschedule Report approval was sent: ${result.rowCount} rows, ${result.pageCount} page${result.pageCount === 1 ? "" : "s"}.`);
+      await refreshStatus();
+    } catch (error) {
+      setMessage(error.message || "Could not send the Reschedule Report approval.");
     } finally {
       setLoading(false);
     }
@@ -398,6 +415,46 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
               onSave={handleSaveConvertGroup}
               saveLabel="Save Convert Groups"
             />
+          </div>
+
+          <div className="whatsapp-settings-card">
+            <div className="mb-4 flex items-start gap-3">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-violet-100 text-violet-700 shadow-inner">
+                <Clock3 className="h-5 w-5" />
+              </span>
+              <div>
+                <p className="text-sm font-black text-[#071537]">20:00 Reschedule Approval</p>
+                <p className="text-xs font-semibold leading-5 text-blue-950/60">
+                  Every day at 20:00, today's report goes to the Backup WhatsApp Number. Assigned groups receive it only after the Send Confirm button is pressed.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-2 rounded-2xl border border-violet-100 bg-violet-50/75 p-4 text-sm font-bold text-blue-950/75 sm:grid-cols-2">
+              <p>Approval number: <strong>{status?.backupWhatsappNumber || settings.backupWhatsappNumber || "Not saved"}</strong></p>
+              <p>Last scheduled date: <strong>{status?.lastRescheduleApprovalDate || "Not yet"}</strong></p>
+              <p>Current report: <strong>{status?.rescheduleApproval?.date || "None"}</strong></p>
+              <p>Status: <strong className="capitalize">{status?.rescheduleApproval?.status || "Waiting"}</strong></p>
+              {status?.rescheduleApproval?.rowCount > 0 && (
+                <p className="sm:col-span-2">
+                  {status.rescheduleApproval.rowCount} rows · {status.rescheduleApproval.pageCount} page{status.rescheduleApproval.pageCount === 1 ? "" : "s"}
+                  {status.rescheduleApproval.sentGroupCount ? ` · Sent to ${status.rescheduleApproval.sentGroupCount} groups` : ""}
+                </p>
+              )}
+              {status?.rescheduleApproval?.lastError && (
+                <p className="text-red-700 sm:col-span-2">{status.rescheduleApproval.lastError}</p>
+              )}
+            </div>
+
+            <button
+              type="button"
+              disabled={loading || !connected || !(status?.backupWhatsappNumber || settings.backupWhatsappNumber)}
+              onClick={handleSendRescheduleApprovalNow}
+              className="primary-action primary-action-purple mt-3 w-full disabled:opacity-50"
+            >
+              <Send className="h-5 w-5" />
+              Send Today's Approval Now
+            </button>
           </div>
 
           <div className="whatsapp-settings-card">

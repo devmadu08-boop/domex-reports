@@ -130,7 +130,7 @@ export default function SettingsPage({
         </div>
 
         <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 p-3 text-sm font-bold text-blue-950/75">
-          Backup JSON file will be sent automatically every day at 08:00 to this WhatsApp number when the backend is running.
+          The JSON backup is sent at 08:00. At 20:00, today's Reschedule Report and its Send Confirm button are sent to this same approval number.
         </div>
 
         <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-2xl border border-white/70 bg-white/55 p-3">
