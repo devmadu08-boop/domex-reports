@@ -1,7 +1,8 @@
 import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
-  getAggregateVotesInPollMessage,
+  generateWAMessageFromContent,
+  proto,
   useMultiFileAuthState,
 } from "@whiskeysockets/baileys";
 import crypto from "node:crypto";
@@ -152,13 +153,6 @@ export async function startWhatsAppClient(force = false) {
     for (const message of messages) {
       handleIncomingWhatsAppMessage(message).catch((error) => {
         console.error("[whatsapp-interaction]", error.message || error);
-      });
-    }
-  });
-  socket.ev.on("messages.update", (updates) => {
-    for (const { key, update } of updates) {
-      handleRescheduleApprovalPollUpdate(key, update).catch((error) => {
-        console.error("[whatsapp-approval-poll]", error.message || error);
       });
     }
   });
@@ -595,6 +589,7 @@ async function createRescheduleApprovalRequest({ force = false } = {}) {
   try {
     approvalMessage = await sendRescheduleConfirmAction({
       recipientJid,
+      buttonId,
       reportDate: clock.date,
       groupCount: groupJids.length,
     });
@@ -614,7 +609,7 @@ async function createRescheduleApprovalRequest({ force = false } = {}) {
   const latestConfig = await readConfig();
   const finalApproval = {
     ...pendingApproval,
-    approvalMode: "poll",
+    approvalMode: "native_flow_v3",
     requestMessageId: approvalMessage.key.id || "",
   };
   await writeConfig(normalizeConfig({
@@ -635,48 +630,65 @@ async function createRescheduleApprovalRequest({ force = false } = {}) {
   };
 }
 
-async function sendRescheduleConfirmAction({ recipientJid, reportDate, groupCount }) {
-  return socket.sendMessage(recipientJid, {
-    poll: {
-      name: [
-        "Reschedule Report Approval",
-        `Date: ${reportDate}`,
-        `Destination: ${groupCount} assigned group${groupCount === 1 ? "" : "s"}`,
-        "",
-        "Select Send Confirm only after checking the report above.",
-      ].join("\n"),
-      values: ["Send Confirm"],
-      selectableCount: 1,
-      toAnnouncementGroup: false,
+async function sendRescheduleConfirmAction({ recipientJid, buttonId, reportDate, groupCount }) {
+  const message = generateWAMessageFromContent(
+    recipientJid,
+    {
+      interactiveMessage: proto.Message.InteractiveMessage.create({
+        body: proto.Message.InteractiveMessage.Body.create({
+          text: [
+            "*Reschedule Report Approval*",
+            `Date: ${reportDate}`,
+            `Destination: ${groupCount} assigned group${groupCount === 1 ? "" : "s"}`,
+            "",
+            "Check the report above, then tap *Send Confirm*.",
+            "If the button is hidden on this device, reply *SEND CONFIRM*.",
+          ].join("\n"),
+        }),
+        footer: proto.Message.InteractiveMessage.Footer.create({
+          text: "Daily Courier Report System",
+        }),
+        nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
+          buttons: [{
+            name: "quick_reply",
+            buttonParamsJson: JSON.stringify({
+              display_text: "Send Confirm",
+              id: buttonId,
+            }),
+          }],
+          messageParamsJson: JSON.stringify({
+            bottom_sheet: {
+              in_thread_buttons_limit: 1,
+              divider_indices: [0],
+              list_title: "Report approval",
+              button_title: "Send Confirm",
+            },
+          }),
+          messageVersion: 3,
+        }),
+      }),
     },
-  });
+    { userJid: socket.user?.id },
+  );
+  await socket.relayMessage(recipientJid, message.message, { messageId: message.key.id });
+  return message;
 }
 
 async function handleIncomingWhatsAppMessage(message) {
   if (message.key?.fromMe || !message.message) return;
   const buttonId = getInteractiveResponseId(message.message);
-  if (!buttonId?.startsWith("reschedule-confirm:")) return;
-  await confirmPendingRescheduleReport(buttonId, message.key?.remoteJid);
-}
+  if (buttonId?.startsWith("reschedule-confirm:")) {
+    await confirmPendingRescheduleReport(buttonId, message.key?.remoteJid);
+    return;
+  }
 
-async function handleRescheduleApprovalPollUpdate(key, update) {
-  if (!update?.pollUpdates?.length || !key?.id) return;
+  const text = getIncomingMessageText(message.message).trim().toUpperCase();
+  if (text !== "SEND CONFIRM") return;
   const config = await readConfig();
   const pending = config.pendingRescheduleApproval;
-  if (!pending || pending.approvalMode !== "poll" || pending.requestMessageId !== key.id) return;
-
-  const votes = getAggregateVotesInPollMessage({
-    message: {
-      pollCreationMessageV3: {
-        options: [{ optionName: "Send Confirm" }],
-      },
-    },
-    pollUpdates: update.pollUpdates,
-  }, socket.user?.id);
-  const confirmed = votes.some((option) => option.name === "Send Confirm" && option.voters.length > 0);
-  if (!confirmed) return;
-
-  await confirmPendingRescheduleReport(pending.buttonId, key.remoteJid);
+  if (!pending || pending.status !== "pending") return;
+  if (normalizeRecipientJid(message.key?.remoteJid) !== normalizeRecipientJid(pending.recipientJid)) return;
+  await confirmPendingRescheduleReport(pending.buttonId, message.key?.remoteJid);
 }
 
 async function confirmPendingRescheduleReport(buttonId, responseJid) {
@@ -770,6 +782,24 @@ function getInteractiveResponseId(messageContent) {
   }
   return content?.buttonsResponseMessage?.selectedButtonId
     || content?.templateButtonReplyMessage?.selectedId
+    || "";
+}
+
+function getIncomingMessageText(messageContent) {
+  let content = messageContent;
+  for (let depth = 0; depth < 5; depth += 1) {
+    const wrapper = content?.ephemeralMessage
+      || content?.viewOnceMessage
+      || content?.viewOnceMessageV2
+      || content?.viewOnceMessageV2Extension
+      || content?.documentWithCaptionMessage;
+    if (!wrapper?.message) break;
+    content = wrapper.message;
+  }
+  return content?.conversation
+    || content?.extendedTextMessage?.text
+    || content?.imageMessage?.caption
+    || content?.videoMessage?.caption
     || "";
 }
 
