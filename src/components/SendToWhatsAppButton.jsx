@@ -22,6 +22,10 @@ export default function SendToWhatsAppButton({ reportRef, reportRefs, reportTitl
         imageDataUrls,
         caption: buildCaption(reportType, reportTitle, reportDate),
       });
+      if (result.queued) {
+        setMessage(`${elements.length} page${elements.length === 1 ? "" : "s"} saved to the WhatsApp queue and will retry automatically.`);
+        return;
+      }
       const groupCount = result.sentCount || 1;
       setMessage(`${elements.length} page${elements.length === 1 ? "" : "s"} sent to ${groupCount} WhatsApp group${groupCount === 1 ? "" : "s"} successfully.`);
     } catch (error) {

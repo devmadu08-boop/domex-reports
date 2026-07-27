@@ -41,6 +41,10 @@ import OperationReportForm, { emptyOperationForm } from "./components/OperationR
 import { CourierPerformanceReport, OperationReport } from "./components/ReportTable.jsx";
 import SendToWhatsAppButton from "./components/SendToWhatsAppButton.jsx";
 import SettingsPage from "./components/SettingsPage.jsx";
+import DailyWorkflowWizard from "./components/DailyWorkflowWizard.jsx";
+import SystemHealthPanel from "./components/SystemHealthPanel.jsx";
+import SystemRecoveryPanel from "./components/SystemRecoveryPanel.jsx";
+import TodayOperationsDashboard from "./components/TodayOperationsDashboard.jsx";
 import {
   clearReportByDate,
   deleteReportType,
@@ -53,11 +57,14 @@ import {
   getReportHistory,
   getSettings,
   getLocalUpdatedAt,
+  getRedoHistory,
   getStoredSession,
+  getUndoHistory,
   getUsers,
   loginWithBranch,
   markWeeklyBackupComplete,
   restoreBackupData,
+  redoLastChange,
   replaceUserAccounts,
   saveCourierName,
   saveReportType,
@@ -67,11 +74,31 @@ import {
   setActiveBranch,
   shouldRunWeeklyBackup,
   createBackupData,
+  undoLastChange,
 } from "./services/reportStorage.js";
-import { downloadSnapshotFromFirebase, downloadUsersFromFirebase, saveWeeklyBackupToFirebase, subscribeToFirebaseSnapshot, uploadLocalSnapshotToFirebase, uploadUsersToFirebase } from "./services/cloudSync.js";
-import { getBackendHealth, saveWhatsAppBackupConfig, syncWhatsAppBackupSnapshot } from "./services/whatsappApi.js";
+import {
+  createSystemVersion,
+  downloadSnapshotFromFirebase,
+  downloadUsersFromFirebase,
+  flushPendingCloudSync,
+  getPendingCloudSync,
+  listSystemVersions,
+  restoreSystemVersionToFirebase,
+  saveWeeklyBackupToFirebase,
+  subscribeToFirebaseSnapshot,
+  syncLocalSnapshotWithRecovery,
+  uploadUsersToFirebase,
+} from "./services/cloudSync.js";
+import {
+  getBackendHealth,
+  getSystemHealth,
+  retryFailedWhatsAppQueue,
+  saveWhatsAppBackupConfig,
+  syncWhatsAppBackupSnapshot,
+} from "./services/whatsappApi.js";
 import { todayIso, displayDate } from "./utils/date.js";
 import { exportBothAsPdf, exportElementAsPdf, exportElementAsPng } from "./utils/exportReports.js";
+import { getReconciliationReviewStatus } from "./utils/deliveredReconciliationReview.js";
 
 const tabs = [
   { id: "dashboard", label: "Dashboard", mobileLabel: "Home", icon: Home },
@@ -165,6 +192,13 @@ export default function App() {
   const [cloudStatus, setCloudStatus] = useState("Cloud sync ready.");
   const [notice, setNotice] = useState("");
   const [pendingHistoryDownload, setPendingHistoryDownload] = useState(null);
+  const [systemHealth, setSystemHealth] = useState(null);
+  const [healthRefreshing, setHealthRefreshing] = useState(false);
+  const [pendingCloudSync, setPendingCloudSync] = useState(getPendingCloudSync);
+  const [systemVersions, setSystemVersions] = useState([]);
+  const [versionBusy, setVersionBusy] = useState(false);
+  const [undoCount, setUndoCount] = useState(() => getUndoHistory().length);
+  const [redoCount, setRedoCount] = useState(() => getRedoHistory().length);
 
   const courierReportRef = useRef(null);
   const operationReportRef = useRef(null);
@@ -175,6 +209,7 @@ export default function App() {
   const unsavedDraftUpdatedAtRef = useRef("");
   const backupSyncTimerRef = useRef(null);
   const syncClientIdRef = useRef(getSyncClientId());
+  const versionBootstrapRef = useRef({ branchName: "", promise: null });
 
   const visibleTabs = useMemo(() => tabs.filter((tab) => !tab.adminOnly || session?.role === "admin"), [session?.role]);
 
@@ -185,6 +220,75 @@ export default function App() {
     setSettingsState(savedSettings);
     setStableTarget(savedSettings.operationTarget || "");
     setCourierNames(getCourierNames());
+    refreshRecoveryState();
+  }, [session?.branchName]);
+
+  useEffect(() => {
+    if (!session?.branchName || session.role !== "admin") return undefined;
+    let cancelled = false;
+    if (versionBootstrapRef.current.branchName !== session.branchName) {
+      versionBootstrapRef.current = {
+        branchName: session.branchName,
+        promise: (async () => {
+          let versions = await listSystemVersions();
+          if (!versions.length) {
+            await createSystemVersion("Initial protected system state", syncClientIdRef.current);
+            versions = await listSystemVersions();
+          }
+          return versions;
+        })(),
+      };
+    }
+    versionBootstrapRef.current.promise
+      .then((versions) => {
+        if (!cancelled) setSystemVersions(versions);
+      })
+      .catch(() => {
+        if (!cancelled) setSystemVersions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.branchName, session?.role]);
+
+  useEffect(() => {
+    if (!session?.branchName) return undefined;
+    const refresh = () => refreshRecoveryState();
+    const unsubscribe = addDataChangeListener(refresh);
+    window.addEventListener("online", refresh);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("online", refresh);
+    };
+  }, [session?.branchName]);
+
+  useEffect(() => {
+    if (!session?.branchName) return undefined;
+    let cancelled = false;
+
+    async function recoverCloudQueue() {
+      if (!navigator.onLine || !getPendingCloudSync()) return;
+      try {
+        const recovered = await flushPendingCloudSync();
+        if (!recovered || cancelled) return;
+        lastCloudUpdateRef.current = recovered.cloudUpdatedAt;
+        setCloudStatus(`Recovered queued Firebase changes at ${new Date(recovered.cloudUpdatedAt).toLocaleTimeString()}.`);
+        setFirebaseStatus("Firebase connected");
+      } catch {
+        if (!cancelled) setFirebaseStatus("Firebase recovery waiting");
+      } finally {
+        if (!cancelled) setPendingCloudSync(getPendingCloudSync());
+      }
+    }
+
+    recoverCloudQueue();
+    window.addEventListener("online", recoverCloudQueue);
+    const timer = window.setInterval(recoverCloudQueue, 15_000);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("online", recoverCloudQueue);
+      window.clearInterval(timer);
+    };
   }, [session?.branchName]);
 
   useEffect(() => {
@@ -253,11 +357,16 @@ export default function App() {
       try {
         await bootstrapFromFirebase();
         if (cancelled) return;
-        const snapshot = await uploadLocalSnapshotToFirebase("auto-sync-enabled", syncClientIdRef.current);
+        const snapshot = await syncLocalSnapshotWithRecovery("auto-sync-enabled", syncClientIdRef.current);
         if (cancelled) return;
         lastCloudUpdateRef.current = snapshot.cloudUpdatedAt;
-        setCloudStatus(`Firebase synced: ${new Date(snapshot.cloudUpdatedAt).toLocaleTimeString()}`);
-        setFirebaseStatus("Firebase connected");
+        setPendingCloudSync(getPendingCloudSync());
+        setCloudStatus(
+          snapshot.queued
+            ? "Firebase unavailable. Changes are stored in the automatic recovery queue."
+            : `Firebase synced: ${new Date(snapshot.cloudUpdatedAt).toLocaleTimeString()}`,
+        );
+        setFirebaseStatus(snapshot.queued ? "Firebase recovery queued" : "Firebase connected");
       } catch (error) {
         if (cancelled) return;
         setCloudStatus(error.message || "Initial Firebase Realtime sync failed.");
@@ -275,10 +384,15 @@ export default function App() {
       window.clearTimeout(realtimeUploadTimerRef.current);
       realtimeUploadTimerRef.current = window.setTimeout(async () => {
         try {
-          const snapshot = await uploadLocalSnapshotToFirebase("realtime-auto", syncClientIdRef.current);
+          const snapshot = await syncLocalSnapshotWithRecovery("realtime-auto", syncClientIdRef.current);
           lastCloudUpdateRef.current = snapshot.cloudUpdatedAt;
-          setCloudStatus(`Firebase uploaded: ${new Date(snapshot.cloudUpdatedAt).toLocaleTimeString()}`);
-          setFirebaseStatus("Firebase connected");
+          setPendingCloudSync(getPendingCloudSync());
+          setCloudStatus(
+            snapshot.queued
+              ? "Firebase unavailable. Latest changes are queued for automatic recovery."
+              : `Firebase uploaded: ${new Date(snapshot.cloudUpdatedAt).toLocaleTimeString()}`,
+          );
+          setFirebaseStatus(snapshot.queued ? "Firebase recovery queued" : "Firebase connected");
         } catch (error) {
           setCloudStatus(error.message || "Firebase Realtime upload failed.");
           setFirebaseStatus("Firebase error");
@@ -331,15 +445,23 @@ export default function App() {
     let cancelled = false;
     async function checkBackend() {
       try {
-        await getBackendHealth();
-        if (!cancelled) setBackendStatus("Backend server running");
+        const health = await getSystemHealth();
+        if (!cancelled) {
+          setSystemHealth(health);
+          setBackendStatus("Backend server running");
+        }
       } catch {
-        if (!cancelled) setBackendStatus("Backend server offline");
+        try {
+          await getBackendHealth();
+          if (!cancelled) setBackendStatus("Backend server running (health details unavailable)");
+        } catch {
+          if (!cancelled) setBackendStatus("Backend server offline");
+        }
       }
     }
 
     checkBackend();
-    const timer = window.setInterval(checkBackend, 10000);
+    const timer = window.setInterval(checkBackend, 15000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -348,6 +470,100 @@ export default function App() {
 
   function showNotice(message) {
     setNotice(message);
+  }
+
+  function refreshRecoveryState() {
+    setUndoCount(getUndoHistory().length);
+    setRedoCount(getRedoHistory().length);
+    setPendingCloudSync(getPendingCloudSync());
+  }
+
+  async function refreshSystemHealth() {
+    setHealthRefreshing(true);
+    try {
+      const health = await getSystemHealth();
+      setSystemHealth(health);
+      setBackendStatus("Backend server running");
+      setPendingCloudSync(getPendingCloudSync());
+    } catch (error) {
+      setBackendStatus("Backend server offline");
+      showNotice(error.message || "System health check failed.");
+    } finally {
+      setHealthRefreshing(false);
+    }
+  }
+
+  async function handleRetryWhatsAppQueue() {
+    try {
+      await retryFailedWhatsAppQueue();
+      await refreshSystemHealth();
+      showNotice("Failed WhatsApp sends were queued for retry.");
+    } catch (error) {
+      showNotice(error.message || "WhatsApp queue retry failed.");
+    }
+  }
+
+  async function syncRecoveredLocalState(reason) {
+    const snapshot = await syncLocalSnapshotWithRecovery(reason, syncClientIdRef.current);
+    lastCloudUpdateRef.current = snapshot.cloudUpdatedAt;
+    setPendingCloudSync(getPendingCloudSync());
+    setFirebaseStatus(snapshot.queued ? "Firebase recovery queued" : "Firebase connected");
+    return snapshot;
+  }
+
+  async function handleUndo() {
+    const entry = undoLastChange();
+    if (!entry) return;
+    handleRestoreBackup();
+    refreshRecoveryState();
+    await syncRecoveredLocalState("undo");
+    showNotice(`Undone: ${entry.action}.`);
+  }
+
+  async function handleRedo() {
+    const entry = redoLastChange();
+    if (!entry) return;
+    handleRestoreBackup();
+    refreshRecoveryState();
+    await syncRecoveredLocalState("redo");
+    showNotice(`Restored forward: ${entry.action}.`);
+  }
+
+  async function handleCreateSystemVersion(label = "Manual admin checkpoint") {
+    setVersionBusy(true);
+    try {
+      const version = await createSystemVersion(label, syncClientIdRef.current);
+      setSystemVersions(await listSystemVersions());
+      showNotice(`${version.name} system checkpoint created.`);
+      return version;
+    } catch (error) {
+      showNotice(error.message || "Could not create system checkpoint.");
+      return null;
+    } finally {
+      setVersionBusy(false);
+    }
+  }
+
+  async function handleSwitchSystemVersion(version) {
+    if (!confirm(`Switch all branch reports, settings, and saved names to ${version.name}? The current state will be saved first.`)) return;
+    setVersionBusy(true);
+    try {
+      await createSystemVersion(`Before switching to ${version.name}`, syncClientIdRef.current);
+      const selectedVersion = await restoreSystemVersionToFirebase(version.id, syncClientIdRef.current);
+      if (!selectedVersion?.snapshot) throw new Error("Selected system version could not be loaded.");
+      applyingRemoteSnapshotRef.current = true;
+      restoreBackupData(selectedVersion.snapshot, { silent: true });
+      handleRestoreBackup();
+      await syncRecoveredLocalState(`system-version-switch-${version.name}`);
+      setSystemVersions(await listSystemVersions());
+      refreshRecoveryState();
+      showNotice(`System switched to ${version.name}.`);
+    } catch (error) {
+      showNotice(error.message || "System version switch failed.");
+    } finally {
+      applyingRemoteSnapshotRef.current = false;
+      setVersionBusy(false);
+    }
   }
 
   async function handleLogin(branchName, password) {
@@ -549,9 +765,14 @@ export default function App() {
 
     setCloudStatus("Saving settings to Firebase Realtime Database...");
     try {
-      const snapshot = await uploadLocalSnapshotToFirebase("settings-save", syncClientIdRef.current);
+      const snapshot = await syncLocalSnapshotWithRecovery("settings-save", syncClientIdRef.current);
       lastCloudUpdateRef.current = snapshot.cloudUpdatedAt;
-      setCloudStatus(`Settings synced to Firebase: ${new Date(snapshot.cloudUpdatedAt).toLocaleTimeString()}`);
+      setPendingCloudSync(getPendingCloudSync());
+      setCloudStatus(
+        snapshot.queued
+          ? "Settings saved locally and queued for Firebase recovery."
+          : `Settings synced to Firebase: ${new Date(snapshot.cloudUpdatedAt).toLocaleTimeString()}`,
+      );
     } catch (error) {
       setCloudStatus(error.message || "Settings Firebase sync failed.");
     }
@@ -591,18 +812,24 @@ export default function App() {
     setSettingsState(savedSettings);
     setStableTarget(savedSettings.operationTarget || "");
     setCourierNames(getCourierNames());
+    if (session?.role === "admin") setUsers(getUsers());
     loadDate(selectedDate);
   }
 
   async function handleCloudUpload() {
     setCloudStatus("Uploading local data to Firebase...");
     try {
-      const snapshot = await uploadLocalSnapshotToFirebase("manual-upload", syncClientIdRef.current);
+      const snapshot = await syncLocalSnapshotWithRecovery("manual-upload", syncClientIdRef.current);
       lastCloudUpdateRef.current = snapshot.cloudUpdatedAt;
       const savedSettings = saveSettings({ cloudLastSyncedAt: snapshot.cloudUpdatedAt });
       setSettingsState(savedSettings);
-      setCloudStatus(`Uploaded to Firebase: ${new Date(snapshot.cloudUpdatedAt).toLocaleString()}`);
-      showNotice("Uploaded to Firebase successfully.");
+      setPendingCloudSync(getPendingCloudSync());
+      setCloudStatus(
+        snapshot.queued
+          ? "Firebase is unavailable. The latest snapshot is queued for automatic upload."
+          : `Uploaded to Firebase: ${new Date(snapshot.cloudUpdatedAt).toLocaleString()}`,
+      );
+      showNotice(snapshot.queued ? "Saved to the cloud recovery queue." : "Uploaded to Firebase successfully.");
     } catch (error) {
       setCloudStatus(error.message || "Cloud upload failed.");
     }
@@ -719,6 +946,73 @@ export default function App() {
     return { totalOnRoute, totalDelivery, deliveryPercent, outward, targetValue, achievement };
   }, [courierRows, operation, stableTarget]);
 
+  const todayOperations = useMemo(() => {
+    const report = getReportByDate(selectedDate);
+    const deliveredReports = Object.values(report.delivered || {});
+    const exceptions = deliveredReports.reduce((total, deliveredReport) => {
+      const status = getReconciliationReviewStatus(deliveredReport.reconciliation);
+      return total
+        + status.unconfirmedRescheduled.length
+        + status.unclassifiedMissing.length
+        + status.unreviewedExtraRescheduled.length
+        + (deliveredReport.reconciliation?.extraDelivered?.length || 0)
+        + (deliveredReport.reconciliation?.deliveredAndRescheduled?.length || 0);
+    }, 0);
+    const hasCourier = (report.courierRows?.length || 0) > 0;
+    const hasOperation = Boolean(report.operation);
+    const whatsappPending =
+      Number(systemHealth?.queue?.counts?.pending || 0)
+      + Number(systemHealth?.queue?.counts?.sending || 0)
+      + Number(systemHealth?.queue?.counts?.failed || 0);
+    const deliveredComplete = deliveredReports.length > 0 && exceptions === 0;
+    const reportsRemaining = Number(!hasCourier) + Number(!hasOperation);
+
+    return {
+      date: displayDate(selectedDate),
+      deliveredRiders: deliveredReports.length,
+      exceptions,
+      reportsRemaining,
+      whatsappPending,
+      hasCourier,
+      hasOperation,
+      ready: deliveredComplete && hasCourier && hasOperation && whatsappPending === 0,
+      steps: [
+        {
+          id: "delivered",
+          tab: "deliveredConverter",
+          label: "Prepare rider Delivered Reports",
+          helper: deliveredComplete
+            ? `${deliveredReports.length} rider report(s) checked`
+            : deliveredReports.length === 0
+              ? "No rider Delivered Reports saved"
+              : `${exceptions} exception(s) need attention`,
+          complete: deliveredComplete,
+        },
+        {
+          id: "courier",
+          tab: "courier",
+          label: "Save Courier Performance",
+          helper: hasCourier ? `${report.courierRows.length} courier row(s) saved` : "Courier Performance is not saved",
+          complete: hasCourier,
+        },
+        {
+          id: "operation",
+          tab: "operation",
+          label: "Save Operation Report",
+          helper: hasOperation ? "Operation Report saved" : "Operation Report is not saved",
+          complete: hasOperation,
+        },
+        {
+          id: "send",
+          tab: whatsappPending ? "settings" : "exports",
+          label: "Complete exports and WhatsApp sends",
+          helper: whatsappPending ? `${whatsappPending} send(s) pending or failed` : "WhatsApp queue is clear",
+          complete: deliveredComplete && hasCourier && hasOperation && whatsappPending === 0,
+        },
+      ],
+    };
+  }, [selectedDate, history, courierRows, operation, systemHealth]);
+
   const activeTabLabel = visibleTabs.find((tab) => tab.id === activeTab)?.label || "Dashboard";
 
   if (!session) {
@@ -726,13 +1020,13 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell app-background pb-24 text-[#15143b] 2xl:grid 2xl:grid-cols-[260px_1fr] 2xl:items-start 2xl:gap-5 2xl:p-5 2xl:pb-5">
+    <div className="app-shell app-background pb-24 text-[#15143b] xl:grid xl:grid-cols-[260px_1fr] xl:items-start xl:gap-5 xl:p-5 xl:pb-5">
       {notice && (
         <div className="fixed right-4 top-4 z-50 max-w-sm rounded-[22px] border border-white/70 bg-violet-600 px-5 py-3 text-sm font-black text-white shadow-2xl shadow-violet-300/50">
           {notice}
         </div>
       )}
-      <aside className="glass-sidebar no-print hidden 2xl:flex">
+      <aside className="glass-sidebar no-print hidden xl:flex">
         <div className="sidebar-profile">
           <div className="profile-avatar">
             <span className="avatar-hair" />
@@ -790,9 +1084,9 @@ export default function App() {
           <StatusPill icon={Server} label="Backend" value={backendStatus} ok={backendStatus.includes("running")} />
         </div>
       )}
-      <header className="sticky top-0 z-30 border-b border-[#eadff2] bg-[#fff7f2] 2xl:static 2xl:border-0 2xl:bg-transparent">
-        <div className="flex flex-col gap-4 px-4 py-4 2xl:px-0 2xl:py-0">
-          <div className="flex items-center justify-between gap-3 2xl:hidden">
+      <header className="sticky top-0 z-30 border-b border-[#eadff2] bg-[#fff7f2] xl:static xl:border-0 xl:bg-transparent">
+        <div className="flex flex-col gap-4 px-4 py-4 xl:px-0 xl:py-0">
+          <div className="flex items-center justify-between gap-3 xl:hidden">
             <div className="min-w-0">
               <p className="text-xs font-black uppercase text-violet-500">Signed in branch</p>
               <p className="truncate text-sm font-black text-[#15143b]">{settings.branchName || session.branchName || "Branch"}</p>
@@ -806,7 +1100,7 @@ export default function App() {
               Logout
             </button>
           </div>
-          <div className="grid gap-4 2xl:grid-cols-[1fr_420px] 2xl:items-center">
+          <div className="grid gap-4 xl:grid-cols-[1fr_420px] xl:items-center">
             <div>
               <p className="text-sm font-black text-violet-600">{activeTabLabel}</p>
               <h1 className="mt-2 text-3xl font-black tracking-tight text-[#101233] md:text-5xl">Daily Courier Report System</h1>
@@ -817,15 +1111,15 @@ export default function App() {
               <input type="search" placeholder="Search reports, couriers..." className="min-w-0 flex-1 bg-transparent text-sm font-bold text-[#15143b] outline-none placeholder:text-[#8b7bb5]" />
             </label>
           </div>
-          <div className="grid grid-cols-2 gap-3 2xl:hidden">
+          <div className="grid grid-cols-2 gap-3 xl:hidden">
             <TopMetric icon={CalendarDays} label="Today" value={displayDate(todayIso())} tone="red" />
             <TopMetric icon={Target} label="Target" value={stableTarget || "Not set"} tone="green" />
           </div>
         </div>
       </header>
 
-      <main className="grid gap-4 px-3 py-4 md:gap-5 md:px-4 2xl:px-0 2xl:py-6">
-        <div className="2xl:hidden">
+      <main className="grid gap-4 px-3 py-4 md:gap-5 md:px-4 xl:px-0 xl:py-6">
+        <div className="xl:hidden">
           <p className="text-sm font-black text-[#15143b]">{activeTabLabel}</p>
           <p className="text-xs font-semibold text-[#6f6597]">Mobile app mode</p>
         </div>
@@ -851,6 +1145,9 @@ export default function App() {
                 onSearch={handleSearch}
               />
 
+              <TodayOperationsDashboard summary={todayOperations} onOpen={setActiveTab} />
+              <DailyWorkflowWizard date={selectedDate} steps={todayOperations.steps} onOpen={setActiveTab} />
+
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <SummaryCard label="Courier Rows" value={courierRows.length} helper="Total entries for this report" icon={Package} color="purple" />
                 <SummaryCard label="Saved Names" value={courierNames.length} helper="Unique courier names saved" icon={UserRound} color="pink" />
@@ -871,6 +1168,17 @@ export default function App() {
             </div>
 
             <aside className="dashboard-side-column">
+              {session.role === "admin" && (
+                <SystemHealthPanel
+                  firebaseStatus={firebaseStatus}
+                  backendStatus={backendStatus}
+                  health={systemHealth}
+                  pendingCloudSync={pendingCloudSync}
+                  refreshing={healthRefreshing}
+                  onRefresh={refreshSystemHealth}
+                  onRetryQueue={handleRetryWhatsAppQueue}
+                />
+              )}
               <CourierBanner />
               <PerformanceOverview stats={stats} />
               <QuickSummary history={history} stats={stats} courierNames={courierNames} />
@@ -963,17 +1271,31 @@ export default function App() {
         )}
 
         {activeTab === "settings" && (
-          <SettingsPage
-            settings={settings}
-            onSaveSettings={handleSaveAppSettings}
-            courierNames={courierNames}
-            onSaveCourierName={handleSaveCourierName}
-            onDeleteCourierName={handleDeleteCourierName}
-            onRestore={handleRestoreBackup}
-            onCloudUpload={handleCloudUpload}
-            onCloudDownload={handleCloudDownload}
-            cloudStatus={cloudStatus}
-          />
+          <>
+            <SettingsPage
+              settings={settings}
+              onSaveSettings={handleSaveAppSettings}
+              courierNames={courierNames}
+              onSaveCourierName={handleSaveCourierName}
+              onDeleteCourierName={handleDeleteCourierName}
+              onRestore={handleRestoreBackup}
+              onCloudUpload={handleCloudUpload}
+              onCloudDownload={handleCloudDownload}
+              cloudStatus={cloudStatus}
+            />
+            {session.role === "admin" && (
+              <SystemRecoveryPanel
+                versions={systemVersions}
+                undoCount={undoCount}
+                redoCount={redoCount}
+                busy={versionBusy}
+                onUndo={handleUndo}
+                onRedo={handleRedo}
+                onCreateVersion={() => handleCreateSystemVersion()}
+                onSwitchVersion={handleSwitchSystemVersion}
+              />
+            )}
+          </>
         )}
 
         {activeTab === "users" && session.role === "admin" && (
@@ -982,7 +1304,7 @@ export default function App() {
       </main>
       </div>
 
-      <nav className="mobile-bottom-nav no-print fixed inset-x-0 bottom-0 z-40 border-t border-violet-100 bg-[#fff8f4] px-2 pt-2 shadow-[0_-8px_24px_rgba(128,104,178,0.14)] 2xl:hidden">
+      <nav className="mobile-bottom-nav no-print fixed inset-x-0 bottom-0 z-40 border-t border-violet-100 bg-[#fff8f4] px-2 pt-2 shadow-[0_-8px_24px_rgba(128,104,178,0.14)] xl:hidden">
         <div className="mobile-scrollbar flex gap-1 overflow-x-auto pb-1">
           {visibleTabs.map((tab) => {
             const Icon = tab.icon;
@@ -1010,13 +1332,13 @@ export default function App() {
 function TopMetric({ icon: Icon, label, value, tone }) {
   const toneClass = tone === "red" ? "from-rose-100/90 to-pink-50/80 text-rose-600" : "from-emerald-100/90 to-emerald-50/80 text-emerald-700";
   return (
-    <div className={`metric-card flex items-center gap-3 bg-gradient-to-br ${toneClass} p-4`}>
-      <div className="grid h-14 w-14 shrink-0 place-items-center rounded-[22px] bg-[#fff8f4] shadow-[8px_8px_18px_rgba(128,104,178,0.16),-8px_-8px_18px_rgba(255,255,255,0.9)]">
-        <Icon className="h-7 w-7" />
+    <div className={`metric-card flex items-center gap-2 bg-gradient-to-br p-3 md:gap-3 md:p-4 ${toneClass}`}>
+      <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[18px] bg-[#fff8f4] shadow-[8px_8px_18px_rgba(128,104,178,0.16),-8px_-8px_18px_rgba(255,255,255,0.9)] md:h-14 md:w-14 md:rounded-[22px]">
+        <Icon className="h-6 w-6 md:h-7 md:w-7" />
       </div>
       <div className="min-w-0">
         <p className="text-xs font-black uppercase text-[#15143b]">{label}</p>
-        <p className="truncate text-lg font-black md:text-2xl">{value}</p>
+        <p className="whitespace-nowrap text-sm font-black leading-tight md:text-2xl">{value}</p>
       </div>
     </div>
   );

@@ -301,7 +301,7 @@ textarea {
   box-shadow: 18px 18px 50px rgba(128, 104, 178, 0.18), -10px -10px 26px rgba(255, 255, 255, 0.88);
 }
 
-@media (max-width: 1535px) {
+@media (max-width: 1279px) {
   .main-dashboard-surface {
     min-height: 100dvh;
     border-radius: 0;

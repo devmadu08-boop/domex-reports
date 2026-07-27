@@ -54,9 +54,12 @@ export default function RescheduleReport({ selectedDate, branchName = "Middeniya
       const imageDataUrls = await Promise.all(
         elements.map((element) => captureElementAsPngDataUrl(element, { whatsappBranded: true })),
       );
-      await sendRescheduleReportToWhatsApp({ imageDataUrls, caption });
-
-      setStatus(`Reschedule Report sent to WhatsApp: ${elements.length} A4 page${elements.length === 1 ? "" : "s"}.`);
+      const result = await sendRescheduleReportToWhatsApp({ imageDataUrls, caption });
+      setStatus(
+        result.queued
+          ? `Reschedule Report saved to the WhatsApp queue: ${elements.length} A4 page${elements.length === 1 ? "" : "s"}.`
+          : `Reschedule Report sent to WhatsApp: ${elements.length} A4 page${elements.length === 1 ? "" : "s"}.`,
+      );
     } catch (error) {
       setStatus(error.message || "Could not send the Reschedule Report to WhatsApp.");
     } finally {

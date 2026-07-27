@@ -5,7 +5,7 @@ import { captureElementAsPngDataUrl, exportElementAsPng, exportElementsAsPortrai
 import { deleteDeliveredReport, getAllDeliveredRiderNames, getDeliveredReport, getDeliveredRiderNames, getReportByDate, getSettings, saveCourierName, saveDeliveredReport as saveDeliveredReportByRider, saveReportType, saveRescheduleRows, saveSettings } from "../services/reportStorage.js";
 import { sendConvertReportToWhatsApp, sendReportToWhatsAppRecipient, sendTextToWhatsAppRecipient } from "../services/whatsappApi.js";
 import { fetchDomexDeliveredCsv } from "../services/domexAutomationApi.js";
-import { normalizeRiderName, normalizeTrackingNo, parseDeliveredCsv, parseRescheduleCsv, reconcileDeliveredTracking } from "../utils/deliveredReconciliation.js";
+import { detectRiderReportCsvType, normalizeRiderName, normalizeTrackingNo, parseDeliveredCsv, parseRescheduleCsv, reconcileDeliveredTracking } from "../utils/deliveredReconciliation.js";
 import {
   EXTRA_RESCHEDULE_IGNORE_REASONS,
   getReconciliationReviewStatus,
@@ -50,6 +50,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
   const [reportsGenerated, setReportsGenerated] = useState(false);
   const [reconciliationStatus, setReconciliationStatus] = useState("");
   const [reminderSending, setReminderSending] = useState(false);
+  const [smartLoading, setSmartLoading] = useState(false);
   const reportRef = useRef(null);
   const reportPageRefs = useRef([]);
 
@@ -73,6 +74,124 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
   const hasValidPickupCount = pickupCount !== "" && Number.isInteger(Number(pickupCount)) && Number(pickupCount) >= 0;
   const canGenerateReports = entries.length > 0 && Boolean(reconciliation?.checkedAt) && reviewStatus.ready && hasValidPickupCount;
   const canFinalizeReport = canGenerateReports && reportsGenerated;
+
+  async function handleSmartFileUpload(event) {
+    const files = [...(event.target.files || [])];
+    event.target.value = "";
+    if (!files.length) return;
+
+    setSmartLoading(true);
+    setReconciliationStatus("Detecting OFD, Delivered, and Reschedule files...");
+    try {
+      const pdfFiles = files.filter((file) => file.name.toLowerCase().endsWith(".pdf") || file.type === "application/pdf");
+      const csvFiles = files.filter((file) => file.name.toLowerCase().endsWith(".csv") || file.type.includes("csv"));
+      if (pdfFiles.length !== 1 || csvFiles.length < 2) {
+        throw new Error("Select one Out for Delivery PDF and the Delivered + Reschedule CSV files together.");
+      }
+
+      const parsedOutForDelivery = await parseOutForDeliveryPdf(pdfFiles[0]);
+      let deliveredFile = null;
+      let deliveredParsed = null;
+      const remainingCsv = [];
+
+      for (const file of csvFiles) {
+        const text = await file.text();
+        if (detectRiderReportCsvType(text) === "delivered" && !deliveredParsed) {
+          const parsed = parseDeliveredCsv(text);
+          deliveredFile = file;
+          deliveredParsed = parsed;
+        } else {
+          remainingCsv.push({ file, text });
+        }
+      }
+
+      if (!deliveredParsed || !deliveredFile) {
+        throw new Error("Delivered CSV could not be detected. It must contain Tracking No, Value, and Rider Name columns.");
+      }
+      assertRiderMatches(parsedOutForDelivery.riderName, deliveredParsed.riderName);
+
+      let rescheduleFile = null;
+      let rescheduleParsed = null;
+      for (const candidate of remainingCsv) {
+        try {
+          const parsed = parseRescheduleCsv(candidate.text, deliveredParsed.riderName);
+          if (!rescheduleParsed) {
+            rescheduleFile = candidate.file;
+            rescheduleParsed = parsed;
+          }
+        } catch {
+          // Keep checking other CSV files by content.
+        }
+      }
+      if (!rescheduleParsed || !rescheduleFile) {
+        throw new Error("Reschedule CSV could not be detected. It must contain Tracking No and Rider Name columns.");
+      }
+
+      const nextDate = deliveredParsed.reportDate || rescheduleParsed.reportDate || reportDate;
+      const nextRiderName = deliveredParsed.riderName;
+      const nextBranchName = deliveredParsed.branchName || branchName || defaultBranchName;
+      const nextSources = {
+        outForDelivery: {
+          fileName: pdfFiles[0].name,
+          count: parsedOutForDelivery.trackingNumbers.length,
+          trackingNumbers: parsedOutForDelivery.trackingNumbers,
+          riderName: parsedOutForDelivery.riderName,
+          pageCount: parsedOutForDelivery.pageCount,
+        },
+        delivered: {
+          fileName: deliveredFile.name,
+          count: deliveredParsed.entries.length,
+          trackingNumbers: deliveredParsed.trackingNumbers,
+        },
+        reschedule: {
+          fileName: rescheduleFile.name,
+          count: rescheduleParsed.trackingNumbers.length,
+          trackingNumbers: rescheduleParsed.trackingNumbers,
+        },
+      };
+      const nextReconciliation = createReconciliation({
+        outTracking: parsedOutForDelivery.trackingNumbers,
+        deliveredEntries: deliveredParsed.entries,
+        rescheduledTracking: rescheduleParsed.trackingNumbers,
+        nextSources,
+        previous: getDeliveredReport(nextDate, nextRiderName)?.reconciliation,
+      });
+
+      setReportDate(nextDate);
+      setRiderName(nextRiderName);
+      setBranchName(nextBranchName);
+      setEntries(deliveredParsed.entries);
+      setFileName(deliveredFile.name);
+      setSources(nextSources);
+      setReconciliation(nextReconciliation);
+      setPickupCount("");
+      setReportsGenerated(false);
+      setIncludeSpecialTracking(false);
+      saveRescheduleRows(rescheduleParsed.riderRows, nextDate);
+      saveDeliveredReportByRider(nextDate, nextRiderName, {
+        riderName: nextRiderName,
+        branchName: nextBranchName,
+        entries: deliveredParsed.entries,
+        includeSpecialTracking: false,
+        pickupCount: "",
+        fileName: deliveredFile.name,
+        sourceFiles: nextSources,
+        reconciliation: nextReconciliation,
+      });
+      setSavedRiderNames(getDeliveredRiderNames(nextDate));
+      const status = getReconciliationReviewStatus(nextReconciliation);
+      setReconciliationStatus(
+        status.ready
+          ? `Smart detection complete: ${deliveredParsed.entries.length} Delivered and ${status.effectiveRescheduledCount} OFD Rescheduled parcels.`
+          : `Smart detection complete. Review ${status.blockingDifferenceCount + status.unconfirmedRescheduled.length + status.unclassifiedMissing.length} item(s) below.`,
+      );
+      onSaved?.({ date: nextDate, riderName: nextRiderName, message: "All three rider files detected and reconciled." });
+    } catch (error) {
+      setReconciliationStatus(error.message || "Smart file detection failed.");
+    } finally {
+      setSmartLoading(false);
+    }
+  }
 
   async function handleOutForDeliveryUpload(event) {
     const file = event.target.files?.[0];
@@ -594,15 +713,18 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
         const imageDataUrls = await Promise.all(
           pageElements.map((element) => captureElementAsPngDataUrl(element, { whatsappBranded: true })),
         );
-        await sendReportToWhatsAppRecipient({
+        const riderSendResult = await sendReportToWhatsAppRecipient({
           phoneNumber: exportPrompt.riderPhone,
           imageDataUrls,
           caption: riderCaption,
         });
-        await sendConvertReportToWhatsApp({
+        const groupSendResult = await sendConvertReportToWhatsApp({
           imageDataUrls,
           caption: `${riderCaption}\n\nDefault group copy for rider: ${riderName || "-"}`,
         });
+        if (riderSendResult.queued || groupSendResult.queued) {
+          setExportStatus("Export complete. WhatsApp delivery is queued and will retry automatically.");
+        }
       }
 
       const nextAutoWhatsApp = Boolean(rememberSendChoice && sendToRiderWhatsApp);
@@ -610,7 +732,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
         saveSettings({ deliveredExportAutoWhatsApp: nextAutoWhatsApp });
       }
 
-      setExportStatus(sendToRiderWhatsApp ? "Export complete and sent to rider WhatsApp + Delivered Report default group." : "Export complete.");
+      setExportStatus((current) => current || (sendToRiderWhatsApp ? "Export complete and sent to rider WhatsApp + Delivered Report default group." : "Export complete."));
       window.setTimeout(() => setExportPrompt(null), 900);
     } catch (error) {
       setExportStatus(error.message || "Export failed.");
@@ -641,6 +763,30 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
             Reset
           </button>
         </div>
+
+        <label className={`mb-4 grid min-h-24 cursor-pointer place-items-center rounded-3xl border-2 border-dashed px-4 py-5 text-center transition ${
+          smartLoading ? "border-violet-300 bg-violet-100" : "border-blue-300 bg-blue-50 hover:border-violet-500 hover:bg-violet-50"
+        }`}>
+          <input
+            type="file"
+            multiple
+            accept=".pdf,.csv,application/pdf,text/csv"
+            onChange={handleSmartFileUpload}
+            disabled={smartLoading}
+            className="hidden"
+          />
+          <span>
+            <span className="mx-auto grid h-11 w-11 place-items-center rounded-2xl bg-violet-600 text-white shadow-lg shadow-violet-200">
+              <Upload className="h-5 w-5" />
+            </span>
+            <span className="mt-2 block text-sm font-black text-[#071537]">
+              {smartLoading ? "Detecting report files..." : "Smart Upload All 3 Files"}
+            </span>
+            <span className="mt-1 block text-xs font-bold text-blue-950/55">
+              Select OFD PDF, Delivered CSV, and Reschedule CSV together. File types are detected from their contents.
+            </span>
+          </span>
+        </label>
 
         <DeliveredReconciliationPanel
           sources={sources}

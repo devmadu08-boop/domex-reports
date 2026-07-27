@@ -2,7 +2,8 @@ import cors from "cors";
 import express from "express";
 import domexAutomationRoutes from "./domex/domexAutomationRoutes.js";
 import whatsappRoutes from "./whatsapp/whatsappRoutes.js";
-import { startDailyBackupScheduler, startWhatsAppClient } from "./whatsapp/whatsappService.js";
+import { getWhatsAppStatus, startDailyBackupScheduler, startWhatsAppClient } from "./whatsapp/whatsappService.js";
+import { getWhatsAppQueueStatus, startWhatsAppQueueWorker } from "./whatsapp/whatsappQueue.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -31,6 +32,22 @@ app.get("/api/health", (_request, response) => {
   response.json({ ok: true, service: "daily-report-backend" });
 });
 
+app.get("/api/system-health", async (_request, response) => {
+  try {
+    const [whatsapp, queue] = await Promise.all([getWhatsAppStatus(), getWhatsAppQueueStatus()]);
+    response.json({
+      ok: true,
+      service: "daily-report-backend",
+      uptimeSeconds: Math.round(process.uptime()),
+      timestamp: new Date().toISOString(),
+      whatsapp,
+      queue,
+    });
+  } catch (error) {
+    response.status(500).json({ ok: false, error: error.message || "System health check failed." });
+  }
+});
+
 app.use("/api/whatsapp", whatsappRoutes);
 app.use("/api/domex", domexAutomationRoutes);
 
@@ -42,3 +59,4 @@ startWhatsAppClient().catch((error) => {
   console.error("[whatsapp-startup]", error);
 });
 startDailyBackupScheduler();
+startWhatsAppQueueWorker();

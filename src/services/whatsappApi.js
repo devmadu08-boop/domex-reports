@@ -56,6 +56,27 @@ export function getBackendHealth() {
   });
 }
 
+export function getSystemHealth() {
+  const url = whatsappApiBaseUrl ? `${whatsappApiBaseUrl}/api/system-health` : "/api/system-health";
+  return fetch(url).then(async (response) => {
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "System health check failed.");
+    return data;
+  });
+}
+
+export function getWhatsAppQueue() {
+  return requestJson("/queue");
+}
+
+export function retryFailedWhatsAppQueue() {
+  return requestJson("/queue/retry-failed", { method: "POST" });
+}
+
+export function retryWhatsAppQueueJob(jobId) {
+  return requestJson(`/queue/${encodeURIComponent(jobId)}/retry`, { method: "POST" });
+}
+
 export function getWhatsAppQr() {
   return requestJson("/qr");
 }

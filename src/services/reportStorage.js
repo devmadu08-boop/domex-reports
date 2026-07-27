@@ -6,7 +6,10 @@ const SETTINGS_KEY = "daily-courier-report-system-settings-v1";
 const META_KEY = "daily-courier-report-system-meta-v1";
 const SESSION_KEY = "daily-courier-report-system-session-v1";
 const USERS_KEY = "daily-courier-report-system-users-v1";
+const UNDO_HISTORY_KEY = "daily-courier-report-system-undo-history-v1";
+const REDO_HISTORY_KEY = "daily-courier-report-system-redo-history-v1";
 const BACKUP_VERSION = 1;
+const MAX_UNDO_HISTORY = 20;
 const DEFAULT_COMPANY_NAME = "Domestic Express (pvt) ltd";
 const ADMIN_USER = { branchName: "madu", password: "2006", role: "admin", createdAt: "system" };
 const DEFAULT_WHATSAPP_CAPTION_TEMPLATES = {
@@ -17,6 +20,7 @@ const DEFAULT_WHATSAPP_CAPTION_TEMPLATES = {
 };
 const DATA_CHANGED_EVENT = "daily-courier-report-data-changed";
 let suppressChangeEvent = false;
+let suppressHistory = false;
 let activeBranchName = "";
 
 const emptyReport = {
@@ -61,6 +65,7 @@ export function addDataChangeListener(listener) {
 }
 
 function writeStore(store) {
+  captureUndoSnapshot("Report data changed");
   localStorage.setItem(scopedKey(STORAGE_KEY), JSON.stringify(store));
   markLocalDataChanged();
   emitDataChanged();
@@ -76,7 +81,38 @@ function readJson(key, fallback) {
 }
 
 function writeJson(key, value) {
+  captureUndoSnapshot(key === SETTINGS_KEY ? "Settings changed" : "Saved courier names changed");
   localStorage.setItem(scopedKey(key), JSON.stringify(value));
+  markLocalDataChanged();
+  emitDataChanged();
+}
+
+function readScopedState() {
+  return {
+    reports: readStore(),
+    courierNames: readJson(COURIER_NAMES_KEY, []),
+    settings: readJson(SETTINGS_KEY, {}),
+    localUpdatedAt: getLocalUpdatedAt(),
+  };
+}
+
+function captureUndoSnapshot(action) {
+  if (suppressHistory || typeof localStorage === "undefined") return;
+  const history = readJson(UNDO_HISTORY_KEY, []);
+  const entry = {
+    id: crypto.randomUUID(),
+    action,
+    createdAt: new Date().toISOString(),
+    state: readScopedState(),
+  };
+  localStorage.setItem(scopedKey(UNDO_HISTORY_KEY), JSON.stringify([entry, ...history].slice(0, MAX_UNDO_HISTORY)));
+  localStorage.removeItem(scopedKey(REDO_HISTORY_KEY));
+}
+
+function applyScopedState(state) {
+  localStorage.setItem(scopedKey(STORAGE_KEY), JSON.stringify(state?.reports || {}));
+  localStorage.setItem(scopedKey(COURIER_NAMES_KEY), JSON.stringify(state?.courierNames || []));
+  localStorage.setItem(scopedKey(SETTINGS_KEY), JSON.stringify(state?.settings || {}));
   markLocalDataChanged();
   emitDataChanged();
 }
@@ -193,6 +229,71 @@ function markLocalDataChanged(value = new Date().toISOString()) {
 
 export function getLocalUpdatedAt() {
   return readJson(META_KEY, {}).localUpdatedAt || "";
+}
+
+export function getUndoHistory() {
+  const history = readJson(UNDO_HISTORY_KEY, []);
+  return Array.isArray(history) ? history : [];
+}
+
+export function undoLastChange() {
+  const history = getUndoHistory();
+  const [latest, ...remaining] = history;
+  if (!latest?.state) return null;
+
+  const redoHistory = readJson(REDO_HISTORY_KEY, []);
+  const redoEntry = {
+    id: crypto.randomUUID(),
+    action: latest.action,
+    createdAt: new Date().toISOString(),
+    state: readScopedState(),
+  };
+
+  suppressHistory = true;
+  try {
+    applyScopedState(latest.state);
+    localStorage.setItem(scopedKey(UNDO_HISTORY_KEY), JSON.stringify(remaining));
+    localStorage.setItem(scopedKey(REDO_HISTORY_KEY), JSON.stringify([redoEntry, ...redoHistory].slice(0, MAX_UNDO_HISTORY)));
+  } finally {
+    suppressHistory = false;
+  }
+  return latest;
+}
+
+export function getRedoHistory() {
+  const history = readJson(REDO_HISTORY_KEY, []);
+  return Array.isArray(history) ? history : [];
+}
+
+export function redoLastChange() {
+  const history = getRedoHistory();
+  const [latest, ...remaining] = history;
+  if (!latest?.state) return null;
+
+  const undoEntry = {
+    id: crypto.randomUUID(),
+    action: latest.action,
+    createdAt: new Date().toISOString(),
+    state: readScopedState(),
+  };
+
+  suppressHistory = true;
+  try {
+    applyScopedState(latest.state);
+    localStorage.setItem(
+      scopedKey(UNDO_HISTORY_KEY),
+      JSON.stringify([undoEntry, ...getUndoHistory()].slice(0, MAX_UNDO_HISTORY)),
+    );
+    localStorage.setItem(scopedKey(REDO_HISTORY_KEY), JSON.stringify(remaining));
+  } finally {
+    suppressHistory = false;
+  }
+  return latest;
+}
+
+export function clearUndoHistory() {
+  localStorage.removeItem(scopedKey(UNDO_HISTORY_KEY));
+  localStorage.removeItem(scopedKey(REDO_HISTORY_KEY));
 }
 
 export function getReportByDate(date) {
@@ -482,6 +583,7 @@ export function createBackupData() {
     reports: readStore(),
     courierNames: getCourierNames(),
     settings: getSettings(),
+    users: getUsers(),
   };
 }
 
@@ -514,7 +616,9 @@ export function restoreBackupData(data, { silent = false } = {}) {
     throw new Error("Invalid backup file.");
   }
 
+  if (!silent) captureUndoSnapshot("Backup restored");
   suppressChangeEvent = silent;
+  suppressHistory = true;
   try {
     writeStore(data.reports || {});
     writeJson(COURIER_NAMES_KEY, data.courierNames || []);
@@ -523,9 +627,16 @@ export function restoreBackupData(data, { silent = false } = {}) {
       ...(data.settings || {}),
       restoredAt: new Date().toISOString(),
     });
+    if (Array.isArray(data.users)) {
+      writeRawJson(
+        USERS_KEY,
+        data.users.filter((user) => normalizeBranchName(user.branchName) !== ADMIN_USER.branchName),
+      );
+    }
     markLocalDataChanged(data.cloudUpdatedAt || data.exportedAt || new Date().toISOString());
   } finally {
     suppressChangeEvent = false;
+    suppressHistory = false;
   }
 
   return createBackupData();

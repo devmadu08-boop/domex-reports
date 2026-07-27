@@ -124,6 +124,15 @@ export function parseRescheduleCsv(text, selectedRiderName) {
   };
 }
 
+export function detectRiderReportCsvType(text) {
+  const rows = parseCsv(text);
+  const header = rows.find((row) => row.includes("Tracking No") && row.includes("Rider Name"));
+  if (!header) return "unknown";
+  if (header.includes("Reason") || header.includes("Created Date")) return "reschedule";
+  if (header.includes("Value") || header.includes("Delivered Date") || header.includes("Delivered Branch")) return "delivered";
+  return "reschedule";
+}
+
 export function reconcileDeliveredTracking({ outForDeliveryTracking = [], deliveredTracking = [], rescheduledTracking = [] }) {
   const outMap = trackingMap(outForDeliveryTracking);
   const deliveredMap = trackingMap(deliveredTracking);

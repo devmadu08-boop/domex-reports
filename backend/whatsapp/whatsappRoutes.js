@@ -18,8 +18,26 @@ import {
   sendReportToRecipient,
   sendTextToRecipient,
 } from "./whatsappService.js";
+import {
+  configureWhatsAppQueue,
+  getWhatsAppQueueStatus,
+  retryFailedWhatsAppJobs,
+  retryWhatsAppJob,
+  sendWithWhatsAppQueue,
+} from "./whatsappQueue.js";
 
 const router = express.Router();
+
+configureWhatsAppQueue(async (type, payload) => {
+  if (type === "default-report") return sendReportToDefaultGroup(payload);
+  if (type === "delivered-report") return sendReportToConvertDefaultGroup(payload);
+  if (type === "reschedule-report") return sendReportToRescheduleDefaultGroup(payload);
+  if (type === "recipient-report") return sendReportToRecipient(payload);
+  if (type === "recipient-text") return sendTextToRecipient(payload);
+  if (type === "backup-now") return sendBackupToWhatsApp({ force: true });
+  if (type === "reschedule-approval") return sendRescheduleApprovalRequest({ force: true });
+  throw new Error(`Unsupported WhatsApp queue job: ${type}`);
+});
 
 function sendError(response, error) {
   console.error("[whatsapp-api]", error);
@@ -95,7 +113,7 @@ router.post("/reschedule-default-group", async (request, response) => {
 
 router.post("/send-report", async (request, response) => {
   try {
-    response.json(await sendReportToDefaultGroup(request.body));
+    response.json(await sendWithWhatsAppQueue("default-report", request.body));
   } catch (error) {
     sendError(response, error);
   }
@@ -103,7 +121,7 @@ router.post("/send-report", async (request, response) => {
 
 router.post("/send-convert-report", async (request, response) => {
   try {
-    response.json(await sendReportToConvertDefaultGroup(request.body));
+    response.json(await sendWithWhatsAppQueue("delivered-report", request.body));
   } catch (error) {
     sendError(response, error);
   }
@@ -111,7 +129,7 @@ router.post("/send-convert-report", async (request, response) => {
 
 router.post("/send-reschedule-report", async (request, response) => {
   try {
-    response.json(await sendReportToRescheduleDefaultGroup(request.body));
+    response.json(await sendWithWhatsAppQueue("reschedule-report", request.body));
   } catch (error) {
     sendError(response, error);
   }
@@ -119,7 +137,7 @@ router.post("/send-reschedule-report", async (request, response) => {
 
 router.post("/send-report-to-recipient", async (request, response) => {
   try {
-    response.json(await sendReportToRecipient(request.body));
+    response.json(await sendWithWhatsAppQueue("recipient-report", request.body));
   } catch (error) {
     sendError(response, error);
   }
@@ -127,7 +145,7 @@ router.post("/send-report-to-recipient", async (request, response) => {
 
 router.post("/send-text-to-recipient", async (request, response) => {
   try {
-    response.json(await sendTextToRecipient(request.body));
+    response.json(await sendWithWhatsAppQueue("recipient-text", request.body));
   } catch (error) {
     sendError(response, error);
   }
@@ -151,7 +169,7 @@ router.post("/backup-snapshot", async (request, response) => {
 
 router.post("/send-backup-now", async (_request, response) => {
   try {
-    response.json(await sendBackupToWhatsApp({ force: true }));
+    response.json(await sendWithWhatsAppQueue("backup-now", {}));
   } catch (error) {
     sendError(response, error);
   }
@@ -159,7 +177,31 @@ router.post("/send-backup-now", async (_request, response) => {
 
 router.post("/send-reschedule-approval-now", async (_request, response) => {
   try {
-    response.json(await sendRescheduleApprovalRequest({ force: true }));
+    response.json(await sendWithWhatsAppQueue("reschedule-approval", {}));
+  } catch (error) {
+    sendError(response, error);
+  }
+});
+
+router.get("/queue", async (_request, response) => {
+  try {
+    response.json(await getWhatsAppQueueStatus());
+  } catch (error) {
+    sendError(response, error);
+  }
+});
+
+router.post("/queue/retry-failed", async (_request, response) => {
+  try {
+    response.json(await retryFailedWhatsAppJobs());
+  } catch (error) {
+    sendError(response, error);
+  }
+});
+
+router.post("/queue/:jobId/retry", async (request, response) => {
+  try {
+    response.json(await retryWhatsAppJob(request.params.jobId));
   } catch (error) {
     sendError(response, error);
   }
