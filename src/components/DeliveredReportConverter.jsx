@@ -6,7 +6,11 @@ import { deleteDeliveredReport, getAllDeliveredRiderNames, getDeliveredReport, g
 import { sendConvertReportToWhatsApp, sendReportToWhatsAppRecipient, sendTextToWhatsAppRecipient } from "../services/whatsappApi.js";
 import { fetchDomexDeliveredCsv } from "../services/domexAutomationApi.js";
 import { normalizeRiderName, normalizeTrackingNo, parseDeliveredCsv, parseRescheduleCsv, reconcileDeliveredTracking } from "../utils/deliveredReconciliation.js";
-import { getReconciliationReviewStatus, normalizeReconciliationReview } from "../utils/deliveredReconciliationReview.js";
+import {
+  EXTRA_RESCHEDULE_IGNORE_REASONS,
+  getReconciliationReviewStatus,
+  normalizeReconciliationReview,
+} from "../utils/deliveredReconciliationReview.js";
 import { parseOutForDeliveryPdf } from "../utils/outForDeliveryPdf.js";
 import { buildDeliveredRiderWhatsAppCaption } from "../utils/deliveredRiderWhatsAppTemplates.js";
 import DeliveredReconciliationPanel from "./DeliveredReconciliationPanel.jsx";
@@ -158,8 +162,11 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
       onSaved?.();
 
       const unresolvedCount = unresolvedMissing(nextReconciliation).length;
+      const nextReviewStatus = getReconciliationReviewStatus(nextReconciliation);
       setReconciliationStatus(
-        unresolvedCount
+        nextReviewStatus.unreviewedExtraRescheduled.length
+          ? `Reconciliation saved. Review ${nextReviewStatus.unreviewedExtraRescheduled.length} Rescheduled parcel(s) that are not in Out for Delivery.`
+          : unresolvedCount
           ? `Reconciliation saved. ${unresolvedCount} missing parcel${unresolvedCount === 1 ? "" : "s"} found.`
           : "Reconciliation saved. Every Out for Delivery parcel is accounted for.",
       );
@@ -367,7 +374,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
     const existing = currentRows.find((row) => normalizeRiderName(row.courierName) === riderKey);
     const onRouteCount = reconciliation?.outForDeliveryCount || 0;
     const deliveryCount = reconciliation?.deliveredCount || 0;
-    const resendCount = reconciliation?.rescheduledCount || 0;
+    const resendCount = reviewStatus.effectiveRescheduledCount;
     const deliveryPercent = onRouteCount > 0 ? ((deliveryCount / onRouteCount) * 100).toFixed(2) : "0.00";
     const nextRow = {
       ...(existing || {}),
@@ -458,6 +465,23 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
     saveReconciliationReview(
       { ...reconciliation, missingParcels },
       reason ? `${normalizedTrackingNo} classified as ${reason}.` : `${normalizedTrackingNo} reason cleared.`,
+    );
+  }
+
+  function updateExtraRescheduledReason(trackingNo, reason) {
+    if (!reconciliation) return;
+    const normalizedTrackingNo = normalizeTrackingNo(trackingNo);
+    const cleanReason = EXTRA_RESCHEDULE_IGNORE_REASONS.includes(reason) ? reason : "";
+    const extraRescheduledParcels = reconciliation.extraRescheduledParcels.map((item) =>
+      item.trackingNo === normalizedTrackingNo
+        ? { ...item, reason: cleanReason, ignoredAt: cleanReason ? new Date().toISOString() : "" }
+        : item,
+    );
+    saveReconciliationReview(
+      { ...reconciliation, extraRescheduledParcels },
+      cleanReason
+        ? `${normalizedTrackingNo} ignored as ${cleanReason}.`
+        : `${normalizedTrackingNo} is no longer ignored.`,
     );
   }
 
@@ -561,7 +585,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           branchName: branchName || defaultBranchName,
           outForDeliveryCount: reconciliation?.outForDeliveryCount ?? sources.outForDelivery?.count ?? 0,
           deliveredCount: reconciliation?.deliveredCount ?? sources.delivered?.count ?? entries.length,
-          rescheduleCount: reconciliation?.rescheduledCount ?? sources.reschedule?.count ?? 0,
+          rescheduleCount: reviewStatus.effectiveRescheduledCount,
           missrouteCount: reviewStatus.missrouteCount,
           returnCount: reviewStatus.returnCount,
           amount: formatMoney(totalValue),
@@ -631,6 +655,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           onToggleRescheduled={updateRescheduledConfirmation}
           onConfirmAllRescheduled={confirmAllRescheduled}
           onMissingReasonChange={updateMissingReason}
+          onExtraRescheduledReasonChange={updateExtraRescheduledReason}
           onSendReminder={() => sendMissingReminder()}
         />
 
@@ -647,7 +672,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <ReadOnlyCount label="On Route Count" value={reconciliation.outForDeliveryCount} helper="Out for Delivery" />
               <ReadOnlyCount label="Delivery Count" value={reconciliation.deliveredCount} helper="Delivered Report" />
-              <ReadOnlyCount label="Resend Count" value={reconciliation.rescheduledCount} helper="Reschedule Report" />
+              <ReadOnlyCount label="Resend Count" value={reviewStatus.effectiveRescheduledCount} helper="OFD Rescheduled only" />
               <label className="grid gap-2 rounded-2xl border border-amber-200 bg-white p-3">
                 <span className="text-xs font-black uppercase text-amber-700">Pickup Count</span>
                 <input
@@ -1045,6 +1070,7 @@ function createReconciliation({ outTracking, deliveredEntries, rescheduledTracki
     ...result,
     missingParcels,
     rescheduledParcels: previous?.rescheduledParcels || [],
+    extraRescheduledParcels: previous?.extraRescheduledParcels || [],
     outForDeliveryTracking: [...new Set(outTracking.map(normalizeTrackingNo).filter(Boolean))],
     deliveredTracking: [...new Set(deliveredTracking)],
     rescheduledTracking: [...new Set(rescheduledTracking.map(normalizeTrackingNo).filter(Boolean))],
@@ -1064,11 +1090,8 @@ function withBalancedStatus(reconciliation) {
   const reviewStatus = getReconciliationReviewStatus(reconciliation);
   return {
     ...reconciliation,
-    balanced:
-      reviewStatus.ready &&
-      (reconciliation.extraDelivered?.length || 0) === 0 &&
-      (reconciliation.extraRescheduled?.length || 0) === 0 &&
-      (reconciliation.deliveredAndRescheduled?.length || 0) === 0,
+    effectiveRescheduledCount: reviewStatus.effectiveRescheduledCount,
+    balanced: reviewStatus.ready,
   };
 }
 

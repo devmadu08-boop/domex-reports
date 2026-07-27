@@ -1,5 +1,9 @@
 import { AlertTriangle, Check, CheckCircle2, FileCheck2, FileSearch, MessageCircle, Upload } from "lucide-react";
-import { DELIVERY_EXCEPTION_REASONS, getReconciliationReviewStatus } from "../utils/deliveredReconciliationReview.js";
+import {
+  DELIVERY_EXCEPTION_REASONS,
+  EXTRA_RESCHEDULE_IGNORE_REASONS,
+  getReconciliationReviewStatus,
+} from "../utils/deliveredReconciliationReview.js";
 
 export default function DeliveredReconciliationPanel({
   sources,
@@ -14,10 +18,17 @@ export default function DeliveredReconciliationPanel({
   onToggleRescheduled,
   onConfirmAllRescheduled,
   onMissingReasonChange,
+  onExtraRescheduledReasonChange,
   onSendReminder,
 }) {
   const unresolvedMissing = reconciliation?.missingParcels?.filter((item) => item.status !== "found") || [];
   const reviewStatus = getReconciliationReviewStatus(reconciliation);
+  const extraRescheduledKeys = new Set(
+    (reconciliation?.extraRescheduledParcels || []).map((item) => item.trackingNo),
+  );
+  const reviewableRescheduled = (reconciliation?.rescheduledParcels || []).filter(
+    (item) => !extraRescheduledKeys.has(item.trackingNo),
+  );
 
   return (
     <div className="mb-5 rounded-3xl border border-violet-200 bg-[#f8f1ff] p-3 shadow-[10px_10px_24px_rgba(80,55,130,0.12)] md:p-5">
@@ -75,13 +86,13 @@ export default function DeliveredReconciliationPanel({
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Metric label="Out for Delivery" value={reconciliation.outForDeliveryCount} tone="violet" />
             <Metric label="Delivered" value={reconciliation.deliveredCount} tone="green" />
-            <Metric label="Rescheduled" value={reconciliation.rescheduledCount} tone="blue" />
+            <Metric label="Rescheduled (OFD)" value={reviewStatus.effectiveRescheduledCount} tone="blue" />
             <Metric label="Missing" value={unresolvedMissing.length} tone={unresolvedMissing.length ? "red" : "green"} />
           </div>
 
-          {reconciliation.rescheduledParcels?.length > 0 && (
+          {reviewableRescheduled.length > 0 && (
             <TrackingSection
-              title={`Confirm Rescheduled parcels (${reviewStatus.confirmedRescheduledCount}/${reconciliation.rescheduledParcels.length})`}
+              title={`Confirm Rescheduled parcels (${reviewStatus.confirmedRescheduledCount}/${reviewStatus.rescheduledReviewCount})`}
               tone="blue"
               action={reviewStatus.unconfirmedRescheduled.length > 0 ? (
                 <button
@@ -94,7 +105,7 @@ export default function DeliveredReconciliationPanel({
                 </button>
               ) : null}
             >
-              {reconciliation.rescheduledParcels.map((item) => (
+              {reviewableRescheduled.map((item) => (
                 <label
                   key={item.trackingNo}
                   className={`flex min-w-0 cursor-pointer items-center gap-3 rounded-xl px-3 py-2 ${
@@ -112,6 +123,40 @@ export default function DeliveredReconciliationPanel({
                   </span>
                 </label>
               ))}
+            </TrackingSection>
+          )}
+
+          {reconciliation.extraRescheduledParcels?.length > 0 && (
+            <TrackingSection title="Rescheduled but not Out for Delivery" tone="amber">
+              {reconciliation.extraRescheduledParcels.map((item) => {
+                const ignored = EXTRA_RESCHEDULE_IGNORE_REASONS.includes(item.reason);
+                return (
+                  <div
+                    key={item.trackingNo}
+                    className={`grid min-w-0 gap-2 rounded-xl px-3 py-3 ${ignored ? "bg-emerald-50" : "bg-amber-50"}`}
+                  >
+                    <div className="min-w-0">
+                      <p className={`break-all text-sm font-black ${ignored ? "text-emerald-800" : "text-amber-900"}`}>
+                        {item.trackingNo}
+                      </p>
+                      <p className="text-xs font-bold text-blue-950/55">
+                        {ignored ? `Ignored as ${item.reason}` : "Choose an allowed reason to ignore this non-OFD parcel."}
+                      </p>
+                    </div>
+                    <select
+                      value={item.reason || ""}
+                      onChange={(event) => onExtraRescheduledReasonChange(item.trackingNo, event.target.value)}
+                      aria-label={`Ignore reason for ${item.trackingNo}`}
+                      className="min-h-11 w-full rounded-xl border border-amber-200 bg-white px-3 text-sm font-black text-[#071537] outline-none focus:border-amber-500 focus:ring-4 focus:ring-amber-100"
+                    >
+                      <option value="">Do not ignore</option>
+                      {EXTRA_RESCHEDULE_IGNORE_REASONS.map((reason) => (
+                        <option key={reason} value={reason}>Ignore - {reason}</option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
             </TrackingSection>
           )}
 
@@ -157,14 +202,13 @@ export default function DeliveredReconciliationPanel({
               Confirm {reviewStatus.unconfirmedRescheduled.length} Rescheduled parcel(s) and select a reason for {reviewStatus.unclassifiedMissing.length} unmatched parcel(s) before generating or exporting.
               {reviewStatus.blockingDifferenceCount > 0 && (
                 <span className="mt-1 block">
-                  Resolve {reviewStatus.blockingDifferenceCount} conflicting tracking record(s) shown below by uploading corrected source files.
+                  Review {reviewStatus.blockingDifferenceCount} conflicting tracking record(s) below. Non-OFD Rescheduled parcels can be ignored only with an allowed reason.
                 </span>
               )}
             </div>
           )}
 
           <DifferenceList title="Delivered but not Out for Delivery" values={reconciliation.extraDelivered} />
-          <DifferenceList title="Rescheduled but not Out for Delivery" values={reconciliation.extraRescheduled} />
           <DifferenceList title="Appears in both Delivered and Rescheduled" values={reconciliation.deliveredAndRescheduled} />
 
           {unresolvedMissing.length > 0 && (
@@ -226,9 +270,11 @@ function Metric({ label, value, tone }) {
 }
 
 function TrackingSection({ title, tone = "red", action, children }) {
-  const toneClasses = tone === "blue"
-    ? "border-sky-200 text-sky-900"
-    : "border-red-200 text-red-800";
+  const toneClasses = {
+    blue: "border-sky-200 text-sky-900",
+    amber: "border-amber-200 text-amber-900",
+    red: "border-red-200 text-red-800",
+  }[tone] || "border-red-200 text-red-800";
   return (
     <div className={`rounded-2xl border bg-white p-3 ${toneClasses}`}>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
