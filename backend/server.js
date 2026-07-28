@@ -1,6 +1,12 @@
 import cors from "cors";
 import express from "express";
 import domexAutomationRoutes from "./domex/domexAutomationRoutes.js";
+import meterMonitorRoutes from "./whatsapp/meterMonitorRoutes.js";
+import {
+  getMeterMonitorStatus,
+  startMeterMonitorClient,
+  startMeterMonitorScheduler,
+} from "./whatsapp/meterMonitorService.js";
 import whatsappRoutes from "./whatsapp/whatsappRoutes.js";
 import { getWhatsAppStatus, startDailyBackupScheduler, startWhatsAppClient } from "./whatsapp/whatsappService.js";
 import { getWhatsAppQueueStatus, startWhatsAppQueueWorker } from "./whatsapp/whatsappQueue.js";
@@ -34,13 +40,25 @@ app.get("/api/health", (_request, response) => {
 
 app.get("/api/system-health", async (_request, response) => {
   try {
-    const [whatsapp, queue] = await Promise.all([getWhatsAppStatus(), getWhatsAppQueueStatus()]);
+    const [whatsapp, meterMonitor, queue] = await Promise.all([
+      getWhatsAppStatus(),
+      getMeterMonitorStatus(),
+      getWhatsAppQueueStatus(),
+    ]);
     response.json({
       ok: true,
       service: "daily-report-backend",
       uptimeSeconds: Math.round(process.uptime()),
       timestamp: new Date().toISOString(),
       whatsapp,
+      meterMonitor: {
+        status: meterMonitor.status,
+        connected: meterMonitor.connected,
+        enabled: Boolean(meterMonitor.config?.enabled),
+        riderCount: meterMonitor.today?.riderCount || 0,
+        submissionCount: meterMonitor.today?.submissionCount || 0,
+        missingCount: meterMonitor.today?.missingCount || 0,
+      },
       queue,
     });
   } catch (error) {
@@ -49,6 +67,7 @@ app.get("/api/system-health", async (_request, response) => {
 });
 
 app.use("/api/whatsapp", whatsappRoutes);
+app.use("/api/meter-monitor", meterMonitorRoutes);
 app.use("/api/domex", domexAutomationRoutes);
 
 app.listen(port, host, () => {
@@ -58,5 +77,9 @@ app.listen(port, host, () => {
 startWhatsAppClient().catch((error) => {
   console.error("[whatsapp-startup]", error);
 });
+startMeterMonitorClient().catch((error) => {
+  console.error("[meter-monitor-startup]", error);
+});
 startDailyBackupScheduler();
+startMeterMonitorScheduler();
 startWhatsAppQueueWorker();

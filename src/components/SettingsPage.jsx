@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { downloadBackupFile, getAllDeliveredRiderNames, restoreBackupFile } from "../services/reportStorage.js";
 import { getDomexAutomationStatus, saveDomexAutomationConfig } from "../services/domexAutomationApi.js";
 import WhatsAppSettings from "./WhatsAppSettings.jsx";
+import RiderMeterMonitorSettings from "./RiderMeterMonitorSettings.jsx";
 import ThemeSwitcher from "./ThemeSwitcher.jsx";
 
 const APPROVAL_REACTION_PRESETS = ["✅", "👍", "❤️", "🚀", "📤"];
@@ -215,6 +216,7 @@ export default function SettingsPage({
 
       <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <WhatsAppSettings settings={settings} onSaveSettings={onSaveSettings} />
+        <RiderMeterMonitorSettings />
 
         <div className="glass-panel p-4 lg:col-span-2">
           <div className="mb-4 flex items-center gap-3">

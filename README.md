@@ -51,6 +51,18 @@ Then open Settings in the app:
 
 WhatsApp auth/session files are stored in `backend/data/` and are ignored by Git.
 
+### Rider Meter Photo Monitor
+
+Settings also includes a separate WhatsApp account for daily rider meter-photo checks. This does not replace or log out the report-sending WhatsApp account.
+
+1. Open `Settings` and find `Rider Meter Photo Monitor`.
+2. Select `Connect Monitor Account` and scan its separate QR code.
+3. Fetch groups and select the group where riders post meter photos.
+4. Load group members, select the required riders, and add readable names and WhatsApp phone numbers.
+5. Set the allowed photo time window and reminder time, enable the required reminder options, and save.
+
+Photos posted by required riders inside the configured time window are recorded for that day. At reminder time, missing riders are mentioned in the selected group and can also receive a private reminder. The monitor session is stored separately in `backend/data/whatsapp-meter-auth/`; the existing report account remains in its original auth directory.
+
 ## DOMEX Delivered Report Automation
 
 The Delivered Report page reconciles an Out for Delivery PDF, a rider Delivered CSV, and the branch Reschedule CSV before creating the existing collection-value report.
