@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { downloadBackupFile, getAllDeliveredRiderNames, restoreBackupFile } from "../services/reportStorage.js";
 import { getDomexAutomationStatus, saveDomexAutomationConfig } from "../services/domexAutomationApi.js";
 import WhatsAppSettings from "./WhatsAppSettings.jsx";
+import ThemeSwitcher from "./ThemeSwitcher.jsx";
 
 const APPROVAL_REACTION_PRESETS = ["✅", "👍", "❤️", "🚀", "📤"];
 
@@ -23,6 +24,7 @@ export default function SettingsPage({
   onCloudUpload,
   onCloudDownload,
   cloudStatus,
+  onThemeChange,
 }) {
   const [draftSettings, setDraftSettings] = useState(settings);
   const [newCourierName, setNewCourierName] = useState("");
@@ -52,6 +54,11 @@ export default function SettingsPage({
 
   function handleSaveSettings() {
     onSaveSettings(draftSettings);
+  }
+
+  function handleThemeChange(themeId) {
+    updateSetting("uiTheme", themeId);
+    onThemeChange?.(themeId);
   }
 
   async function handleSaveDomexConfig() {
@@ -131,6 +138,8 @@ export default function SettingsPage({
           </div>
         </div>
 
+        <ThemeSwitcher value={draftSettings.uiTheme} onChange={handleThemeChange} />
+
         <div className="grid gap-4 md:grid-cols-3">
           <Field label="Company Header" value={draftSettings.companyName || ""} onChange={(value) => updateSetting("companyName", value)} />
           <Field label="Branch Name" value={draftSettings.branchName || ""} onChange={(value) => updateSetting("branchName", value)} placeholder="Example: Middeniya" />
@@ -204,7 +213,7 @@ export default function SettingsPage({
         </div>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <WhatsAppSettings settings={settings} onSaveSettings={onSaveSettings} />
 
         <div className="glass-panel p-4 lg:col-span-2">
@@ -263,7 +272,7 @@ export default function SettingsPage({
             Delivered Report එකේ saved rider names සඳහා WhatsApp number save කරන්න.
           </p>
 
-          <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+          <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
             <Field label="Rider Name" value={newRiderName} onChange={setNewRiderName} placeholder="Rider name" />
             <Field label="WhatsApp Number" value={newRiderPhone} onChange={setNewRiderPhone} placeholder="947XXXXXXXX" />
             <button type="button" onClick={handleAddRiderPhone} className="primary-action primary-action-blue">

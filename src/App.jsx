@@ -45,6 +45,8 @@ import DailyWorkflowWizard from "./components/DailyWorkflowWizard.jsx";
 import SystemHealthPanel from "./components/SystemHealthPanel.jsx";
 import SystemRecoveryPanel from "./components/SystemRecoveryPanel.jsx";
 import TodayOperationsDashboard from "./components/TodayOperationsDashboard.jsx";
+import ThemeSwitcher from "./components/ThemeSwitcher.jsx";
+import { normalizeThemeId } from "./themeConfig.js";
 import {
   clearReportByDate,
   deleteReportType,
@@ -780,6 +782,20 @@ export default function App() {
     syncBackupConfigToBackend(savedSettings);
   }
 
+  async function handleThemeChange(themeId) {
+    const normalizedTheme = normalizeThemeId(themeId);
+    const savedSettings = saveSettings({ uiTheme: normalizedTheme });
+    setSettingsState(savedSettings);
+    showNotice(`${normalizedTheme === "default" ? "Default" : normalizedTheme} theme applied.`);
+    try {
+      const snapshot = await syncLocalSnapshotWithRecovery("theme-change", syncClientIdRef.current);
+      lastCloudUpdateRef.current = snapshot.cloudUpdatedAt;
+      setPendingCloudSync(getPendingCloudSync());
+    } catch {
+      // The local theme remains active and automatic cloud recovery will retry.
+    }
+  }
+
   async function syncBackupConfigToBackend(savedSettings = getSettings()) {
     if (!savedSettings.backupWhatsappNumber) return;
     try {
@@ -1020,7 +1036,10 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell app-background pb-24 text-[#15143b] xl:grid xl:grid-cols-[260px_1fr] xl:items-start xl:gap-5 xl:p-5 xl:pb-5">
+    <div
+      data-theme={normalizeThemeId(settings.uiTheme)}
+      className={`app-shell app-background theme-${normalizeThemeId(settings.uiTheme)} pb-24 text-[#15143b] xl:grid xl:grid-cols-[260px_1fr] xl:items-start xl:gap-5 xl:p-5 xl:pb-5`}
+    >
       {notice && (
         <div className="fixed right-4 top-4 z-50 max-w-sm rounded-[22px] border border-white/70 bg-violet-600 px-5 py-3 text-sm font-black text-white shadow-2xl shadow-violet-300/50">
           {notice}
@@ -1100,16 +1119,19 @@ export default function App() {
               Logout
             </button>
           </div>
-          <div className="grid gap-4 xl:grid-cols-[1fr_420px] xl:items-center">
+          <div className="grid gap-4 xl:grid-cols-[1fr_500px] xl:items-center">
             <div>
               <p className="text-sm font-black text-violet-600">{activeTabLabel}</p>
               <h1 className="mt-2 text-3xl font-black tracking-tight text-[#101233] md:text-5xl">Daily Courier Report System</h1>
               <p className="mt-2 text-sm font-semibold text-[#4d4b86] md:text-base">Fast daily entry, saved courier names, clean WhatsApp-ready exports.</p>
             </div>
-            <label className="top-search-bar">
-              <Search className="h-6 w-6 text-violet-400" />
-              <input type="search" placeholder="Search reports, couriers..." className="min-w-0 flex-1 bg-transparent text-sm font-bold text-[#15143b] outline-none placeholder:text-[#8b7bb5]" />
-            </label>
+            <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+              <label className="top-search-bar">
+                <Search className="h-6 w-6 text-violet-400" />
+                <input type="search" placeholder="Search reports, couriers..." className="min-w-0 flex-1 bg-transparent text-sm font-bold text-[#15143b] outline-none placeholder:text-[#8b7bb5]" />
+              </label>
+              <ThemeSwitcher value={settings.uiTheme} onChange={handleThemeChange} compact />
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3 xl:hidden">
             <TopMetric icon={CalendarDays} label="Today" value={displayDate(todayIso())} tone="red" />
@@ -1282,6 +1304,7 @@ export default function App() {
               onCloudUpload={handleCloudUpload}
               onCloudDownload={handleCloudDownload}
               cloudStatus={cloudStatus}
+              onThemeChange={handleThemeChange}
             />
             {session.role === "admin" && (
               <SystemRecoveryPanel

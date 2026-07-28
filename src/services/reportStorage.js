@@ -542,6 +542,7 @@ export function getSettings() {
     lastAutoBackupAt: "",
     firestoreRealtimeSync: false,
     cloudLastSyncedAt: "",
+    uiTheme: "default",
     deliveredRiderWhatsAppNumbers: {},
     deliveredRiderDefaultCaptionTemplate: DEFAULT_DELIVERED_RIDER_TEMPLATE,
     deliveredRiderCaptionTemplates: {},
