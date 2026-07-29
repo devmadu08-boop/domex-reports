@@ -59,9 +59,9 @@ Settings also includes a separate WhatsApp account for daily rider meter-photo c
 2. Select `Connect Monitor Account` and scan its separate QR code.
 3. Fetch groups and select the group where riders post meter photos.
 4. Load group members, select the required riders, and add readable names and WhatsApp phone numbers.
-5. Set the allowed photo time window and reminder time, enable the required reminder options, and save.
+5. Confirm the morning IN window (`08:00-11:30`) and evening OUT window (`17:00-20:00`), enable the required reminder options, and save.
 
-Photos posted by required riders inside the configured time window are recorded for that day. At reminder time, missing riders are mentioned in the selected group and can also receive a private reminder. The monitor session is stored separately in `backend/data/whatsapp-meter-auth/`; the existing report account remains in its original auth directory.
+IN and OUT photos are recorded separately. During each window, the backend checks once per hour and performs a final check at the exact window end. Only riders who are still missing that session's photo are mentioned in the selected group and can receive a private reminder. The monitor session is stored separately in `backend/data/whatsapp-meter-auth/`; the existing report account remains in its original auth directory.
 
 ## DOMEX Delivered Report Automation
 

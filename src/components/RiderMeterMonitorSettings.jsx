@@ -25,12 +25,14 @@ const EMPTY_CONFIG = {
   enabled: false,
   groupJid: "",
   groupName: "",
-  windowStart: "17:00",
-  windowEnd: "19:00",
-  reminderTime: "19:05",
+  inWindowStart: "08:00",
+  inWindowEnd: "11:30",
+  outWindowStart: "17:00",
+  outWindowEnd: "20:00",
+  reminderIntervalMinutes: 60,
   groupReminder: true,
   privateReminder: true,
-  reminderTemplate: "📸 *Daily Rider Meter Photo Reminder*\n\n{name}, please send today's rider meter photo before the daily check closes.",
+  reminderTemplate: "📸 *Daily Rider {type} Photo Reminder*\n\n{name}, please send today's {type} photo before {end}.",
   riders: [],
 };
 
@@ -162,17 +164,19 @@ export default function RiderMeterMonitorSettings() {
     }, "Rider Meter Monitor settings saved.");
   }
 
-  async function handleCheckNow() {
+  async function handleCheckNow(sessionKey) {
     await runAction(
-      runMeterMonitorCheck,
+      () => runMeterMonitorCheck(sessionKey),
       (result) => result.missingCount
-        ? `Reminder sent. ${result.missingCount} rider${result.missingCount === 1 ? "" : "s"} had not sent a photo.`
-        : "All required riders have sent today's meter photo.",
+        ? `${result.sessionLabel} reminder sent. ${result.missingCount} rider${result.missingCount === 1 ? "" : "s"} had not sent a photo.`
+        : `All required riders have sent today's ${result.sessionLabel} photo.`,
     );
   }
 
   const connected = Boolean(status?.connected);
   const today = status?.today || {};
+  const inStatus = today.in || {};
+  const outStatus = today.out || {};
   const knownParticipants = participants.length
     ? participants
     : config.riders.map((rider) => ({ ...rider, savedOnly: true }));
@@ -280,20 +284,41 @@ export default function RiderMeterMonitorSettings() {
           </div>
 
           <div className="whatsapp-settings-card grid gap-4">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <label className="grid gap-2 text-sm font-black text-[#071537]">
-                Photo window starts
-                <input type="time" value={config.windowStart} onChange={(event) => setConfig((current) => ({ ...current, windowStart: event.target.value }))} className="whatsapp-control h-11" />
-              </label>
-              <label className="grid gap-2 text-sm font-black text-[#071537]">
-                Photo window ends
-                <input type="time" value={config.windowEnd} onChange={(event) => setConfig((current) => ({ ...current, windowEnd: event.target.value }))} className="whatsapp-control h-11" />
-              </label>
-              <label className="grid gap-2 text-sm font-black text-[#071537]">
-                Reminder time
-                <input type="time" value={config.reminderTime} onChange={(event) => setConfig((current) => ({ ...current, reminderTime: event.target.value }))} className="whatsapp-control h-11" />
-              </label>
+            <div className="grid gap-3 lg:grid-cols-2">
+              <div className="grid gap-3 rounded-2xl border border-amber-200 bg-amber-50/80 p-3 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <p className="text-sm font-black text-amber-900">Morning IN Meter Photo</p>
+                  <p className="text-xs font-semibold text-amber-800/70">Riders must post the starting meter photo in this window.</p>
+                </div>
+                <label className="grid gap-2 text-sm font-black text-[#071537]">
+                  Starts
+                  <input type="time" value={config.inWindowStart} onChange={(event) => setConfig((current) => ({ ...current, inWindowStart: event.target.value }))} className="whatsapp-control h-11" />
+                </label>
+                <label className="grid gap-2 text-sm font-black text-[#071537]">
+                  Ends
+                  <input type="time" value={config.inWindowEnd} onChange={(event) => setConfig((current) => ({ ...current, inWindowEnd: event.target.value }))} className="whatsapp-control h-11" />
+                </label>
+              </div>
+
+              <div className="grid gap-3 rounded-2xl border border-indigo-200 bg-indigo-50/80 p-3 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <p className="text-sm font-black text-indigo-900">Evening OUT Meter Photo</p>
+                  <p className="text-xs font-semibold text-indigo-800/70">Riders must post the closing meter photo in this window.</p>
+                </div>
+                <label className="grid gap-2 text-sm font-black text-[#071537]">
+                  Starts
+                  <input type="time" value={config.outWindowStart} onChange={(event) => setConfig((current) => ({ ...current, outWindowStart: event.target.value }))} className="whatsapp-control h-11" />
+                </label>
+                <label className="grid gap-2 text-sm font-black text-[#071537]">
+                  Ends
+                  <input type="time" value={config.outWindowEnd} onChange={(event) => setConfig((current) => ({ ...current, outWindowEnd: event.target.value }))} className="whatsapp-control h-11" />
+                </label>
+              </div>
             </div>
+
+            <p className="rounded-2xl bg-cyan-50 p-3 text-sm font-bold text-cyan-900">
+              Missing riders are checked every {config.reminderIntervalMinutes || 60} minutes during each window, including a final check at the window end.
+            </p>
 
             <div className="grid gap-3 sm:grid-cols-3">
               <label className="flex cursor-pointer items-center gap-3 rounded-2xl bg-white/70 p-3 text-sm font-black text-[#071537]">
@@ -319,7 +344,7 @@ export default function RiderMeterMonitorSettings() {
                 className="whatsapp-control min-h-24 resize-y px-4 py-3 text-sm"
               />
               <span className="text-xs font-semibold text-blue-950/55">
-                Available: {"{name}"}, {"{date}"}, {"{group}"}, {"{start}"}, {"{end}"}
+                Available: {"{name}"}, {"{date}"}, {"{group}"}, {"{type}"}, {"{start}"}, {"{end}"}
               </span>
             </label>
           </div>
@@ -380,40 +405,66 @@ export default function RiderMeterMonitorSettings() {
               <Clock3 className="h-5 w-5 text-violet-600" />
               <p className="text-sm font-black text-[#071537]">Today's Meter Photo Check</p>
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl bg-emerald-50 p-3">
-                <p className="text-xs font-black uppercase text-emerald-700">Received</p>
-                <p className="mt-1 text-2xl font-black text-emerald-800">{today.submissionCount || 0}</p>
-              </div>
-              <div className="rounded-2xl bg-rose-50 p-3">
-                <p className="text-xs font-black uppercase text-rose-700">Missing</p>
-                <p className="mt-1 text-2xl font-black text-rose-800">{today.missingCount || 0}</p>
-              </div>
-              <div className="rounded-2xl bg-violet-50 p-3">
-                <p className="text-xs font-black uppercase text-violet-700">Required</p>
-                <p className="mt-1 text-2xl font-black text-violet-800">{today.riderCount || config.riders.length}</p>
-              </div>
+            <div className="grid gap-3 lg:grid-cols-2">
+              {[
+                { key: "in", title: "IN Meter", status: inStatus, tone: "amber" },
+                { key: "out", title: "OUT Meter", status: outStatus, tone: "indigo" },
+              ].map((item) => (
+                <div
+                  key={item.key}
+                  className={`grid gap-3 rounded-2xl border p-3 ${
+                    item.tone === "amber"
+                      ? "border-amber-200 bg-amber-50/80"
+                      : "border-indigo-200 bg-indigo-50/80"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-black text-[#071537]">{item.title}</p>
+                    <span className="rounded-xl bg-white/80 px-2 py-1 text-xs font-black text-blue-950/65">
+                      {item.status.start || "--:--"} - {item.status.end || "--:--"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="rounded-xl bg-emerald-100/80 p-2 text-center">
+                      <p className="text-[10px] font-black uppercase text-emerald-700">Received</p>
+                      <p className="text-xl font-black text-emerald-800">{item.status.submissionCount || 0}</p>
+                    </div>
+                    <div className="rounded-xl bg-rose-100/80 p-2 text-center">
+                      <p className="text-[10px] font-black uppercase text-rose-700">Missing</p>
+                      <p className="text-xl font-black text-rose-800">{item.status.missingCount || 0}</p>
+                    </div>
+                    <div className="rounded-xl bg-violet-100/80 p-2 text-center">
+                      <p className="text-[10px] font-black uppercase text-violet-700">Required</p>
+                      <p className="text-xl font-black text-violet-800">{item.status.riderCount || config.riders.length}</p>
+                    </div>
+                  </div>
+                  {item.status.missing?.length > 0 && (
+                    <p className="rounded-xl bg-white/75 p-2 text-xs font-bold text-rose-800">
+                      Missing: {item.status.missing.map((rider) => rider.name).join(", ")}
+                    </p>
+                  )}
+                  {item.status.lastReminderSlot && (
+                    <p className="flex items-center gap-2 text-xs font-bold text-emerald-700">
+                      <CheckCircle2 className="h-4 w-4" /> Last hourly check: {item.status.lastReminderSlot}
+                    </p>
+                  )}
+                </div>
+              ))}
             </div>
-            {today.missing?.length > 0 && (
-              <p className="rounded-2xl bg-rose-50 p-3 text-sm font-bold text-rose-800">
-                Missing: {today.missing.map((rider) => rider.name).join(", ")}
-              </p>
-            )}
-            {today.reminderSentAt && (
-              <p className="flex items-center gap-2 text-sm font-bold text-emerald-700">
-                <CheckCircle2 className="h-4 w-4" /> Reminder completed at {today.reminderSentAt}
-              </p>
-            )}
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 lg:grid-cols-3">
             <button type="button" disabled={loading} onClick={handleSave} className="primary-action primary-action-green disabled:opacity-50">
               <Save className="h-5 w-5" />
               Save Meter Monitor
             </button>
-            <button type="button" disabled={loading || !connected} onClick={handleCheckNow} className="primary-action primary-action-purple disabled:opacity-50">
+            <button type="button" disabled={loading || !connected} onClick={() => handleCheckNow("in")} className="primary-action primary-action-blue disabled:opacity-50">
               <Send className="h-5 w-5" />
-              Check & Remind Now
+              Remind Missing IN
+            </button>
+            <button type="button" disabled={loading || !connected} onClick={() => handleCheckNow("out")} className="primary-action primary-action-purple disabled:opacity-50">
+              <Send className="h-5 w-5" />
+              Remind Missing OUT
             </button>
           </div>
 

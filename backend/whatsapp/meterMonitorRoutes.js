@@ -73,9 +73,12 @@ router.put("/config", async (request, response) => {
   }
 });
 
-router.post("/run-check", async (_request, response) => {
+router.post("/run-check", async (request, response) => {
   try {
-    response.json(await runMeterPhotoCheck({ force: true }));
+    response.json(await runMeterPhotoCheck({
+      force: true,
+      sessionKey: String(request.body?.sessionKey || ""),
+    }));
   } catch (error) {
     sendError(response, error);
   }

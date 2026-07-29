@@ -16,14 +16,21 @@ const DEFAULT_CONFIG = {
   enabled: false,
   groupJid: "",
   groupName: "",
-  windowStart: "17:00",
-  windowEnd: "19:00",
-  reminderTime: "19:05",
+  inWindowStart: "08:00",
+  inWindowEnd: "11:30",
+  outWindowStart: "17:00",
+  outWindowEnd: "20:00",
+  reminderIntervalMinutes: 60,
   groupReminder: true,
   privateReminder: true,
-  reminderTemplate: "📸 *Daily Rider Meter Photo Reminder*\n\n{name}, please send today's rider meter photo before the daily check closes.",
+  reminderTemplate: "📸 *Daily Rider {type} Photo Reminder*\n\n{name}, please send today's {type} photo before {end}.",
   riders: [],
 };
+const METER_SESSIONS = [
+  { key: "in", label: "IN Meter", startField: "inWindowStart", endField: "inWindowEnd" },
+  { key: "out", label: "OUT Meter", startField: "outWindowStart", endField: "outWindowEnd" },
+];
+const LEGACY_REMINDER_TEMPLATE = "📸 *Daily Rider Meter Photo Reminder*\n\n{name}, please send today's rider meter photo before the daily check closes.";
 
 let meterSocket = null;
 let meterQr = "";
@@ -61,6 +68,22 @@ function validTime(value, fallback) {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value || "")) ? String(value) : fallback;
 }
 
+function validReminderInterval(value) {
+  const minutes = Number(value);
+  return Number.isInteger(minutes) && minutes >= 15 && minutes <= 240 ? minutes : 60;
+}
+
+function timeToMinutes(value) {
+  const [hours, minutes] = String(value || "00:00").split(":").map(Number);
+  return (hours * 60) + minutes;
+}
+
+function minutesToTime(value) {
+  const hours = Math.floor(value / 60) % 24;
+  const minutes = value % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
 function normalizeRiders(riders) {
   const result = [];
   const seen = new Set();
@@ -82,18 +105,21 @@ function normalizeRiders(riders) {
 }
 
 function normalizeConfig(config = {}) {
+  const reminderTemplate = String(config.reminderTemplate || "");
   return {
-    ...DEFAULT_CONFIG,
-    ...config,
     enabled: Boolean(config.enabled),
     groupJid: String(config.groupJid || "").trim(),
     groupName: String(config.groupName || "").trim(),
-    windowStart: validTime(config.windowStart, DEFAULT_CONFIG.windowStart),
-    windowEnd: validTime(config.windowEnd, DEFAULT_CONFIG.windowEnd),
-    reminderTime: validTime(config.reminderTime, DEFAULT_CONFIG.reminderTime),
+    inWindowStart: validTime(config.inWindowStart, DEFAULT_CONFIG.inWindowStart),
+    inWindowEnd: validTime(config.inWindowEnd, DEFAULT_CONFIG.inWindowEnd),
+    outWindowStart: validTime(config.outWindowStart, DEFAULT_CONFIG.outWindowStart),
+    outWindowEnd: validTime(config.outWindowEnd, DEFAULT_CONFIG.outWindowEnd),
+    reminderIntervalMinutes: validReminderInterval(config.reminderIntervalMinutes),
     groupReminder: config.groupReminder !== false,
     privateReminder: config.privateReminder !== false,
-    reminderTemplate: String(config.reminderTemplate || DEFAULT_CONFIG.reminderTemplate),
+    reminderTemplate: !reminderTemplate || reminderTemplate === LEGACY_REMINDER_TEMPLATE
+      ? DEFAULT_CONFIG.reminderTemplate
+      : reminderTemplate,
     riders: normalizeRiders(config.riders),
   };
 }
@@ -160,6 +186,51 @@ export function isTimeWithinWindow(time, start, end) {
   return time >= start || time <= end;
 }
 
+export function buildReminderSlots(start, end, intervalMinutes = 60) {
+  const startMinutes = timeToMinutes(start);
+  const endMinutes = timeToMinutes(end);
+  if (endMinutes <= startMinutes) return [];
+
+  const slots = [];
+  for (
+    let slot = startMinutes + validReminderInterval(intervalMinutes);
+    slot <= endMinutes;
+    slot += validReminderInterval(intervalMinutes)
+  ) {
+    slots.push(minutesToTime(slot));
+  }
+  const endTime = minutesToTime(endMinutes);
+  if (!slots.includes(endTime)) slots.push(endTime);
+  return slots;
+}
+
+function getSession(config, sessionKey) {
+  const session = METER_SESSIONS.find((item) => item.key === sessionKey);
+  return session
+    ? { ...session, start: config[session.startField], end: config[session.endField] }
+    : null;
+}
+
+function getSessionForTime(config, time) {
+  return METER_SESSIONS
+    .map((session) => getSession(config, session.key))
+    .find((session) => isTimeWithinWindow(time, session.start, session.end)) || null;
+}
+
+function getSessionState(day, sessionKey) {
+  if (!day.sessions) day.sessions = {};
+  if (!day.sessions[sessionKey]) {
+    day.sessions[sessionKey] = {
+      submissions: sessionKey === "out" && day.submissions ? day.submissions : {},
+      lastReminderSlot: "",
+      reminderHistory: [],
+    };
+  }
+  day.sessions[sessionKey].submissions ||= {};
+  day.sessions[sessionKey].reminderHistory ||= [];
+  return day.sessions[sessionKey];
+}
+
 function unwrapMessageContent(message) {
   let content = message || {};
   for (let index = 0; index < 5; index += 1) {
@@ -212,21 +283,23 @@ async function recordPhotoSubmission(message) {
   if (!config.enabled || message.key.remoteJid !== config.groupJid) return;
 
   const clock = getColomboClock();
-  if (!isTimeWithinWindow(clock.time, config.windowStart, config.windowEnd)) return;
+  const session = getSessionForTime(config, clock.time);
+  if (!session) return;
 
   const rider = findRiderBySender(config.riders, message);
   if (!rider) return;
 
   const state = await readState();
-  const day = state.days[clock.date] || { submissions: {} };
+  const day = state.days[clock.date] || { sessions: {} };
+  const sessionState = getSessionState(day, session.key);
   const riderKey = rider.phoneNumber || rider.jid || rider.lid;
-  day.submissions = day.submissions || {};
-  day.submissions[riderKey] = {
+  sessionState.submissions[riderKey] = {
     name: rider.name,
     jid: rider.jid,
     phoneNumber: rider.phoneNumber,
     receivedAt: clock.timestamp,
     messageId: message.key.id || "",
+    session: session.key,
   };
   state.days[clock.date] = day;
   await writeState(state);
@@ -237,32 +310,50 @@ function getRiderKey(rider) {
 }
 
 export function buildMeterTodayStatus(config, state, date = getColomboClock().date) {
-  const day = state.days[date] || { submissions: {} };
-  const submittedKeys = new Set(Object.keys(day.submissions || {}));
-  const submitted = config.riders.filter((rider) => submittedKeys.has(getRiderKey(rider)));
-  const missing = config.riders.filter((rider) => !submittedKeys.has(getRiderKey(rider)));
+  const day = state.days[date] || { sessions: {} };
+  const sessions = Object.fromEntries(METER_SESSIONS.map((sessionDefinition) => {
+    const session = getSession(config, sessionDefinition.key);
+    const sessionState = getSessionState(day, session.key);
+    const submittedKeys = new Set(Object.keys(sessionState.submissions || {}));
+    const submitted = config.riders.filter((rider) => submittedKeys.has(getRiderKey(rider)));
+    const missing = config.riders.filter((rider) => !submittedKeys.has(getRiderKey(rider)));
+    return [session.key, {
+      key: session.key,
+      label: session.label,
+      start: session.start,
+      end: session.end,
+      submitted,
+      missing,
+      submissionCount: submitted.length,
+      missingCount: missing.length,
+      riderCount: config.riders.length,
+      lastReminderSlot: sessionState.lastReminderSlot || "",
+      reminderHistory: sessionState.reminderHistory || [],
+      submissions: sessionState.submissions || {},
+    }];
+  }));
   return {
     date,
-    submitted,
-    missing,
-    submissionCount: submitted.length,
-    missingCount: missing.length,
+    sessions,
+    in: sessions.in,
+    out: sessions.out,
+    submissionCount: sessions.in.submissionCount + sessions.out.submissionCount,
+    missingCount: sessions.in.missingCount + sessions.out.missingCount,
     riderCount: config.riders.length,
-    reminderSentAt: day.reminderSentAt || "",
-    submissions: day.submissions || {},
   };
 }
 
-function formatReminder(template, rider, config, clock) {
+function formatReminder(template, rider, config, clock, session) {
   return String(template || DEFAULT_CONFIG.reminderTemplate)
     .replaceAll("{name}", rider.name || "Rider")
     .replaceAll("{date}", clock.date)
     .replaceAll("{group}", config.groupName || "Rider group")
-    .replaceAll("{start}", config.windowStart)
-    .replaceAll("{end}", config.windowEnd);
+    .replaceAll("{type}", session.label)
+    .replaceAll("{start}", session.start)
+    .replaceAll("{end}", session.end);
 }
 
-async function sendMissingReminders(config, status, clock) {
+async function sendMissingReminders(config, status, clock, session) {
   if (!meterSocket || meterConnectionState !== "connected") {
     throw new Error("Rider Meter WhatsApp is not connected.");
   }
@@ -276,7 +367,7 @@ async function sendMissingReminders(config, status, clock) {
       return mentionDigits ? `@${mentionDigits}` : rider.name;
     });
     await meterSocket.sendMessage(config.groupJid, {
-      text: `📸 *Rider Meter Photo Reminder*\n📅 ${clock.date}\n\nPhoto not received from:\n${names.map((name) => `• ${name}`).join("\n")}\n\nPlease send the meter photo now.`,
+      text: `📸 *${session.label} Photo Reminder*\n📅 ${clock.date}\n⏰ ${session.start} - ${session.end}\n\nPhoto not received from:\n${names.map((name) => `• ${name}`).join("\n")}\n\nPlease send the ${session.label} photo now.`,
       mentions,
     });
     groupSent = true;
@@ -288,7 +379,7 @@ async function sendMissingReminders(config, status, clock) {
       const recipientJid = normalizeRecipientJid(rider.phoneJid || rider.phoneNumber || rider.jid);
       if (!recipientJid) continue;
       await meterSocket.sendMessage(recipientJid, {
-        text: formatReminder(config.reminderTemplate, rider, config, clock),
+        text: formatReminder(config.reminderTemplate, rider, config, clock, session),
       });
       privateSent += 1;
     }
@@ -297,7 +388,7 @@ async function sendMissingReminders(config, status, clock) {
   return { groupSent, privateSent };
 }
 
-export async function runMeterPhotoCheck({ force = false } = {}) {
+export async function runMeterPhotoCheck({ force = false, sessionKey = "" } = {}) {
   if (meterCheckRunning) return { ok: true, skipped: true, reason: "Meter photo check is already running." };
   meterCheckRunning = true;
   try {
@@ -307,23 +398,37 @@ export async function runMeterPhotoCheck({ force = false } = {}) {
     if (!config.groupJid) throw new Error("Select a Rider Meter WhatsApp group.");
     if (!config.riders.length) throw new Error("Select at least one required rider.");
 
-    const state = await readState();
-    const status = buildMeterTodayStatus(config, state, clock.date);
-    if (status.reminderSentAt && !force) {
-      return { ok: true, skipped: true, reason: "Today's reminder was already sent.", ...status };
+    const session = sessionKey ? getSession(config, sessionKey) : getSessionForTime(config, clock.time);
+    if (!session) {
+      return { ok: true, skipped: true, reason: "No IN or OUT meter photo window is currently active." };
     }
 
-    const sent = await sendMissingReminders(config, status, clock);
-    const day = state.days[clock.date] || { submissions: {} };
-    day.reminderSentAt = clock.timestamp;
-    day.missingAtReminder = status.missing.map((rider) => ({
+    const state = await readState();
+    const todayStatus = buildMeterTodayStatus(config, state, clock.date);
+    const status = todayStatus.sessions[session.key];
+    const sent = await sendMissingReminders(config, status, clock, session);
+    const day = state.days[clock.date] || { sessions: {} };
+    const sessionState = getSessionState(day, session.key);
+    sessionState.reminderHistory.push({
+      sentAt: clock.timestamp,
+      slot: force ? "manual" : clock.time,
+      missingCount: status.missingCount,
+    });
+    sessionState.missingAtLastReminder = status.missing.map((rider) => ({
       name: rider.name,
       jid: rider.jid,
       phoneNumber: rider.phoneNumber,
     }));
     state.days[clock.date] = day;
     await writeState(state);
-    return { ok: true, ...status, ...sent, reminderSentAt: clock.timestamp };
+    return {
+      ok: true,
+      sessionKey: session.key,
+      sessionLabel: session.label,
+      ...status,
+      ...sent,
+      reminderSentAt: clock.timestamp,
+    };
   } finally {
     meterCheckRunning = false;
   }
@@ -332,10 +437,27 @@ export async function runMeterPhotoCheck({ force = false } = {}) {
 async function schedulerTick() {
   const config = await readConfig();
   const clock = getColomboClock();
-  if (!config.enabled || clock.time < config.reminderTime) return;
+  if (!config.enabled) return;
+  const session = getSessionForTime(config, clock.time);
+  if (!session) return;
+
   const state = await readState();
-  if (state.days[clock.date]?.reminderSentAt) return;
-  await runMeterPhotoCheck();
+  const day = state.days[clock.date] || { sessions: {} };
+  const sessionState = getSessionState(day, session.key);
+  const dueSlots = buildReminderSlots(
+    session.start,
+    session.end,
+    config.reminderIntervalMinutes,
+  ).filter((slot) => slot <= clock.time && slot > (sessionState.lastReminderSlot || ""));
+  const latestDueSlot = dueSlots.at(-1);
+  if (!latestDueSlot) return;
+
+  await runMeterPhotoCheck({ sessionKey: session.key });
+  const latestState = await readState();
+  const latestDay = latestState.days[clock.date] || { sessions: {} };
+  getSessionState(latestDay, session.key).lastReminderSlot = latestDueSlot;
+  latestState.days[clock.date] = latestDay;
+  await writeState(latestState);
 }
 
 export function startMeterMonitorScheduler() {
@@ -489,11 +611,10 @@ export async function fetchMeterGroupParticipants(groupJid) {
 
 export async function saveMeterMonitorConfig(config) {
   const normalized = normalizeConfig(config);
-  if (
-    normalized.windowStart <= normalized.windowEnd
-    && normalized.reminderTime < normalized.windowEnd
-  ) {
-    throw new Error("Reminder time must be at or after the photo window end time.");
+  for (const session of METER_SESSIONS.map((item) => getSession(normalized, item.key))) {
+    if (timeToMinutes(session.end) <= timeToMinutes(session.start)) {
+      throw new Error(`${session.label} end time must be after its start time.`);
+    }
   }
   const saved = await writeConfig(normalized);
   return { ok: true, config: saved };

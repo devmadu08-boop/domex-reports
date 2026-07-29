@@ -56,6 +56,9 @@ export function saveMeterMonitorConfig(config) {
   });
 }
 
-export function runMeterMonitorCheck() {
-  return requestJson("/run-check", { method: "POST" });
+export function runMeterMonitorCheck(sessionKey) {
+  return requestJson("/run-check", {
+    method: "POST",
+    body: JSON.stringify({ sessionKey }),
+  });
 }
