@@ -5,8 +5,8 @@ import {
   getMeterMonitorQr,
   getMeterMonitorStatus,
   logoutMeterMonitor,
+  queueMeterPhotoCheck,
   reconnectMeterMonitor,
-  runMeterPhotoCheck,
   saveMeterMonitorConfig,
 } from "./meterMonitorService.js";
 
@@ -75,8 +75,7 @@ router.put("/config", async (request, response) => {
 
 router.post("/run-check", async (request, response) => {
   try {
-    response.json(await runMeterPhotoCheck({
-      force: true,
+    response.json(await queueMeterPhotoCheck({
       sessionKey: String(request.body?.sessionKey || ""),
     }));
   } catch (error) {

@@ -1,4 +1,5 @@
 import {
+  CalendarDays,
   Camera,
   CheckCircle2,
   Clock3,
@@ -8,6 +9,7 @@ import {
   Save,
   Send,
   Users,
+  X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -30,6 +32,8 @@ const EMPTY_CONFIG = {
   outWindowStart: "17:00",
   outWindowEnd: "20:00",
   reminderIntervalMinutes: 60,
+  messageDelaySeconds: 15,
+  specialHolidays: [],
   groupReminder: true,
   privateReminder: true,
   reminderTemplate: "📸 *Daily Rider {type} Photo Reminder*\n\n{name}, please send today's {type} photo before {end}.",
@@ -48,6 +52,8 @@ export default function RiderMeterMonitorSettings() {
   const [participants, setParticipants] = useState([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [holidayDraft, setHolidayDraft] = useState("");
+  const [leaveDrafts, setLeaveDrafts] = useState({});
   const initializedRef = useRef(false);
 
   useEffect(() => {
@@ -141,6 +147,7 @@ export default function RiderMeterMonitorSettings() {
               {
                 ...participant,
                 name: participant.name || participant.phoneNumber || participant.jid,
+                leaveDates: participant.leaveDates || [],
               },
             ],
       };
@@ -156,6 +163,47 @@ export default function RiderMeterMonitorSettings() {
     }));
   }
 
+  function addSpecialHoliday() {
+    if (!holidayDraft) return;
+    setConfig((current) => ({
+      ...current,
+      specialHolidays: [...new Set([...(current.specialHolidays || []), holidayDraft])].sort(),
+    }));
+    setHolidayDraft("");
+  }
+
+  function removeSpecialHoliday(date) {
+    setConfig((current) => ({
+      ...current,
+      specialHolidays: (current.specialHolidays || []).filter((item) => item !== date),
+    }));
+  }
+
+  function addRiderLeave(key) {
+    const date = leaveDrafts[key];
+    if (!date) return;
+    setConfig((current) => ({
+      ...current,
+      riders: current.riders.map((rider) => (
+        participantKey(rider) === key
+          ? { ...rider, leaveDates: [...new Set([...(rider.leaveDates || []), date])].sort() }
+          : rider
+      )),
+    }));
+    setLeaveDrafts((current) => ({ ...current, [key]: "" }));
+  }
+
+  function removeRiderLeave(key, date) {
+    setConfig((current) => ({
+      ...current,
+      riders: current.riders.map((rider) => (
+        participantKey(rider) === key
+          ? { ...rider, leaveDates: (rider.leaveDates || []).filter((item) => item !== date) }
+          : rider
+      )),
+    }));
+  }
+
   async function handleSave() {
     await runAction(async () => {
       const result = await saveMeterMonitorConfig(config);
@@ -167,9 +215,18 @@ export default function RiderMeterMonitorSettings() {
   async function handleCheckNow(sessionKey) {
     await runAction(
       () => runMeterMonitorCheck(sessionKey),
-      (result) => result.missingCount
-        ? `${result.sessionLabel} reminder sent. ${result.missingCount} rider${result.missingCount === 1 ? "" : "s"} had not sent a photo.`
-        : `All required riders have sent today's ${result.sessionLabel} photo.`,
+      (result) => {
+        if (result.skipped) return result.reason || "Reminder check skipped.";
+        if (result.duplicatePrevented) {
+          return `${result.sessionLabel} reminder batch is already being sent. A duplicate batch was not added.`;
+        }
+        if (result.queued) {
+          return `${result.sessionLabel} reminder batch queued. ${result.missingCount} missing rider${result.missingCount === 1 ? "" : "s"} will receive messages one by one with at least ${result.messageDelaySeconds} seconds between messages.`;
+        }
+        return result.missingCount
+          ? `${result.sessionLabel}: ${result.missingCount} rider${result.missingCount === 1 ? "" : "s"} had not sent a photo.`
+          : `All required riders have sent today's ${result.sessionLabel} photo.`;
+      },
     );
   }
 
@@ -320,6 +377,25 @@ export default function RiderMeterMonitorSettings() {
               Missing riders are checked every {config.reminderIntervalMinutes || 60} minutes during each window, including a final check at the window end.
             </p>
 
+            <label className="grid gap-2 text-sm font-black text-[#071537] sm:max-w-sm">
+              Delay between WhatsApp messages
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min="5"
+                  max="120"
+                  step="1"
+                  value={config.messageDelaySeconds}
+                  onChange={(event) => setConfig((current) => ({ ...current, messageDelaySeconds: Number(event.target.value) }))}
+                  className="whatsapp-control h-11 min-w-0 flex-1"
+                />
+                <span className="text-sm font-bold text-blue-950/60">seconds</span>
+              </div>
+              <span className="text-xs font-semibold text-blue-950/55">
+                Messages are sent one by one with this delay plus a random 0-5 second gap. Recommended: 15 seconds or more.
+              </span>
+            </label>
+
             <div className="grid gap-3 sm:grid-cols-3">
               <label className="flex cursor-pointer items-center gap-3 rounded-2xl bg-white/70 p-3 text-sm font-black text-[#071537]">
                 <input type="checkbox" checked={config.enabled} onChange={(event) => setConfig((current) => ({ ...current, enabled: event.target.checked }))} className="h-5 w-5 accent-cyan-600" />
@@ -349,6 +425,43 @@ export default function RiderMeterMonitorSettings() {
             </label>
           </div>
 
+          <div className="whatsapp-settings-card grid gap-4">
+            <div className="flex items-start gap-3">
+              <CalendarDays className="mt-0.5 h-5 w-5 text-violet-600" />
+              <div>
+                <p className="text-sm font-black text-[#071537]">Branch Holidays</p>
+                <p className="text-xs font-semibold text-blue-950/60">
+                  Every Sunday is automatically disabled. Add special holidays below to stop all meter checks and reminders.
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,240px)_auto] sm:justify-start">
+              <input
+                type="date"
+                value={holidayDraft}
+                onChange={(event) => setHolidayDraft(event.target.value)}
+                className="whatsapp-control h-11"
+              />
+              <button type="button" onClick={addSpecialHoliday} disabled={!holidayDraft} className="secondary-action disabled:opacity-50">
+                <CalendarDays className="h-4 w-4" />
+                Add Special Holiday
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-xl bg-violet-100 px-3 py-2 text-xs font-black text-violet-800">
+                Sundays: Always off
+              </span>
+              {(config.specialHolidays || []).map((date) => (
+                <span key={date} className="inline-flex items-center gap-2 rounded-xl bg-rose-100 px-3 py-2 text-xs font-black text-rose-800">
+                  {date}
+                  <button type="button" onClick={() => removeSpecialHoliday(date)} aria-label={`Remove special holiday ${date}`} className="grid h-5 w-5 place-items-center rounded-full hover:bg-rose-200">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+
           <div className="whatsapp-settings-card">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -375,19 +488,47 @@ export default function RiderMeterMonitorSettings() {
                       </span>
                     </label>
                     {selectedRider && (
-                      <div className="grid min-w-0 gap-2 sm:grid-cols-2">
-                        <input
-                          value={selectedRider.name || ""}
-                          onChange={(event) => updateRider(key, "name", event.target.value)}
-                          placeholder="Rider name"
-                          className="whatsapp-control h-10 min-w-0 text-sm"
-                        />
-                        <input
-                          value={selectedRider.phoneNumber || ""}
-                          onChange={(event) => updateRider(key, "phoneNumber", event.target.value)}
-                          placeholder="947XXXXXXXX"
-                          className="whatsapp-control h-10 min-w-0 text-sm"
-                        />
+                      <div className="grid min-w-0 gap-3">
+                        <div className="grid min-w-0 gap-2 sm:grid-cols-2">
+                          <input
+                            value={selectedRider.name || ""}
+                            onChange={(event) => updateRider(key, "name", event.target.value)}
+                            placeholder="Rider name"
+                            className="whatsapp-control h-10 min-w-0 text-sm"
+                          />
+                          <input
+                            value={selectedRider.phoneNumber || ""}
+                            onChange={(event) => updateRider(key, "phoneNumber", event.target.value)}
+                            placeholder="947XXXXXXXX"
+                            className="whatsapp-control h-10 min-w-0 text-sm"
+                          />
+                        </div>
+                        <div className="grid gap-2 rounded-xl bg-white/70 p-2">
+                          <p className="text-xs font-black text-[#071537]">Rider Leave Dates</p>
+                          <div className="grid gap-2 sm:grid-cols-[minmax(0,220px)_auto] sm:justify-start">
+                            <input
+                              type="date"
+                              value={leaveDrafts[key] || ""}
+                              onChange={(event) => setLeaveDrafts((current) => ({ ...current, [key]: event.target.value }))}
+                              className="whatsapp-control h-10"
+                            />
+                            <button type="button" disabled={!leaveDrafts[key]} onClick={() => addRiderLeave(key)} className="secondary-action disabled:opacity-50">
+                              Add Leave
+                            </button>
+                          </div>
+                          {(selectedRider.leaveDates || []).length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                              {selectedRider.leaveDates.map((date) => (
+                                <span key={date} className="inline-flex items-center gap-2 rounded-lg bg-amber-100 px-2 py-1 text-xs font-black text-amber-900">
+                                  {date}
+                                  <button type="button" onClick={() => removeRiderLeave(key, date)} aria-label={`Remove ${selectedRider.name || "rider"} leave ${date}`} className="grid h-5 w-5 place-items-center rounded-full hover:bg-amber-200">
+                                    <X className="h-3.5 w-3.5" />
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -405,6 +546,16 @@ export default function RiderMeterMonitorSettings() {
               <Clock3 className="h-5 w-5 text-violet-600" />
               <p className="text-sm font-black text-[#071537]">Today's Meter Photo Check</p>
             </div>
+            {today.inactive && (
+              <p className="rounded-2xl bg-violet-100 p-3 text-sm font-black text-violet-900">
+                Monitor inactive today: {today.inactiveReason}
+              </p>
+            )}
+            {!today.inactive && today.onLeaveCount > 0 && (
+              <p className="rounded-2xl bg-amber-100 p-3 text-sm font-bold text-amber-900">
+                On leave today: {today.onLeave.map((rider) => rider.name).join(", ")}
+              </p>
+            )}
             <div className="grid gap-3 lg:grid-cols-2">
               {[
                 { key: "in", title: "IN Meter", status: inStatus, tone: "amber" },
@@ -458,11 +609,11 @@ export default function RiderMeterMonitorSettings() {
               <Save className="h-5 w-5" />
               Save Meter Monitor
             </button>
-            <button type="button" disabled={loading || !connected} onClick={() => handleCheckNow("in")} className="primary-action primary-action-blue disabled:opacity-50">
+            <button type="button" disabled={loading || !connected || today.inactive} onClick={() => handleCheckNow("in")} className="primary-action primary-action-blue disabled:opacity-50">
               <Send className="h-5 w-5" />
               Remind Missing IN
             </button>
-            <button type="button" disabled={loading || !connected} onClick={() => handleCheckNow("out")} className="primary-action primary-action-purple disabled:opacity-50">
+            <button type="button" disabled={loading || !connected || today.inactive} onClick={() => handleCheckNow("out")} className="primary-action primary-action-purple disabled:opacity-50">
               <Send className="h-5 w-5" />
               Remind Missing OUT
             </button>

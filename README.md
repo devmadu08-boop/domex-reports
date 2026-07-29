@@ -61,7 +61,9 @@ Settings also includes a separate WhatsApp account for daily rider meter-photo c
 4. Load group members, select the required riders, and add readable names and WhatsApp phone numbers.
 5. Confirm the morning IN window (`08:00-11:30`) and evening OUT window (`17:00-20:00`), enable the required reminder options, and save.
 
-IN and OUT photos are recorded separately. During each window, the backend checks once per hour and performs a final check at the exact window end. Only riders who are still missing that session's photo are mentioned in the selected group and can receive a private reminder. The monitor session is stored separately in `backend/data/whatsapp-meter-auth/`; the existing report account remains in its original auth directory.
+IN and OUT photos are recorded separately. During each window, the backend checks once per hour and performs a final check at the exact window end. Only riders who are still missing that session's photo are mentioned in the selected group and can receive a private reminder. Reminder messages are paced one by one using the configured delay plus a small random gap instead of being sent as a burst.
+
+Every Sunday is automatically treated as a branch holiday. Settings can also store branch-wide special holidays and rider-specific leave dates; those days/riders are excluded from photo checks and reminders. The monitor session is stored separately in `backend/data/whatsapp-meter-auth/`; the existing report account remains in its original auth directory.
 
 ## DOMEX Delivered Report Automation
 
