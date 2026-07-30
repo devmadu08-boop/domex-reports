@@ -1,4 +1,21 @@
-import { Bot, Cloud, CloudDownload, CloudUpload, Download, RotateCcw, Save, Settings, Trash2, Upload, UserPlus } from "lucide-react";
+import {
+  Bot,
+  Camera,
+  Cloud,
+  CloudDownload,
+  CloudUpload,
+  DatabaseBackup,
+  Download,
+  MessageCircle,
+  RotateCcw,
+  Save,
+  Settings,
+  SlidersHorizontal,
+  Trash2,
+  Upload,
+  UserPlus,
+  Users,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { downloadBackupFile, getAllDeliveredRiderNames, restoreBackupFile } from "../services/reportStorage.js";
 import { getDomexAutomationStatus, saveDomexAutomationConfig } from "../services/domexAutomationApi.js";
@@ -26,6 +43,7 @@ export default function SettingsPage({
   onCloudDownload,
   cloudStatus,
   onThemeChange,
+  children,
 }) {
   const [draftSettings, setDraftSettings] = useState(settings);
   const [newCourierName, setNewCourierName] = useState("");
@@ -34,6 +52,7 @@ export default function SettingsPage({
   const [restoreStatus, setRestoreStatus] = useState("");
   const [domexConfig, setDomexConfig] = useState({ username: "", password: "", branchName: "Middeniya" });
   const [domexStatus, setDomexStatus] = useState("");
+  const [activeSection, setActiveSection] = useState("general");
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -128,14 +147,54 @@ export default function SettingsPage({
 
   return (
     <section className="grid gap-5">
-      <div className="glass-panel p-4">
+      <div className="settings-hub glass-panel grid gap-4 p-4">
+        <div className="flex items-center gap-3">
+          <span className="grid h-12 w-12 place-items-center rounded-2xl bg-violet-100 text-violet-700 shadow-inner">
+            <Settings className="h-6 w-6" />
+          </span>
+          <div>
+            <h2 className="text-xl font-black text-[#071537]">Settings Center</h2>
+            <p className="text-sm font-semibold text-blue-950/65">Choose a category and manage only what you need.</p>
+          </div>
+        </div>
+        <nav className="settings-category-nav" aria-label="Settings categories">
+          {[
+            { id: "general", label: "General", helper: "Branch & appearance", icon: SlidersHorizontal },
+            { id: "whatsapp", label: "Report WhatsApp", helper: "Groups & templates", icon: MessageCircle },
+            { id: "meter", label: "Meter Monitor", helper: "Photos & reminders", icon: Camera },
+            { id: "people", label: "People", helper: "Couriers & riders", icon: Users },
+            { id: "automation", label: "Automation", helper: "DOMEX login", icon: Bot },
+            { id: "data", label: "Data & Backup", helper: "Sync & recovery", icon: DatabaseBackup },
+          ].map((item) => {
+            const Icon = item.icon;
+            const selected = activeSection === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => setActiveSection(item.id)}
+                className={`settings-category-button ${selected ? "settings-category-button-active" : ""}`}
+              >
+                <Icon className="h-5 w-5" />
+                <span className="min-w-0">
+                  <strong>{item.label}</strong>
+                  <small>{item.helper}</small>
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+
+      {activeSection === "general" && <div className="glass-panel p-4">
         <div className="mb-4 flex items-center gap-3">
           <span className="grid h-11 w-11 place-items-center rounded-2xl bg-emerald-100 text-emerald-700 shadow-inner">
             <Settings className="h-6 w-6" />
           </span>
           <div>
-            <h2 className="text-xl font-black text-[#071537]">Settings</h2>
-            <p className="text-sm font-semibold text-blue-950/65">Manage report defaults, saved names, backup, and restore.</p>
+            <h2 className="text-xl font-black text-[#071537]">General & Appearance</h2>
+            <p className="text-sm font-semibold text-blue-950/65">Report identity, branch defaults, theme, and scheduled approval.</p>
           </div>
         </div>
 
@@ -212,13 +271,13 @@ export default function SettingsPage({
             Reset Changes
           </button>
         </div>
-      </div>
+      </div>}
 
       <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <WhatsAppSettings settings={settings} onSaveSettings={onSaveSettings} />
-        <RiderMeterMonitorSettings />
+        {activeSection === "whatsapp" && <WhatsAppSettings settings={settings} onSaveSettings={onSaveSettings} />}
+        {activeSection === "meter" && <RiderMeterMonitorSettings />}
 
-        <div className="glass-panel p-4 lg:col-span-2">
+        {activeSection === "automation" && <div className="glass-panel p-4 lg:col-span-2">
           <div className="mb-4 flex items-center gap-3">
             <span className="grid h-11 w-11 place-items-center rounded-2xl bg-blue-100 text-blue-700 shadow-inner">
               <Bot className="h-6 w-6" />
@@ -240,9 +299,9 @@ export default function SettingsPage({
             </button>
             {domexStatus && <p className="rounded-2xl bg-white/60 px-4 py-3 text-sm font-black text-blue-950">{domexStatus}</p>}
           </div>
-        </div>
+        </div>}
 
-        <div className="glass-panel p-4">
+        {activeSection === "people" && <div className="glass-panel p-4">
           <h3 className="mb-3 text-lg font-black text-[#071537]">Saved Courier Names</h3>
           <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
             <Field label="Add Courier Name" value={newCourierName} onChange={setNewCourierName} placeholder="Courier name" />
@@ -266,9 +325,9 @@ export default function SettingsPage({
               ))
             )}
           </div>
-        </div>
+        </div>}
 
-        <div className="glass-panel p-4">
+        {activeSection === "people" && <div className="glass-panel p-4">
           <h3 className="mb-3 text-lg font-black text-[#071537]">Delivered Rider WhatsApp Numbers</h3>
           <p className="mb-4 text-sm font-semibold text-blue-950/65">
             Delivered Report එකේ saved rider names සඳහා WhatsApp number save කරන්න.
@@ -310,9 +369,9 @@ export default function SettingsPage({
               Save Rider Numbers
             </button>
           </div>
-        </div>
+        </div>}
 
-        <div className="glass-panel p-4">
+        {activeSection === "data" && <div className="glass-panel p-4">
           <div className="mb-3 flex items-center gap-2">
             <Cloud className="h-5 w-5 text-blue-700" />
             <h3 className="text-lg font-black text-[#071537]">Firebase Realtime Sync</h3>
@@ -336,9 +395,9 @@ export default function SettingsPage({
               </span>
             </p>
           </div>
-        </div>
+        </div>}
 
-        <div className="glass-panel p-4 lg:col-span-2">
+        {activeSection === "data" && <div className="glass-panel p-4">
           <h3 className="mb-3 text-lg font-black text-[#071537]">Backup & Restore</h3>
           <div className="grid gap-3 md:grid-cols-2">
             <button type="button" onClick={() => downloadBackupFile("manual")} className="primary-action primary-action-green">
@@ -361,7 +420,8 @@ export default function SettingsPage({
             </p>
             {restoreStatus && <p className="mt-2 font-black text-emerald-700">{restoreStatus}</p>}
           </div>
-        </div>
+        </div>}
+        {activeSection === "data" && children && <div className="lg:col-span-2">{children}</div>}
       </div>
     </section>
   );

@@ -53,10 +53,10 @@ WhatsApp auth/session files are stored in `backend/data/` and are ignored by Git
 
 ### Rider Meter Photo Monitor
 
-Settings also includes a separate WhatsApp account for daily rider meter-photo checks. This does not replace or log out the report-sending WhatsApp account.
+Settings includes a selectable WhatsApp connection for daily rider meter-photo checks. It can share the already connected Primary Report WhatsApp account or use an independent monitor account without replacing or logging out the primary session.
 
-1. Open `Settings` and find `Rider Meter Photo Monitor`.
-2. Select `Connect Monitor Account` and scan its separate QR code.
+1. Open `Settings > Meter Monitor`.
+2. Choose `Use Primary Report WhatsApp`, or choose `Use Separate Monitor Account` and scan its independent QR code.
 3. Fetch groups and select the group where riders post meter photos.
 4. Load group members, select the required riders, and add readable names and WhatsApp phone numbers.
 5. Confirm the morning IN window (`08:00-11:30`) and evening OUT window (`17:00-20:00`), enable the required reminder options, and save.

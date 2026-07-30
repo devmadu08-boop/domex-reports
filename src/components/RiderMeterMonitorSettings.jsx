@@ -24,6 +24,7 @@ import {
 } from "../services/meterMonitorApi.js";
 
 const EMPTY_CONFIG = {
+  accountMode: "separate",
   enabled: false,
   groupJid: "",
   groupName: "",
@@ -70,7 +71,7 @@ export default function RiderMeterMonitorSettings() {
         setConfig({ ...EMPTY_CONFIG, ...(nextStatus.config || {}) });
         initializedRef.current = true;
       }
-      if (!nextStatus.connected) {
+      if (!nextStatus.connected && nextStatus.accountMode !== "primary") {
         const qr = await getMeterMonitorQr();
         setQrDataUrl(qr.qrDataUrl || "");
       } else {
@@ -212,6 +213,21 @@ export default function RiderMeterMonitorSettings() {
     }, "Rider Meter Monitor settings saved.");
   }
 
+  async function handleAccountModeChange(accountMode) {
+    const nextConfig = { ...config, accountMode };
+    setConfig(nextConfig);
+    setGroups([]);
+    setParticipants([]);
+    setQrDataUrl("");
+    await runAction(async () => {
+      const result = await saveMeterMonitorConfig(nextConfig);
+      setConfig({ ...EMPTY_CONFIG, ...result.config });
+      return result;
+    }, accountMode === "primary"
+      ? "Meter Monitor now uses the Primary Report WhatsApp account."
+      : "Meter Monitor now uses its separate WhatsApp account.");
+  }
+
   async function handleCheckNow(sessionKey) {
     await runAction(
       () => runMeterMonitorCheck(sessionKey),
@@ -231,6 +247,7 @@ export default function RiderMeterMonitorSettings() {
   }
 
   const connected = Boolean(status?.connected);
+  const accountMode = config.accountMode || "separate";
   const today = status?.today || {};
   const inStatus = today.in || {};
   const outStatus = today.out || {};
@@ -248,7 +265,7 @@ export default function RiderMeterMonitorSettings() {
           <div>
             <h3 className="text-lg font-black text-[#071537]">Rider Meter Photo Monitor</h3>
             <p className="text-sm font-semibold text-blue-950/65">
-              A separate WhatsApp account checks daily rider photos without changing the report account.
+              Use the Primary Report WhatsApp or keep an independent monitor account.
             </p>
           </div>
         </div>
@@ -257,15 +274,57 @@ export default function RiderMeterMonitorSettings() {
         </span>
       </div>
 
+      <div className="mb-4 grid gap-3 md:grid-cols-2">
+        <button
+          type="button"
+          disabled={loading}
+          aria-pressed={accountMode === "primary"}
+          onClick={() => handleAccountModeChange("primary")}
+          className={`grid min-h-28 gap-2 rounded-2xl border p-4 text-left transition ${
+            accountMode === "primary"
+              ? "border-emerald-400 bg-emerald-50 shadow-lg shadow-emerald-100"
+              : "border-white bg-white/65 hover:border-emerald-200"
+          }`}
+        >
+          <span className="text-sm font-black text-[#071537]">Use Primary Report WhatsApp</span>
+          <span className="text-xs font-semibold leading-5 text-blue-950/60">
+            Reports and meter monitoring share the already connected primary account. No second QR is required.
+          </span>
+        </button>
+        <button
+          type="button"
+          disabled={loading}
+          aria-pressed={accountMode === "separate"}
+          onClick={() => handleAccountModeChange("separate")}
+          className={`grid min-h-28 gap-2 rounded-2xl border p-4 text-left transition ${
+            accountMode === "separate"
+              ? "border-cyan-400 bg-cyan-50 shadow-lg shadow-cyan-100"
+              : "border-white bg-white/65 hover:border-cyan-200"
+          }`}
+        >
+          <span className="text-sm font-black text-[#071537]">Use Separate Monitor Account</span>
+          <span className="text-xs font-semibold leading-5 text-blue-950/60">
+            Keep meter photos and reminders on a second WhatsApp session with its own QR login.
+          </span>
+        </button>
+      </div>
+
       <div className="grid min-w-0 gap-4 xl:grid-cols-[290px_minmax(0,1fr)]">
         <div className="whatsapp-settings-card text-center">
           {connected ? (
             <div className="grid min-h-[260px] place-items-center">
               <div>
                 <Camera className="mx-auto h-16 w-16 text-cyan-700" />
-                <p className="mt-3 text-lg font-black text-[#071537]">Monitor Account Connected</p>
+                <p className="mt-3 text-lg font-black text-[#071537]">
+                  {accountMode === "primary" ? "Primary Account Connected" : "Monitor Account Connected"}
+                </p>
                 <p className="mt-1 text-sm font-bold text-blue-950/65">{status?.connectedNumber || "Number unavailable"}</p>
+                <p className="mt-2 text-xs font-black text-cyan-700">{status?.connectionSource}</p>
               </div>
+            </div>
+          ) : accountMode === "primary" ? (
+            <div className="grid min-h-[260px] place-items-center text-sm font-bold text-blue-950/65">
+              Connect the Primary Report WhatsApp in the Report WhatsApp section.
             </div>
           ) : qrDataUrl ? (
             <>
@@ -280,26 +339,32 @@ export default function RiderMeterMonitorSettings() {
         </div>
 
         <div className="grid min-w-0 gap-4">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => runAction(reconnectMeterMonitor, "Rider Meter WhatsApp reconnect started.")}
-              className="primary-action primary-action-blue disabled:opacity-50"
-            >
-              <RefreshCw className="h-5 w-5" />
-              Connect Monitor Account
-            </button>
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => runAction(logoutMeterMonitor, "Only the Rider Meter Monitor session was removed.")}
-              className="primary-action primary-action-red disabled:opacity-50"
-            >
-              <LogOut className="h-5 w-5" />
-              Remove Monitor Session
-            </button>
-          </div>
+          {accountMode === "separate" ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => runAction(reconnectMeterMonitor, "Rider Meter WhatsApp reconnect started.")}
+                className="primary-action primary-action-blue disabled:opacity-50"
+              >
+                <RefreshCw className="h-5 w-5" />
+                Connect Monitor Account
+              </button>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => runAction(logoutMeterMonitor, "Only the Rider Meter Monitor session was removed.")}
+                className="primary-action primary-action-red disabled:opacity-50"
+              >
+                <LogOut className="h-5 w-5" />
+                Remove Monitor Session
+              </button>
+            </div>
+          ) : (
+            <p className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-900">
+              Primary mode is active. Reconnect or logout the account only from the Report WhatsApp section.
+            </p>
+          )}
 
           <div className="whatsapp-settings-card grid min-w-0 gap-4">
             <div className="flex flex-wrap items-center justify-between gap-3">

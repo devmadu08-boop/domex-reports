@@ -1305,19 +1305,20 @@ export default function App() {
               onCloudDownload={handleCloudDownload}
               cloudStatus={cloudStatus}
               onThemeChange={handleThemeChange}
-            />
-            {session.role === "admin" && (
-              <SystemRecoveryPanel
-                versions={systemVersions}
-                undoCount={undoCount}
-                redoCount={redoCount}
-                busy={versionBusy}
-                onUndo={handleUndo}
-                onRedo={handleRedo}
-                onCreateVersion={() => handleCreateSystemVersion()}
-                onSwitchVersion={handleSwitchSystemVersion}
-              />
-            )}
+            >
+              {session.role === "admin" && (
+                <SystemRecoveryPanel
+                  versions={systemVersions}
+                  undoCount={undoCount}
+                  redoCount={redoCount}
+                  busy={versionBusy}
+                  onUndo={handleUndo}
+                  onRedo={handleRedo}
+                  onCreateVersion={() => handleCreateSystemVersion()}
+                  onSwitchVersion={handleSwitchSystemVersion}
+                />
+              )}
+            </SettingsPage>
           </>
         )}
 

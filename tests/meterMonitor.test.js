@@ -8,6 +8,7 @@ import {
   getMeterReminderDelayMs,
   hasMeterPhoto,
   isTimeWithinWindow,
+  normalizeMeterAccountMode,
 } from "../backend/whatsapp/meterMonitorService.js";
 
 test("meter photo window supports normal and overnight ranges", () => {
@@ -41,6 +42,13 @@ test("meter reminders are paced with a base delay and random gap", () => {
   assert.equal(getMeterReminderDelayMs({ messageDelaySeconds: 15 }, 0), 15000);
   assert.equal(getMeterReminderDelayMs({ messageDelaySeconds: 15 }, 0.999), 19995);
   assert.equal(getMeterReminderDelayMs({ messageDelaySeconds: 1 }, 0), 15000);
+});
+
+test("meter WhatsApp account mode preserves separate mode and supports primary mode", () => {
+  assert.equal(normalizeMeterAccountMode("primary"), "primary");
+  assert.equal(normalizeMeterAccountMode("separate"), "separate");
+  assert.equal(normalizeMeterAccountMode("unknown"), "separate");
+  assert.equal(normalizeMeterAccountMode(), "separate");
 });
 
 test("Sundays and special branch holidays disable the meter monitor", () => {

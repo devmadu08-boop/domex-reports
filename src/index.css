@@ -949,6 +949,101 @@ textarea {
     -6px -6px 16px rgba(255, 255, 255, 0.9);
 }
 
+.settings-hub {
+  position: sticky;
+  top: 10px;
+  z-index: 20;
+}
+
+.settings-category-nav {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 2px 2px 8px;
+  scrollbar-width: thin;
+}
+
+.settings-category-button {
+  display: grid;
+  min-width: 168px;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #e8def5;
+  border-radius: 18px;
+  background: #fffaf7;
+  padding: 11px 12px;
+  color: #7566a0;
+  text-align: left;
+  box-shadow:
+    5px 6px 14px rgba(128, 104, 178, 0.1),
+    -4px -4px 12px rgba(255, 255, 255, 0.85);
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, color 160ms ease;
+}
+
+.settings-category-button:hover {
+  transform: translateY(-1px);
+  border-color: #cdb9ef;
+  color: #6241c7;
+}
+
+.settings-category-button strong,
+.settings-category-button small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-category-button strong {
+  color: #18234a;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.settings-category-button small {
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 750;
+  color: #887da9;
+}
+
+.settings-category-button-active {
+  border-color: #a987ef;
+  background: #eee5ff;
+  color: #7146dc;
+  box-shadow:
+    7px 8px 18px rgba(111, 70, 220, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
+@media (min-width: 900px) {
+  .settings-category-nav {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    overflow: visible;
+    padding-bottom: 2px;
+  }
+
+  .settings-category-button {
+    min-width: 0;
+  }
+}
+
+@media (min-width: 1500px) {
+  .settings-category-nav {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 899px) {
+  .settings-hub {
+    top: 0;
+    margin-inline: -2px;
+    padding-bottom: 10px;
+  }
+}
+
 .whatsapp-template-card {
   border: 1px solid #d7efe7;
   border-radius: 22px;
@@ -1380,6 +1475,28 @@ textarea {
 
 .theme-night :is(input, textarea)::placeholder {
   color: #76869d !important;
+}
+
+.theme-night .settings-category-button {
+  color: #dfe8f6;
+  background: linear-gradient(145deg, #202838, #171d29);
+  border-color: #344154;
+  box-shadow: 5px 5px 12px rgba(4, 8, 14, 0.34),
+    -4px -4px 10px rgba(54, 67, 87, 0.16);
+}
+
+.theme-night .settings-category-button small {
+  color: #9aa9bf;
+}
+
+.theme-night .settings-category-button-active {
+  color: #ffffff;
+  background: linear-gradient(135deg, #18a98e, #35d1b3);
+  border-color: rgba(94, 234, 212, 0.55);
+}
+
+.theme-night .settings-category-button-active small {
+  color: rgba(255, 255, 255, 0.82);
 }
 
 .theme-night .main-dashboard-surface [class*="bg-[#fffaf7]"],

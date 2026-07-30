@@ -24,6 +24,7 @@ let reconnecting = false;
 let backupSchedulerStarted = false;
 let rescheduleApprovalSending = false;
 let rescheduleApprovalRequestRunning = false;
+const primaryMessageListeners = new Set();
 
 async function ensureDataDir() {
   await fs.mkdir(dataDir, { recursive: true });
@@ -164,6 +165,15 @@ export async function startWhatsAppClient(force = false) {
   });
 
   socket.ev.on("creds.update", saveCreds);
+  socket.ev.on("messages.upsert", ({ messages, type }) => {
+    for (const listener of primaryMessageListeners) {
+      try {
+        listener({ messages: messages || [], type });
+      } catch (error) {
+        console.error("[whatsapp-message-listener]", error.message || error);
+      }
+    }
+  });
   socket.ev.on("messages.reaction", (reactions) => {
     for (const reactionUpdate of reactions) {
       handleRescheduleApprovalReaction(reactionUpdate).catch((error) => {
@@ -278,6 +288,34 @@ export async function fetchWhatsAppGroups() {
       participants: group.participants?.length || 0,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function subscribeToPrimaryWhatsAppMessages(listener) {
+  if (typeof listener !== "function") return () => undefined;
+  primaryMessageListeners.add(listener);
+  return () => primaryMessageListeners.delete(listener);
+}
+
+export function getPrimaryWhatsAppRuntimeStatus() {
+  return {
+    status: connectionState,
+    connected: connectionState === "connected",
+    connectedNumber,
+  };
+}
+
+export async function sendPrimaryWhatsAppMessage(recipientJid, content) {
+  if (!socket || connectionState !== "connected") {
+    throw new Error("Primary report WhatsApp is not connected.");
+  }
+  return socket.sendMessage(recipientJid, content);
+}
+
+export async function fetchPrimaryWhatsAppGroupMetadata(groupJid) {
+  if (!socket || connectionState !== "connected") {
+    throw new Error("Primary report WhatsApp is not connected.");
+  }
+  return socket.groupMetadata(String(groupJid || ""));
 }
 
 export async function saveDefaultGroupJids(groupJids) {

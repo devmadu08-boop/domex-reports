@@ -7,12 +7,20 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import Pino from "pino";
 import QRCode from "qrcode";
+import {
+  fetchPrimaryWhatsAppGroupMetadata,
+  fetchWhatsAppGroups,
+  getPrimaryWhatsAppRuntimeStatus,
+  sendPrimaryWhatsAppMessage,
+  subscribeToPrimaryWhatsAppMessages,
+} from "./whatsappService.js";
 
 const dataDir = path.resolve("backend", "data");
 const authDir = path.join(dataDir, "whatsapp-meter-auth");
 const configPath = path.join(dataDir, "whatsapp-meter-config.json");
 const statePath = path.join(dataDir, "whatsapp-meter-state.json");
 const DEFAULT_CONFIG = {
+  accountMode: "separate",
   enabled: false,
   groupJid: "",
   groupName: "",
@@ -90,6 +98,10 @@ function normalizeDateList(values) {
   )].sort();
 }
 
+export function normalizeMeterAccountMode(value) {
+  return value === "primary" ? "primary" : "separate";
+}
+
 function timeToMinutes(value) {
   const [hours, minutes] = String(value || "00:00").split(":").map(Number);
   return (hours * 60) + minutes;
@@ -125,6 +137,7 @@ function normalizeRiders(riders) {
 function normalizeConfig(config = {}) {
   const reminderTemplate = String(config.reminderTemplate || "");
   return {
+    accountMode: normalizeMeterAccountMode(config.accountMode),
     enabled: Boolean(config.enabled),
     groupJid: String(config.groupJid || "").trim(),
     groupName: String(config.groupName || "").trim(),
@@ -314,10 +327,11 @@ function findRiderBySender(riders, message) {
   return riders.find((rider) => [...riderIdentityCandidates(rider)].some((value) => senderCandidates.has(value)));
 }
 
-async function recordPhotoSubmission(message) {
+async function recordPhotoSubmission(message, sourceMode) {
   if (!message?.key?.remoteJid?.endsWith("@g.us") || !hasMeterPhoto(message.message)) return;
 
   const config = await readConfig();
+  if (config.accountMode !== sourceMode) return;
   if (!config.enabled || message.key.remoteJid !== config.groupJid) return;
 
   const clock = getColomboClock();
@@ -343,6 +357,15 @@ async function recordPhotoSubmission(message) {
   state.days[clock.date] = day;
   await writeState(state);
 }
+
+subscribeToPrimaryWhatsAppMessages(({ messages, type }) => {
+  if (type !== "notify") return;
+  for (const message of messages) {
+    recordPhotoSubmission(message, "primary").catch((error) => {
+      console.error("[meter-monitor-primary-photo]", error.message || error);
+    });
+  }
+});
 
 function getRiderKey(rider) {
   return rider.phoneNumber || rider.jid || rider.lid;
@@ -418,9 +441,34 @@ async function waitBeforeNextReminder(config, messagesSent) {
   await wait(getMeterReminderDelayMs(config));
 }
 
-async function sendMissingReminders(config, status, clock, session) {
+function getMeterRuntimeStatus(config) {
+  if (config.accountMode === "primary") {
+    return getPrimaryWhatsAppRuntimeStatus();
+  }
+  return {
+    status: meterConnectionState,
+    connected: meterConnectionState === "connected",
+    connectedNumber: meterConnectedNumber,
+  };
+}
+
+async function sendMeterMessage(config, recipientJid, content) {
+  if (config.accountMode === "primary") {
+    return sendPrimaryWhatsAppMessage(recipientJid, content);
+  }
   if (!meterSocket || meterConnectionState !== "connected") {
-    throw new Error("Rider Meter WhatsApp is not connected.");
+    throw new Error("Separate Meter Monitor WhatsApp is not connected.");
+  }
+  return meterSocket.sendMessage(recipientJid, content);
+}
+
+async function sendMissingReminders(config, status, clock, session) {
+  if (!getMeterRuntimeStatus(config).connected) {
+    throw new Error(
+      config.accountMode === "primary"
+        ? "Primary report WhatsApp is not connected."
+        : "Separate Meter Monitor WhatsApp is not connected.",
+    );
   }
   if (!status.missing.length) return { groupSent: false, privateSent: 0 };
 
@@ -432,7 +480,7 @@ async function sendMissingReminders(config, status, clock, session) {
       const mentionDigits = jidDigits(rider.phoneJid || rider.jid);
       return mentionDigits ? `@${mentionDigits}` : rider.name;
     });
-    await meterSocket.sendMessage(config.groupJid, {
+    await sendMeterMessage(config, config.groupJid, {
       text: `📸 *${session.label} Photo Reminder*\n📅 ${clock.date}\n⏰ ${session.start} - ${session.end}\n\nPhoto not received from:\n${names.map((name) => `• ${name}`).join("\n")}\n\nPlease send the ${session.label} photo now.`,
       mentions,
     });
@@ -446,7 +494,7 @@ async function sendMissingReminders(config, status, clock, session) {
       const recipientJid = normalizeRecipientJid(rider.phoneJid || rider.phoneNumber || rider.jid);
       if (!recipientJid) continue;
       await waitBeforeNextReminder(config, messagesSent);
-      await meterSocket.sendMessage(recipientJid, {
+      await sendMeterMessage(config, recipientJid, {
         text: formatReminder(config.reminderTemplate, rider, config, clock, session),
       });
       privateSent += 1;
@@ -515,8 +563,12 @@ export async function runMeterPhotoCheck({ force = false, sessionKey = "" } = {}
 export async function queueMeterPhotoCheck({ sessionKey = "" } = {}) {
   const config = await readConfig();
   const clock = getColomboClock();
-  if (!meterSocket || meterConnectionState !== "connected") {
-    throw new Error("Rider Meter WhatsApp is not connected.");
+  if (!getMeterRuntimeStatus(config).connected) {
+    throw new Error(
+      config.accountMode === "primary"
+        ? "Primary report WhatsApp is not connected."
+        : "Separate Meter Monitor WhatsApp is not connected.",
+    );
   }
   if (!config.groupJid) throw new Error("Select a Rider Meter WhatsApp group.");
   if (!config.riders.length) throw new Error("Select at least one required rider.");
@@ -616,6 +668,12 @@ export function startMeterMonitorScheduler() {
 }
 
 export async function startMeterMonitorClient(force = false) {
+  const config = await readConfig();
+  if (config.accountMode === "primary") {
+    meterQr = "";
+    meterQrDataUrl = "";
+    return null;
+  }
   if (meterSocket && !force) return meterSocket;
   if (meterReconnecting) return meterSocket;
 
@@ -637,7 +695,7 @@ export async function startMeterMonitorClient(force = false) {
     nextSocket.ev.on("messages.upsert", ({ messages, type }) => {
       if (type !== "notify") return;
       for (const message of messages || []) {
-        recordPhotoSubmission(message).catch((error) => {
+        recordPhotoSubmission(message, "separate").catch((error) => {
           console.error("[meter-monitor-photo]", error.message || error);
         });
       }
@@ -674,21 +732,32 @@ export async function startMeterMonitorClient(force = false) {
 
 export async function getMeterMonitorStatus() {
   const [config, state] = await Promise.all([readConfig(), readState()]);
+  const runtime = getMeterRuntimeStatus(config);
   return {
-    status: meterConnectionState,
-    connected: meterConnectionState === "connected",
-    connectedNumber: meterConnectedNumber,
-    hasQr: Boolean(meterQrDataUrl),
+    status: runtime.status,
+    connected: runtime.connected,
+    connectedNumber: runtime.connectedNumber,
+    accountMode: config.accountMode,
+    connectionSource: config.accountMode === "primary" ? "Primary Report WhatsApp" : "Separate Monitor WhatsApp",
+    hasQr: config.accountMode === "separate" && Boolean(meterQrDataUrl),
     config,
     today: buildMeterTodayStatus(config, state),
   };
 }
 
 export async function getMeterMonitorQr() {
-  return { qr: meterQr, qrDataUrl: meterQrDataUrl };
+  const config = await readConfig();
+  if (config.accountMode === "primary") {
+    return { qr: "", qrDataUrl: "", accountMode: config.accountMode };
+  }
+  return { qr: meterQr, qrDataUrl: meterQrDataUrl, accountMode: config.accountMode };
 }
 
 export async function reconnectMeterMonitor() {
+  const config = await readConfig();
+  if (config.accountMode === "primary") {
+    return getMeterMonitorStatus();
+  }
   const previousSocket = meterSocket;
   meterSocket = null;
   if (previousSocket) {
@@ -704,6 +773,10 @@ export async function reconnectMeterMonitor() {
 }
 
 export async function logoutMeterMonitor() {
+  const config = await readConfig();
+  if (config.accountMode === "primary") {
+    return getMeterMonitorStatus();
+  }
   const previousSocket = meterSocket;
   meterSocket = null;
   if (previousSocket) {
@@ -722,6 +795,10 @@ export async function logoutMeterMonitor() {
 }
 
 export async function fetchMeterMonitorGroups() {
+  const config = await readConfig();
+  if (config.accountMode === "primary") {
+    return fetchWhatsAppGroups();
+  }
   if (!meterSocket || meterConnectionState !== "connected") {
     throw new Error("Rider Meter WhatsApp is not connected. Scan its QR code first.");
   }
@@ -736,10 +813,16 @@ export async function fetchMeterMonitorGroups() {
 }
 
 export async function fetchMeterGroupParticipants(groupJid) {
-  if (!meterSocket || meterConnectionState !== "connected") {
-    throw new Error("Rider Meter WhatsApp is not connected. Scan its QR code first.");
+  const config = await readConfig();
+  let metadata;
+  if (config.accountMode === "primary") {
+    metadata = await fetchPrimaryWhatsAppGroupMetadata(groupJid);
+  } else {
+    if (!meterSocket || meterConnectionState !== "connected") {
+      throw new Error("Separate Meter Monitor WhatsApp is not connected. Scan its QR code first.");
+    }
+    metadata = await meterSocket.groupMetadata(String(groupJid || ""));
   }
-  const metadata = await meterSocket.groupMetadata(String(groupJid || ""));
   return {
     groupJid: metadata.id,
     groupName: metadata.subject,
@@ -764,5 +847,22 @@ export async function saveMeterMonitorConfig(config) {
     }
   }
   const saved = await writeConfig(normalized);
+  if (saved.accountMode === "primary" && meterSocket) {
+    const previousSocket = meterSocket;
+    meterSocket = null;
+    meterConnectionState = "disconnected";
+    meterConnectedNumber = "";
+    meterQr = "";
+    meterQrDataUrl = "";
+    try {
+      previousSocket.end(undefined);
+    } catch {
+      // Keep the separate auth files so the user can switch back later.
+    }
+  } else if (saved.accountMode === "separate" && !meterSocket) {
+    startMeterMonitorClient().catch((error) => {
+      console.error("[meter-monitor-mode-switch]", error.message || error);
+    });
+  }
   return { ok: true, config: saved };
 }
