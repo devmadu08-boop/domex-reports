@@ -31,7 +31,7 @@ const EMPTY_CONFIG = {
   inWindowStart: "08:00",
   inWindowEnd: "11:30",
   outWindowStart: "17:00",
-  outWindowEnd: "20:00",
+  outWindowEnd: "20:30",
   reminderIntervalMinutes: 60,
   messageDelaySeconds: 15,
   specialHolidays: [],
@@ -407,39 +407,31 @@ export default function RiderMeterMonitorSettings() {
 
           <div className="whatsapp-settings-card grid gap-4">
             <div className="grid gap-3 lg:grid-cols-2">
-              <div className="grid gap-3 rounded-2xl border border-amber-200 bg-amber-50/80 p-3 sm:grid-cols-2">
-                <div className="sm:col-span-2">
+              <div className="grid gap-3 rounded-2xl border border-amber-200 bg-amber-50/80 p-3">
+                <div>
                   <p className="text-sm font-black text-amber-900">Morning IN Meter Photo</p>
-                  <p className="text-xs font-semibold text-amber-800/70">Riders must post the starting meter photo in this window.</p>
+                  <p className="text-xs font-semibold text-amber-800/70">Two checks only, at the opening and closing times.</p>
                 </div>
-                <label className="grid gap-2 text-sm font-black text-[#071537]">
-                  Starts
-                  <input type="time" value={config.inWindowStart} onChange={(event) => setConfig((current) => ({ ...current, inWindowStart: event.target.value }))} className="whatsapp-control h-11" />
-                </label>
-                <label className="grid gap-2 text-sm font-black text-[#071537]">
-                  Ends
-                  <input type="time" value={config.inWindowEnd} onChange={(event) => setConfig((current) => ({ ...current, inWindowEnd: event.target.value }))} className="whatsapp-control h-11" />
-                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <span className="rounded-xl bg-white/80 px-3 py-3 text-center text-sm font-black text-amber-900">08:00</span>
+                  <span className="rounded-xl bg-white/80 px-3 py-3 text-center text-sm font-black text-amber-900">11:30</span>
+                </div>
               </div>
 
-              <div className="grid gap-3 rounded-2xl border border-indigo-200 bg-indigo-50/80 p-3 sm:grid-cols-2">
-                <div className="sm:col-span-2">
+              <div className="grid gap-3 rounded-2xl border border-indigo-200 bg-indigo-50/80 p-3">
+                <div>
                   <p className="text-sm font-black text-indigo-900">Evening OUT Meter Photo</p>
-                  <p className="text-xs font-semibold text-indigo-800/70">Riders must post the closing meter photo in this window.</p>
+                  <p className="text-xs font-semibold text-indigo-800/70">Two checks only, at the opening and closing times.</p>
                 </div>
-                <label className="grid gap-2 text-sm font-black text-[#071537]">
-                  Starts
-                  <input type="time" value={config.outWindowStart} onChange={(event) => setConfig((current) => ({ ...current, outWindowStart: event.target.value }))} className="whatsapp-control h-11" />
-                </label>
-                <label className="grid gap-2 text-sm font-black text-[#071537]">
-                  Ends
-                  <input type="time" value={config.outWindowEnd} onChange={(event) => setConfig((current) => ({ ...current, outWindowEnd: event.target.value }))} className="whatsapp-control h-11" />
-                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <span className="rounded-xl bg-white/80 px-3 py-3 text-center text-sm font-black text-indigo-900">17:00</span>
+                  <span className="rounded-xl bg-white/80 px-3 py-3 text-center text-sm font-black text-indigo-900">20:30</span>
+                </div>
               </div>
             </div>
 
             <p className="rounded-2xl bg-cyan-50 p-3 text-sm font-bold text-cyan-900">
-              Missing riders are checked every {config.reminderIntervalMinutes || 60} minutes during each window, including a final check at the window end.
+              Automatic reminders run only at 08:00, 11:30, 17:00, and 20:30. Riders who already submitted the correct photo are skipped.
             </p>
 
             <label className="grid gap-2 text-sm font-black text-[#071537] sm:max-w-sm">

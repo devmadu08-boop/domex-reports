@@ -19,15 +19,18 @@ const dataDir = path.resolve("backend", "data");
 const authDir = path.join(dataDir, "whatsapp-meter-auth");
 const configPath = path.join(dataDir, "whatsapp-meter-config.json");
 const statePath = path.join(dataDir, "whatsapp-meter-state.json");
+const FIXED_METER_SCHEDULE = {
+  inWindowStart: "08:00",
+  inWindowEnd: "11:30",
+  outWindowStart: "17:00",
+  outWindowEnd: "20:30",
+};
 const DEFAULT_CONFIG = {
   accountMode: "separate",
   enabled: false,
   groupJid: "",
   groupName: "",
-  inWindowStart: "08:00",
-  inWindowEnd: "11:30",
-  outWindowStart: "17:00",
-  outWindowEnd: "20:00",
+  ...FIXED_METER_SCHEDULE,
   reminderIntervalMinutes: 60,
   messageDelaySeconds: 15,
   specialHolidays: [],
@@ -141,10 +144,7 @@ function normalizeConfig(config = {}) {
     enabled: Boolean(config.enabled),
     groupJid: String(config.groupJid || "").trim(),
     groupName: String(config.groupName || "").trim(),
-    inWindowStart: validTime(config.inWindowStart, DEFAULT_CONFIG.inWindowStart),
-    inWindowEnd: validTime(config.inWindowEnd, DEFAULT_CONFIG.inWindowEnd),
-    outWindowStart: validTime(config.outWindowStart, DEFAULT_CONFIG.outWindowStart),
-    outWindowEnd: validTime(config.outWindowEnd, DEFAULT_CONFIG.outWindowEnd),
+    ...FIXED_METER_SCHEDULE,
     reminderIntervalMinutes: validReminderInterval(config.reminderIntervalMinutes),
     messageDelaySeconds: validMessageDelay(config.messageDelaySeconds),
     specialHolidays: normalizeDateList(config.specialHolidays),
@@ -237,22 +237,16 @@ export function getMeterDayAvailability(config, date) {
   return { inactive: false, reason: "" };
 }
 
-export function buildReminderSlots(start, end, intervalMinutes = 60) {
-  const startMinutes = timeToMinutes(start);
-  const endMinutes = timeToMinutes(end);
-  if (endMinutes <= startMinutes) return [];
+export function buildReminderSlots(start, end) {
+  const validStart = validTime(start, "");
+  const validEnd = validTime(end, "");
+  if (!validStart || !validEnd) return [];
+  return validStart === validEnd ? [validStart] : [validStart, validEnd];
+}
 
-  const slots = [];
-  for (
-    let slot = startMinutes + validReminderInterval(intervalMinutes);
-    slot <= endMinutes;
-    slot += validReminderInterval(intervalMinutes)
-  ) {
-    slots.push(minutesToTime(slot));
-  }
-  const endTime = minutesToTime(endMinutes);
-  if (!slots.includes(endTime)) slots.push(endTime);
-  return slots;
+export function getDueReminderSlot(start, end, currentTime, lastReminderSlot = "") {
+  return buildReminderSlots(start, end)
+    .find((slot) => slot === currentTime && slot > lastReminderSlot) || "";
 }
 
 function getSession(config, sessionKey) {
@@ -643,20 +637,20 @@ async function schedulerTick() {
   const state = await readState();
   const day = state.days[clock.date] || { sessions: {} };
   const sessionState = getSessionState(day, session.key);
-  const dueSlots = buildReminderSlots(
+  const dueSlot = getDueReminderSlot(
     session.start,
     session.end,
-    config.reminderIntervalMinutes,
-  ).filter((slot) => slot <= clock.time && slot > (sessionState.lastReminderSlot || ""));
-  const latestDueSlot = dueSlots.at(-1);
-  if (!latestDueSlot) return;
+    clock.time,
+    sessionState.lastReminderSlot || "",
+  );
+  if (!dueSlot) return;
 
+  // Claim the slot before sending so a partial failure cannot trigger repeated batches.
+  sessionState.lastReminderSlot = dueSlot;
+  day.sessions[session.key] = sessionState;
+  state.days[clock.date] = day;
+  await writeState(state);
   await runMeterPhotoCheck({ sessionKey: session.key });
-  const latestState = await readState();
-  const latestDay = latestState.days[clock.date] || { sessions: {} };
-  getSessionState(latestDay, session.key).lastReminderSlot = latestDueSlot;
-  latestState.days[clock.date] = latestDay;
-  await writeState(latestState);
 }
 
 export function startMeterMonitorScheduler() {

@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildMeterTodayStatus,
   buildReminderSlots,
+  getDueReminderSlot,
   getMeterDayAvailability,
   getMeterReminderDelayMs,
   hasMeterPhoto,
@@ -27,15 +28,24 @@ test("meter monitor detects regular, view-once, and image document messages", ()
   assert.equal(hasMeterPhoto({ conversation: "photo sent" }), false);
 });
 
-test("hourly reminder slots include the exact window end", () => {
+test("meter reminders run only at each window start and end", () => {
   assert.deepEqual(
-    buildReminderSlots("08:00", "11:30", 60),
-    ["09:00", "10:00", "11:00", "11:30"],
+    buildReminderSlots("08:00", "11:30"),
+    ["08:00", "11:30"],
   );
   assert.deepEqual(
-    buildReminderSlots("17:00", "20:00", 60),
-    ["18:00", "19:00", "20:00"],
+    buildReminderSlots("17:00", "20:30"),
+    ["17:00", "20:30"],
   );
+  assert.deepEqual(buildReminderSlots("08:00", "08:00"), ["08:00"]);
+  assert.deepEqual(buildReminderSlots("invalid", "11:30"), []);
+});
+
+test("meter scheduler sends only in the exact checkpoint minute", () => {
+  assert.equal(getDueReminderSlot("08:00", "11:30", "08:00"), "08:00");
+  assert.equal(getDueReminderSlot("08:00", "11:30", "08:01"), "");
+  assert.equal(getDueReminderSlot("08:00", "11:30", "11:30", "08:00"), "11:30");
+  assert.equal(getDueReminderSlot("08:00", "11:30", "11:30", "11:30"), "");
 });
 
 test("meter reminders are paced with a base delay and random gap", () => {
@@ -71,7 +81,7 @@ test("today status separates IN and OUT submissions and missing riders", () => {
     inWindowStart: "08:00",
     inWindowEnd: "11:30",
     outWindowStart: "17:00",
-    outWindowEnd: "20:00",
+    outWindowEnd: "20:30",
     riders: [
       { name: "Akila", jid: "94770000001@s.whatsapp.net", phoneNumber: "94770000001" },
       {
