@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildMeterRiderMention,
   buildMeterTodayStatus,
   buildReminderSlots,
   getDueReminderSlot,
@@ -11,6 +12,30 @@ import {
   isTimeWithinWindow,
   normalizeMeterAccountMode,
 } from "../backend/whatsapp/meterMonitorService.js";
+
+test("group reminders include the rider name and all usable WhatsApp mention identities", () => {
+  assert.deepEqual(
+    buildMeterRiderMention({
+      name: "Sudesh",
+      phoneNumber: "076 123 4567",
+      phoneJid: "94761234567@s.whatsapp.net",
+      jid: "257676898492428@lid",
+      lid: "257676898492428@lid",
+    }),
+    {
+      text: "*Sudesh* - @94761234567",
+      jids: ["94761234567@s.whatsapp.net", "257676898492428@lid"],
+    },
+  );
+
+  assert.deepEqual(
+    buildMeterRiderMention({ name: "Akila", jid: "123456789@lid" }),
+    {
+      text: "*Akila* - @123456789",
+      jids: ["123456789@lid"],
+    },
+  );
+});
 
 test("meter photo window supports normal and overnight ranges", () => {
   assert.equal(isTimeWithinWindow("18:15", "17:00", "19:00"), true);

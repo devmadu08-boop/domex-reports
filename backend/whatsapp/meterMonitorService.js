@@ -71,6 +71,23 @@ function jidDigits(value) {
   return normalizePhoneDigits(String(value || "").split("@")[0].split(":")[0]);
 }
 
+export function buildMeterRiderMention(rider = {}) {
+  const riderName = String(rider.name || "Rider").trim() || "Rider";
+  const phoneDigits = normalizePhoneDigits(rider.phoneNumber || rider.phoneJid);
+  const fallbackDigits = jidDigits(rider.jid || rider.lid);
+  const mentionDigits = phoneDigits || fallbackDigits;
+  const mentionJids = [...new Set(
+    [rider.phoneJid, rider.jid, rider.lid]
+      .map((value) => String(value || "").trim())
+      .filter((value) => value.includes("@")),
+  )];
+
+  return {
+    text: mentionDigits ? `*${riderName}* - @${mentionDigits}` : `*${riderName}*`,
+    jids: mentionJids,
+  };
+}
+
 function normalizeRecipientJid(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -469,13 +486,10 @@ async function sendMissingReminders(config, status, clock, session) {
   let groupSent = false;
   let messagesSent = 0;
   if (config.groupReminder && config.groupJid) {
-    const mentions = status.missing.map((rider) => rider.phoneJid || rider.jid || rider.lid).filter(Boolean);
-    const names = status.missing.map((rider) => {
-      const mentionDigits = jidDigits(rider.phoneJid || rider.jid);
-      return mentionDigits ? `@${mentionDigits}` : rider.name;
-    });
+    const riderMentions = status.missing.map(buildMeterRiderMention);
+    const mentions = [...new Set(riderMentions.flatMap((rider) => rider.jids))];
     await sendMeterMessage(config, config.groupJid, {
-      text: `📸 *${session.label} Photo Reminder*\n📅 ${clock.date}\n⏰ ${session.start} - ${session.end}\n\nPhoto not received from:\n${names.map((name) => `• ${name}`).join("\n")}\n\nPlease send the ${session.label} photo now.`,
+      text: `📸 *${session.label} Photo Reminder*\n📅 ${clock.date}\n⏰ ${session.start} - ${session.end}\n\nPhoto not received from:\n${riderMentions.map((rider) => `• ${rider.text}`).join("\n")}\n\nPlease send the ${session.label} photo now.`,
       mentions,
     });
     groupSent = true;
