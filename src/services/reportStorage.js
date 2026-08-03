@@ -9,7 +9,8 @@ const USERS_KEY = "daily-courier-report-system-users-v1";
 const UNDO_HISTORY_KEY = "daily-courier-report-system-undo-history-v1";
 const REDO_HISTORY_KEY = "daily-courier-report-system-redo-history-v1";
 const BACKUP_VERSION = 1;
-const MAX_UNDO_HISTORY = 20;
+const MAX_UNDO_HISTORY = 5;
+const MAX_PERSISTED_HISTORY_CHARS = 1_200_000;
 const DEFAULT_COMPANY_NAME = "Domestic Express (pvt) ltd";
 const ADMIN_USER = { branchName: "madu", password: "2006", role: "admin", createdAt: "system" };
 const DEFAULT_WHATSAPP_CAPTION_TEMPLATES = {
@@ -22,6 +23,7 @@ const DATA_CHANGED_EVENT = "daily-courier-report-data-changed";
 let suppressChangeEvent = false;
 let suppressHistory = false;
 let activeBranchName = "";
+const memoryHistory = new Map();
 
 const emptyReport = {
   courierRows: [],
@@ -52,6 +54,84 @@ function readStore() {
 
 function scopedKey(key) {
   return activeBranchName ? `${key}::${activeBranchName.toLowerCase()}` : key;
+}
+
+function getHistoryStorage() {
+  if (typeof sessionStorage !== "undefined") return sessionStorage;
+  return typeof localStorage !== "undefined" ? localStorage : null;
+}
+
+function readHistory(key) {
+  const storageKey = scopedKey(key);
+  if (memoryHistory.has(storageKey)) return memoryHistory.get(storageKey);
+  const storage = getHistoryStorage();
+  if (!storage) return [];
+  try {
+    const history = JSON.parse(storage.getItem(storageKey) || "[]");
+    const normalized = Array.isArray(history) ? history.slice(0, MAX_UNDO_HISTORY) : [];
+    memoryHistory.set(storageKey, normalized);
+    return normalized;
+  } catch {
+    return [];
+  }
+}
+
+function writeHistory(key, entries) {
+  const storageKey = scopedKey(key);
+  const normalized = (Array.isArray(entries) ? entries : []).slice(0, MAX_UNDO_HISTORY);
+  memoryHistory.set(storageKey, normalized);
+
+  const storage = getHistoryStorage();
+  if (!storage) return normalized;
+  let persisted = normalized;
+  let serialized = JSON.stringify(persisted);
+  while (persisted.length && serialized.length > MAX_PERSISTED_HISTORY_CHARS) {
+    persisted = persisted.slice(0, -1);
+    serialized = JSON.stringify(persisted);
+  }
+  try {
+    if (persisted.length) storage.setItem(storageKey, serialized);
+    else storage.removeItem(storageKey);
+  } catch {
+    // Undo remains available in memory even when browser session storage is full.
+    try {
+      storage.removeItem(storageKey);
+    } catch {
+      // Report saving must never fail because optional history could not be persisted.
+    }
+  }
+  return normalized;
+}
+
+function clearHistory(key) {
+  const storageKey = scopedKey(key);
+  memoryHistory.delete(storageKey);
+  try {
+    getHistoryStorage()?.removeItem(storageKey);
+  } catch {
+    // History cleanup is best effort.
+  }
+}
+
+function removeLegacyLocalHistory() {
+  if (typeof localStorage === "undefined") return;
+  try {
+    const legacyPrefixes = [UNDO_HISTORY_KEY, REDO_HISTORY_KEY];
+    const legacyKeys = [];
+    if (Number.isInteger(localStorage.length) && typeof localStorage.key === "function") {
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        if (legacyPrefixes.some((prefix) => key === prefix || key?.startsWith(`${prefix}::`))) {
+          legacyKeys.push(key);
+        }
+      }
+    } else {
+      legacyKeys.push(scopedKey(UNDO_HISTORY_KEY), scopedKey(REDO_HISTORY_KEY));
+    }
+    legacyKeys.forEach((key) => localStorage.removeItem(key));
+  } catch {
+    // A restricted browser may not expose writable local storage.
+  }
 }
 
 function emitDataChanged() {
@@ -98,15 +178,15 @@ function readScopedState() {
 
 function captureUndoSnapshot(action) {
   if (suppressHistory || typeof localStorage === "undefined") return;
-  const history = readJson(UNDO_HISTORY_KEY, []);
+  const history = getUndoHistory();
   const entry = {
     id: crypto.randomUUID(),
     action,
     createdAt: new Date().toISOString(),
     state: readScopedState(),
   };
-  localStorage.setItem(scopedKey(UNDO_HISTORY_KEY), JSON.stringify([entry, ...history].slice(0, MAX_UNDO_HISTORY)));
-  localStorage.removeItem(scopedKey(REDO_HISTORY_KEY));
+  writeHistory(UNDO_HISTORY_KEY, [entry, ...history]);
+  clearHistory(REDO_HISTORY_KEY);
 }
 
 function applyScopedState(state) {
@@ -136,6 +216,7 @@ function normalizeBranchName(value) {
 
 export function setActiveBranch(branchName) {
   activeBranchName = normalizeBranchName(branchName);
+  removeLegacyLocalHistory();
 }
 
 export function getActiveBranch() {
@@ -232,8 +313,7 @@ export function getLocalUpdatedAt() {
 }
 
 export function getUndoHistory() {
-  const history = readJson(UNDO_HISTORY_KEY, []);
-  return Array.isArray(history) ? history : [];
+  return readHistory(UNDO_HISTORY_KEY);
 }
 
 export function undoLastChange() {
@@ -241,7 +321,7 @@ export function undoLastChange() {
   const [latest, ...remaining] = history;
   if (!latest?.state) return null;
 
-  const redoHistory = readJson(REDO_HISTORY_KEY, []);
+  const redoHistory = getRedoHistory();
   const redoEntry = {
     id: crypto.randomUUID(),
     action: latest.action,
@@ -252,8 +332,8 @@ export function undoLastChange() {
   suppressHistory = true;
   try {
     applyScopedState(latest.state);
-    localStorage.setItem(scopedKey(UNDO_HISTORY_KEY), JSON.stringify(remaining));
-    localStorage.setItem(scopedKey(REDO_HISTORY_KEY), JSON.stringify([redoEntry, ...redoHistory].slice(0, MAX_UNDO_HISTORY)));
+    writeHistory(UNDO_HISTORY_KEY, remaining);
+    writeHistory(REDO_HISTORY_KEY, [redoEntry, ...redoHistory]);
   } finally {
     suppressHistory = false;
   }
@@ -261,8 +341,7 @@ export function undoLastChange() {
 }
 
 export function getRedoHistory() {
-  const history = readJson(REDO_HISTORY_KEY, []);
-  return Array.isArray(history) ? history : [];
+  return readHistory(REDO_HISTORY_KEY);
 }
 
 export function redoLastChange() {
@@ -280,11 +359,8 @@ export function redoLastChange() {
   suppressHistory = true;
   try {
     applyScopedState(latest.state);
-    localStorage.setItem(
-      scopedKey(UNDO_HISTORY_KEY),
-      JSON.stringify([undoEntry, ...getUndoHistory()].slice(0, MAX_UNDO_HISTORY)),
-    );
-    localStorage.setItem(scopedKey(REDO_HISTORY_KEY), JSON.stringify(remaining));
+    writeHistory(UNDO_HISTORY_KEY, [undoEntry, ...getUndoHistory()]);
+    writeHistory(REDO_HISTORY_KEY, remaining);
   } finally {
     suppressHistory = false;
   }
@@ -292,8 +368,8 @@ export function redoLastChange() {
 }
 
 export function clearUndoHistory() {
-  localStorage.removeItem(scopedKey(UNDO_HISTORY_KEY));
-  localStorage.removeItem(scopedKey(REDO_HISTORY_KEY));
+  clearHistory(UNDO_HISTORY_KEY);
+  clearHistory(REDO_HISTORY_KEY);
 }
 
 export function getReportByDate(date) {

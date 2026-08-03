@@ -77,15 +77,26 @@ function pendingSyncStorageKey(branchName = getActiveBranch()) {
 }
 
 function savePendingCloudSync(snapshot, error) {
-  localStorage.setItem(
-    pendingSyncStorageKey(snapshot.branchName),
-    JSON.stringify({
-      snapshot,
-      attempts: Number(getPendingCloudSync()?.attempts || 0) + 1,
-      queuedAt: new Date().toISOString(),
-      lastError: error?.message || "Cloud connection unavailable.",
-    }),
-  );
+  const storageKey = pendingSyncStorageKey(snapshot.branchName);
+  const pending = {
+    branchName: snapshot.branchName,
+    sourceClientId: snapshot.sourceClientId || "",
+    reason: snapshot.reason || "automatic-cloud-recovery",
+    rebuildFromLocal: true,
+    attempts: Number(getPendingCloudSync()?.attempts || 0) + 1,
+    queuedAt: new Date().toISOString(),
+    lastError: error?.message || "Cloud connection unavailable.",
+  };
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(pending));
+  } catch {
+    // Local reports remain authoritative; recovery can rebuild a fresh snapshot later.
+    try {
+      localStorage.removeItem(storageKey);
+    } catch {
+      // Cloud failure must not block the report save flow.
+    }
+  }
 }
 
 export async function uploadLocalSnapshotToFirebase(reason = "manual", sourceClientId = "") {
@@ -106,7 +117,21 @@ export async function syncLocalSnapshotWithRecovery(reason = "auto", sourceClien
 
 export function getPendingCloudSync() {
   try {
-    return JSON.parse(localStorage.getItem(pendingSyncStorageKey()) || "null");
+    const storageKey = pendingSyncStorageKey();
+    const pending = JSON.parse(localStorage.getItem(storageKey) || "null");
+    if (!pending?.snapshot) return pending;
+
+    const compactPending = {
+      branchName: pending.snapshot.branchName || getActiveBranch(),
+      sourceClientId: pending.snapshot.sourceClientId || "",
+      reason: pending.snapshot.reason || "automatic-cloud-recovery",
+      rebuildFromLocal: true,
+      attempts: Number(pending.attempts || 0),
+      queuedAt: pending.queuedAt || new Date().toISOString(),
+      lastError: pending.lastError || "Cloud connection unavailable.",
+    };
+    localStorage.setItem(storageKey, JSON.stringify(compactPending));
+    return compactPending;
   } catch {
     return null;
   }
@@ -114,10 +139,10 @@ export function getPendingCloudSync() {
 
 export async function flushPendingCloudSync() {
   const pending = getPendingCloudSync();
-  if (!pending?.snapshot) return null;
+  if (!pending) return null;
   try {
     const snapshot = {
-      ...pending.snapshot,
+      ...(pending.snapshot || buildCloudSnapshot("automatic-cloud-recovery", pending.sourceClientId || "")),
       reason: "automatic-cloud-recovery",
       cloudUpdatedAt: new Date().toISOString(),
     };
@@ -125,7 +150,10 @@ export async function flushPendingCloudSync() {
     localStorage.removeItem(pendingSyncStorageKey());
     return { ...snapshot, recovered: true };
   } catch (error) {
-    savePendingCloudSync(pending.snapshot, error);
+    savePendingCloudSync(
+      pending.snapshot || buildCloudSnapshot(pending.reason || "automatic-cloud-recovery", pending.sourceClientId || ""),
+      error,
+    );
     throw error;
   }
 }

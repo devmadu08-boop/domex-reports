@@ -50,3 +50,24 @@ test("report changes can be undone and restored forward", () => {
   assert.equal(storage.getReportByDate("2026-07-27").courierRows.length, 1);
   assert.equal(storage.getRedoHistory().length, 0);
 });
+
+test("report saving continues when optional browser history storage is full", () => {
+  globalThis.sessionStorage = {
+    getItem() {
+      return null;
+    },
+    setItem() {
+      throw new DOMException("Storage quota exceeded", "QuotaExceededError");
+    },
+    removeItem() {},
+  };
+
+  storage.setActiveBranch("quota-branch");
+  assert.doesNotThrow(() => {
+    storage.saveReportType("2026-08-03", "operation", { target: 100 });
+  });
+  assert.equal(storage.getReportByDate("2026-08-03").operation.target, 100);
+  assert.equal(storage.getUndoHistory().length, 1);
+
+  delete globalThis.sessionStorage;
+});
