@@ -22,9 +22,10 @@ const statePath = path.join(dataDir, "whatsapp-meter-state.json");
 const FIXED_METER_SCHEDULE = {
   inWindowStart: "08:00",
   inWindowEnd: "11:30",
-  outWindowStart: "17:00",
-  outWindowEnd: "20:30",
+  outWindowStart: "15:00",
+  outWindowEnd: "17:00",
 };
+export const METER_SCAN_INTERVAL_MS = 10_000;
 const DEFAULT_CONFIG = {
   accountMode: "separate",
   enabled: false,
@@ -672,7 +673,7 @@ export function startMeterMonitorScheduler() {
   meterSchedulerStarted = true;
   setInterval(() => {
     schedulerTick().catch((error) => console.error("[meter-monitor-scheduler]", error.message || error));
-  }, 30_000);
+  }, METER_SCAN_INTERVAL_MS);
 }
 
 export async function startMeterMonitorClient(force = false) {

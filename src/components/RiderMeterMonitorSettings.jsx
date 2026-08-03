@@ -30,8 +30,8 @@ const EMPTY_CONFIG = {
   groupName: "",
   inWindowStart: "08:00",
   inWindowEnd: "11:30",
-  outWindowStart: "17:00",
-  outWindowEnd: "20:30",
+  outWindowStart: "15:00",
+  outWindowEnd: "17:00",
   reminderIntervalMinutes: 60,
   messageDelaySeconds: 15,
   specialHolidays: [],
@@ -424,14 +424,14 @@ export default function RiderMeterMonitorSettings() {
                   <p className="text-xs font-semibold text-indigo-800/70">Two checks only, at the opening and closing times.</p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
+                  <span className="rounded-xl bg-white/80 px-3 py-3 text-center text-sm font-black text-indigo-900">15:00</span>
                   <span className="rounded-xl bg-white/80 px-3 py-3 text-center text-sm font-black text-indigo-900">17:00</span>
-                  <span className="rounded-xl bg-white/80 px-3 py-3 text-center text-sm font-black text-indigo-900">20:30</span>
                 </div>
               </div>
             </div>
 
             <p className="rounded-2xl bg-cyan-50 p-3 text-sm font-bold text-cyan-900">
-              Automatic reminders run only at 08:00, 11:30, 17:00, and 20:30. Riders who already submitted the correct photo are skipped.
+              Photos are monitored continuously and status is checked every 10 seconds. Automatic reminders run only at 08:00, 11:30, 15:00, and 17:00; riders who already submitted the correct photo are skipped.
             </p>
 
             <label className="grid gap-2 text-sm font-black text-[#071537] sm:max-w-sm">

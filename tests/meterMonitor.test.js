@@ -8,6 +8,7 @@ import {
   getDueReminderSlot,
   getMeterDayAvailability,
   getMeterReminderDelayMs,
+  METER_SCAN_INTERVAL_MS,
   hasMeterPhoto,
   isTimeWithinWindow,
   normalizeMeterAccountMode,
@@ -59,11 +60,15 @@ test("meter reminders run only at each window start and end", () => {
     ["08:00", "11:30"],
   );
   assert.deepEqual(
-    buildReminderSlots("17:00", "20:30"),
-    ["17:00", "20:30"],
+    buildReminderSlots("15:00", "17:00"),
+    ["15:00", "17:00"],
   );
   assert.deepEqual(buildReminderSlots("08:00", "08:00"), ["08:00"]);
   assert.deepEqual(buildReminderSlots("invalid", "11:30"), []);
+});
+
+test("meter status scheduler checks the selected group state every ten seconds", () => {
+  assert.equal(METER_SCAN_INTERVAL_MS, 10_000);
 });
 
 test("meter scheduler sends only in the exact checkpoint minute", () => {
@@ -105,8 +110,8 @@ test("today status separates IN and OUT submissions and missing riders", () => {
   const config = {
     inWindowStart: "08:00",
     inWindowEnd: "11:30",
-    outWindowStart: "17:00",
-    outWindowEnd: "20:30",
+    outWindowStart: "15:00",
+    outWindowEnd: "17:00",
     riders: [
       { name: "Akila", jid: "94770000001@s.whatsapp.net", phoneNumber: "94770000001" },
       {
