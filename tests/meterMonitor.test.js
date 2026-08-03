@@ -7,7 +7,6 @@ import {
   buildReminderSlots,
   getDueReminderSlot,
   getMeterDayAvailability,
-  getMeterReminderDelayMs,
   METER_SCAN_INTERVAL_MS,
   hasMeterPhoto,
   isTimeWithinWindow,
@@ -76,12 +75,6 @@ test("meter scheduler sends only in the exact checkpoint minute", () => {
   assert.equal(getDueReminderSlot("08:00", "11:30", "08:01"), "");
   assert.equal(getDueReminderSlot("08:00", "11:30", "11:30", "08:00"), "11:30");
   assert.equal(getDueReminderSlot("08:00", "11:30", "11:30", "11:30"), "");
-});
-
-test("meter reminders are paced with a base delay and random gap", () => {
-  assert.equal(getMeterReminderDelayMs({ messageDelaySeconds: 15 }, 0), 15000);
-  assert.equal(getMeterReminderDelayMs({ messageDelaySeconds: 15 }, 0.999), 19995);
-  assert.equal(getMeterReminderDelayMs({ messageDelaySeconds: 1 }, 0), 15000);
 });
 
 test("meter WhatsApp account mode preserves separate mode and supports primary mode", () => {

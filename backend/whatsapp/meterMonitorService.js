@@ -33,7 +33,6 @@ const DEFAULT_CONFIG = {
   groupName: "",
   ...FIXED_METER_SCHEDULE,
   reminderIntervalMinutes: 60,
-  messageDelaySeconds: 15,
   specialHolidays: [],
   groupReminder: true,
   privateReminder: true,
@@ -53,10 +52,7 @@ let meterConnectionState = "disconnected";
 let meterConnectedNumber = "";
 let meterReconnecting = false;
 let meterSchedulerStarted = false;
-let meterCheckRunning = false;
 let stateWriteQueue = Promise.resolve();
-let meterManualQueue = Promise.resolve();
-const queuedManualChecks = new Set();
 
 async function ensureDataDir() {
   await fs.mkdir(dataDir, { recursive: true });
@@ -104,11 +100,6 @@ function validTime(value, fallback) {
 function validReminderInterval(value) {
   const minutes = Number(value);
   return Number.isInteger(minutes) && minutes >= 15 && minutes <= 240 ? minutes : 60;
-}
-
-function validMessageDelay(value) {
-  const seconds = Number(value);
-  return Number.isInteger(seconds) && seconds >= 5 && seconds <= 120 ? seconds : 15;
 }
 
 function normalizeDateList(values) {
@@ -164,7 +155,6 @@ function normalizeConfig(config = {}) {
     groupName: String(config.groupName || "").trim(),
     ...FIXED_METER_SCHEDULE,
     reminderIntervalMinutes: validReminderInterval(config.reminderIntervalMinutes),
-    messageDelaySeconds: validMessageDelay(config.messageDelaySeconds),
     specialHolidays: normalizeDateList(config.specialHolidays),
     groupReminder: config.groupReminder !== false,
     privateReminder: config.privateReminder !== false,
@@ -438,21 +428,6 @@ function formatReminder(template, rider, config, clock, session) {
     .replaceAll("{end}", session.end);
 }
 
-function wait(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-export function getMeterReminderDelayMs(config, randomValue = Math.random()) {
-  const baseDelay = validMessageDelay(config.messageDelaySeconds) * 1000;
-  const randomGap = Math.floor(Math.max(0, Math.min(0.999999, randomValue)) * 5000);
-  return baseDelay + randomGap;
-}
-
-async function waitBeforeNextReminder(config, messagesSent) {
-  if (!messagesSent) return;
-  await wait(getMeterReminderDelayMs(config));
-}
-
 function getMeterRuntimeStatus(config) {
   if (config.accountMode === "primary") {
     return getPrimaryWhatsAppRuntimeStatus();
@@ -502,7 +477,6 @@ async function sendMissingReminders(config, status, clock, session) {
     for (const rider of status.missing) {
       const recipientJid = normalizeRecipientJid(rider.phoneJid || rider.phoneNumber || rider.jid);
       if (!recipientJid) continue;
-      await waitBeforeNextReminder(config, messagesSent);
       await sendMeterMessage(config, recipientJid, {
         text: formatReminder(config.reminderTemplate, rider, config, clock, session),
       });
@@ -515,58 +489,51 @@ async function sendMissingReminders(config, status, clock, session) {
     groupSent,
     privateSent,
     messagesSent,
-    messageDelaySeconds: config.messageDelaySeconds,
   };
 }
 
 export async function runMeterPhotoCheck({ force = false, sessionKey = "" } = {}) {
-  if (meterCheckRunning) return { ok: true, skipped: true, reason: "Meter photo check is already running." };
-  meterCheckRunning = true;
-  try {
-    const config = await readConfig();
-    const clock = getColomboClock();
-    if (!config.enabled && !force) return { ok: true, skipped: true, reason: "Meter monitoring is disabled." };
-    if (!config.groupJid) throw new Error("Select a Rider Meter WhatsApp group.");
-    if (!config.riders.length) throw new Error("Select at least one required rider.");
-    const availability = getMeterDayAvailability(config, clock.date);
-    if (availability.inactive) {
-      return { ok: true, skipped: true, reason: availability.reason };
-    }
-
-    const session = sessionKey ? getSession(config, sessionKey) : getSessionForTime(config, clock.time);
-    if (!session) {
-      return { ok: true, skipped: true, reason: "No IN or OUT meter photo window is currently active." };
-    }
-
-    const state = await readState();
-    const todayStatus = buildMeterTodayStatus(config, state, clock.date);
-    const status = todayStatus.sessions[session.key];
-    const sent = await sendMissingReminders(config, status, clock, session);
-    const day = state.days[clock.date] || { sessions: {} };
-    const sessionState = getSessionState(day, session.key);
-    sessionState.reminderHistory.push({
-      sentAt: clock.timestamp,
-      slot: force ? "manual" : clock.time,
-      missingCount: status.missingCount,
-    });
-    sessionState.missingAtLastReminder = status.missing.map((rider) => ({
-      name: rider.name,
-      jid: rider.jid,
-      phoneNumber: rider.phoneNumber,
-    }));
-    state.days[clock.date] = day;
-    await writeState(state);
-    return {
-      ok: true,
-      sessionKey: session.key,
-      sessionLabel: session.label,
-      ...status,
-      ...sent,
-      reminderSentAt: clock.timestamp,
-    };
-  } finally {
-    meterCheckRunning = false;
+  const config = await readConfig();
+  const clock = getColomboClock();
+  if (!config.enabled && !force) return { ok: true, skipped: true, reason: "Meter monitoring is disabled." };
+  if (!config.groupJid) throw new Error("Select a Rider Meter WhatsApp group.");
+  if (!config.riders.length) throw new Error("Select at least one required rider.");
+  const availability = getMeterDayAvailability(config, clock.date);
+  if (availability.inactive) {
+    return { ok: true, skipped: true, reason: availability.reason };
   }
+
+  const session = sessionKey ? getSession(config, sessionKey) : getSessionForTime(config, clock.time);
+  if (!session) {
+    return { ok: true, skipped: true, reason: "No IN or OUT meter photo window is currently active." };
+  }
+
+  const state = await readState();
+  const todayStatus = buildMeterTodayStatus(config, state, clock.date);
+  const status = todayStatus.sessions[session.key];
+  const sent = await sendMissingReminders(config, status, clock, session);
+  const day = state.days[clock.date] || { sessions: {} };
+  const sessionState = getSessionState(day, session.key);
+  sessionState.reminderHistory.push({
+    sentAt: clock.timestamp,
+    slot: force ? "manual" : clock.time,
+    missingCount: status.missingCount,
+  });
+  sessionState.missingAtLastReminder = status.missing.map((rider) => ({
+    name: rider.name,
+    jid: rider.jid,
+    phoneNumber: rider.phoneNumber,
+  }));
+  state.days[clock.date] = day;
+  await writeState(state);
+  return {
+    ok: true,
+    sessionKey: session.key,
+    sessionLabel: session.label,
+    ...status,
+    ...sent,
+    reminderSentAt: clock.timestamp,
+  };
 }
 
 export async function queueMeterPhotoCheck({ sessionKey = "" } = {}) {
@@ -602,43 +569,7 @@ export async function queueMeterPhotoCheck({ sessionKey = "" } = {}) {
     };
   }
 
-  const queueKey = `${clock.date}:${session.key}`;
-  if (queuedManualChecks.has(queueKey)) {
-    return {
-      ok: true,
-      queued: true,
-      duplicatePrevented: true,
-      sessionKey: session.key,
-      sessionLabel: session.label,
-      missingCount: status.missingCount,
-      messageDelaySeconds: config.messageDelaySeconds,
-    };
-  }
-
-  queuedManualChecks.add(queueKey);
-  meterManualQueue = meterManualQueue
-    .catch(() => undefined)
-    .then(() => runMeterPhotoCheck({ force: true, sessionKey: session.key }))
-    .catch((error) => {
-      console.error("[meter-monitor-manual-queue]", error.message || error);
-    })
-    .finally(() => {
-      queuedManualChecks.delete(queueKey);
-    });
-
-  const estimatedMessages =
-    (config.groupReminder ? 1 : 0)
-    + (config.privateReminder ? status.missing.length : 0);
-  return {
-    ok: true,
-    queued: true,
-    sessionKey: session.key,
-    sessionLabel: session.label,
-    missingCount: status.missingCount,
-    estimatedMessages,
-    estimatedMinimumSeconds: Math.max(0, estimatedMessages - 1) * config.messageDelaySeconds,
-    messageDelaySeconds: config.messageDelaySeconds,
-  };
+  return runMeterPhotoCheck({ force: true, sessionKey: session.key });
 }
 
 async function schedulerTick() {

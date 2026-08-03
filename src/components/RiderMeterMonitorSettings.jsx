@@ -33,7 +33,6 @@ const EMPTY_CONFIG = {
   outWindowStart: "15:00",
   outWindowEnd: "17:00",
   reminderIntervalMinutes: 60,
-  messageDelaySeconds: 15,
   specialHolidays: [],
   groupReminder: true,
   privateReminder: true,
@@ -233,14 +232,8 @@ export default function RiderMeterMonitorSettings() {
       () => runMeterMonitorCheck(sessionKey),
       (result) => {
         if (result.skipped) return result.reason || "Reminder check skipped.";
-        if (result.duplicatePrevented) {
-          return `${result.sessionLabel} reminder batch is already being sent. A duplicate batch was not added.`;
-        }
-        if (result.queued) {
-          return `${result.sessionLabel} reminder batch queued. ${result.missingCount} missing rider${result.missingCount === 1 ? "" : "s"} will receive messages one by one with at least ${result.messageDelaySeconds} seconds between messages.`;
-        }
         return result.missingCount
-          ? `${result.sessionLabel}: ${result.missingCount} rider${result.missingCount === 1 ? "" : "s"} had not sent a photo.`
+          ? `${result.sessionLabel}: reminders sent immediately for ${result.missingCount} missing rider${result.missingCount === 1 ? "" : "s"}.`
           : `All required riders have sent today's ${result.sessionLabel} photo.`;
       },
     );
@@ -433,25 +426,6 @@ export default function RiderMeterMonitorSettings() {
             <p className="rounded-2xl bg-cyan-50 p-3 text-sm font-bold text-cyan-900">
               Photos are monitored continuously and status is checked every 10 seconds. Automatic reminders run only at 08:00, 11:30, 15:00, and 17:00; riders who already submitted the correct photo are skipped.
             </p>
-
-            <label className="grid gap-2 text-sm font-black text-[#071537] sm:max-w-sm">
-              Delay between WhatsApp messages
-              <div className="flex items-center gap-3">
-                <input
-                  type="number"
-                  min="5"
-                  max="120"
-                  step="1"
-                  value={config.messageDelaySeconds}
-                  onChange={(event) => setConfig((current) => ({ ...current, messageDelaySeconds: Number(event.target.value) }))}
-                  className="whatsapp-control h-11 min-w-0 flex-1"
-                />
-                <span className="text-sm font-bold text-blue-950/60">seconds</span>
-              </div>
-              <span className="text-xs font-semibold text-blue-950/55">
-                Messages are sent one by one with this delay plus a random 0-5 second gap. Recommended: 15 seconds or more.
-              </span>
-            </label>
 
             <div className="grid gap-3 sm:grid-cols-3">
               <label className="flex cursor-pointer items-center gap-3 rounded-2xl bg-white/70 p-3 text-sm font-black text-[#071537]">
