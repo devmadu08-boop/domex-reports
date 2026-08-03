@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildMeterRiderMention,
+  formatGroupReminder,
   buildMeterTodayStatus,
   buildReminderSlots,
   getDueReminderSlot,
@@ -12,6 +13,21 @@ import {
   isTimeWithinWindow,
   normalizeMeterAccountMode,
 } from "../backend/whatsapp/meterMonitorService.js";
+
+test("group reminder templates include the missing rider list and summary placeholders", () => {
+  const text = formatGroupReminder(
+    "*{type}* {date} ({missingCount})\n{missingRiders}\n{group} {start}-{end}",
+    [{ text: "*Akila* - @94770000001" }, { text: "*Sudesh* - @94770000002" }],
+    { groupName: "Meter Group" },
+    { date: "2026-08-04" },
+    { label: "OUT Meter", start: "15:00", end: "17:00" },
+  );
+
+  assert.equal(
+    text,
+    "*OUT Meter* 2026-08-04 (2)\n• *Akila* - @94770000001\n• *Sudesh* - @94770000002\nMeter Group 15:00-17:00",
+  );
+});
 
 test("group reminders include the rider name and all usable WhatsApp mention identities", () => {
   assert.deepEqual(

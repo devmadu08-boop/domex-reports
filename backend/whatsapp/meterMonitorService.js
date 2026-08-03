@@ -36,6 +36,7 @@ const DEFAULT_CONFIG = {
   specialHolidays: [],
   groupReminder: true,
   privateReminder: true,
+  groupReminderTemplate: "📸 *{type} Photo Reminder*\n📅 {date}\n⏰ {start} - {end}\n\nPhoto not received from:\n{missingRiders}\n\nPlease send the {type} photo now.",
   reminderTemplate: "📸 *Daily Rider {type} Photo Reminder*\n\n{name}, please send today's {type} photo before {end}.",
   riders: [],
 };
@@ -148,6 +149,7 @@ function normalizeRiders(riders) {
 
 function normalizeConfig(config = {}) {
   const reminderTemplate = String(config.reminderTemplate || "");
+  const groupReminderTemplate = String(config.groupReminderTemplate || "").trim();
   return {
     accountMode: normalizeMeterAccountMode(config.accountMode),
     enabled: Boolean(config.enabled),
@@ -158,6 +160,7 @@ function normalizeConfig(config = {}) {
     specialHolidays: normalizeDateList(config.specialHolidays),
     groupReminder: config.groupReminder !== false,
     privateReminder: config.privateReminder !== false,
+    groupReminderTemplate: groupReminderTemplate || DEFAULT_CONFIG.groupReminderTemplate,
     reminderTemplate: !reminderTemplate || reminderTemplate === LEGACY_REMINDER_TEMPLATE
       ? DEFAULT_CONFIG.reminderTemplate
       : reminderTemplate,
@@ -428,6 +431,18 @@ function formatReminder(template, rider, config, clock, session) {
     .replaceAll("{end}", session.end);
 }
 
+export function formatGroupReminder(template, riderMentions, config, clock, session) {
+  const missingRiders = riderMentions.map((rider) => `• ${rider.text}`).join("\n");
+  return String(template || DEFAULT_CONFIG.groupReminderTemplate)
+    .replaceAll("{date}", clock.date)
+    .replaceAll("{group}", config.groupName || "Rider group")
+    .replaceAll("{type}", session.label)
+    .replaceAll("{start}", session.start)
+    .replaceAll("{end}", session.end)
+    .replaceAll("{missingCount}", String(riderMentions.length))
+    .replaceAll("{missingRiders}", missingRiders);
+}
+
 function getMeterRuntimeStatus(config) {
   if (config.accountMode === "primary") {
     return getPrimaryWhatsAppRuntimeStatus();
@@ -465,7 +480,7 @@ async function sendMissingReminders(config, status, clock, session) {
     const riderMentions = status.missing.map(buildMeterRiderMention);
     const mentions = [...new Set(riderMentions.flatMap((rider) => rider.jids))];
     await sendMeterMessage(config, config.groupJid, {
-      text: `📸 *${session.label} Photo Reminder*\n📅 ${clock.date}\n⏰ ${session.start} - ${session.end}\n\nPhoto not received from:\n${riderMentions.map((rider) => `• ${rider.text}`).join("\n")}\n\nPlease send the ${session.label} photo now.`,
+      text: formatGroupReminder(config.groupReminderTemplate, riderMentions, config, clock, session),
       mentions,
     });
     groupSent = true;

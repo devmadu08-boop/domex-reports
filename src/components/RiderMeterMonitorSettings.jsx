@@ -36,6 +36,7 @@ const EMPTY_CONFIG = {
   specialHolidays: [],
   groupReminder: true,
   privateReminder: true,
+  groupReminderTemplate: "📸 *{type} Photo Reminder*\n📅 {date}\n⏰ {start} - {end}\n\nPhoto not received from:\n{missingRiders}\n\nPlease send the {type} photo now.",
   reminderTemplate: "📸 *Daily Rider {type} Photo Reminder*\n\n{name}, please send today's {type} photo before {end}.",
   riders: [],
 };
@@ -150,6 +151,27 @@ export default function RiderMeterMonitorSettings() {
                 leaveDates: participant.leaveDates || [],
               },
             ],
+      };
+    });
+  }
+
+  function toggleAllRiders() {
+    if (!knownParticipants.length) return;
+    setConfig((current) => {
+      const selectedByKey = new Map(current.riders.map((rider) => [participantKey(rider), rider]));
+      const allSelected = knownParticipants.every((participant) => selectedByKey.has(participantKey(participant)));
+      if (allSelected) return { ...current, riders: [] };
+
+      return {
+        ...current,
+        riders: knownParticipants.map((participant) => {
+          const existing = selectedByKey.get(participantKey(participant));
+          return existing || {
+            ...participant,
+            name: participant.name || participant.phoneNumber || participant.jid,
+            leaveDates: participant.leaveDates || [],
+          };
+        }),
       };
     });
   }
@@ -443,6 +465,19 @@ export default function RiderMeterMonitorSettings() {
             </div>
 
             <label className="grid gap-2 text-sm font-black text-[#071537]">
+              Group reminder template
+              <textarea
+                rows="5"
+                value={config.groupReminderTemplate}
+                onChange={(event) => setConfig((current) => ({ ...current, groupReminderTemplate: event.target.value }))}
+                className="whatsapp-control min-h-32 resize-y px-4 py-3 text-sm"
+              />
+              <span className="text-xs font-semibold text-blue-950/55">
+                Available: {"{date}"}, {"{group}"}, {"{type}"}, {"{start}"}, {"{end}"}, {"{missingCount}"}, {"{missingRiders}"}
+              </span>
+            </label>
+
+            <label className="grid gap-2 text-sm font-black text-[#071537]">
               Private reminder template
               <textarea
                 rows="3"
@@ -501,9 +536,22 @@ export default function RiderMeterMonitorSettings() {
                   Select riders, then add a readable name and phone number for private reminders.
                 </p>
               </div>
-              <span className="rounded-xl bg-cyan-100 px-3 py-2 text-xs font-black text-cyan-800">
-                {config.riders.length} selected
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={toggleAllRiders}
+                  disabled={!knownParticipants.length}
+                  className="secondary-action h-10 px-4 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  {knownParticipants.length > 0 && knownParticipants.every((participant) => config.riders.some((rider) => participantKey(rider) === participantKey(participant)))
+                    ? "Clear All"
+                    : "Select All"}
+                </button>
+                <span className="rounded-xl bg-cyan-100 px-3 py-2 text-xs font-black text-cyan-800">
+                  {config.riders.length} selected
+                </span>
+              </div>
             </div>
 
             <div className="grid max-h-[420px] gap-2 overflow-y-auto">
