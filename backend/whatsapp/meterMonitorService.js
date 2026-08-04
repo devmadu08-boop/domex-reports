@@ -54,6 +54,17 @@ let meterConnectedNumber = "";
 let meterReconnecting = false;
 let meterSchedulerStarted = false;
 let stateWriteQueue = Promise.resolve();
+const meterMessageListeners = new Set();
+
+function publishMeterMessages(messages, type, sourceMode, metadata = {}) {
+  for (const listener of meterMessageListeners) {
+    try {
+      listener({ messages: messages || [], type, sourceMode, ...metadata });
+    } catch (error) {
+      console.error("[meter-monitor-message-listener]", error.message || error);
+    }
+  }
+}
 
 async function ensureDataDir() {
   await fs.mkdir(dataDir, { recursive: true });
@@ -363,7 +374,8 @@ async function recordPhotoSubmission(message, sourceMode) {
   await writeState(state);
 }
 
-subscribeToPrimaryWhatsAppMessages(({ messages, type }) => {
+subscribeToPrimaryWhatsAppMessages(({ messages, type, chats, contacts }) => {
+  publishMeterMessages(messages, type, "primary", { chats, contacts });
   if (type !== "notify") return;
   for (const message of messages) {
     recordPhotoSubmission(message, "primary").catch((error) => {
@@ -455,13 +467,17 @@ function getMeterRuntimeStatus(config) {
 }
 
 async function sendMeterMessage(config, recipientJid, content) {
+  let sentMessage;
   if (config.accountMode === "primary") {
-    return sendPrimaryWhatsAppMessage(recipientJid, content);
+    sentMessage = await sendPrimaryWhatsAppMessage(recipientJid, content);
+  } else {
+    if (!meterSocket || meterConnectionState !== "connected") {
+      throw new Error("Separate Meter Monitor WhatsApp is not connected.");
+    }
+    sentMessage = await meterSocket.sendMessage(recipientJid, content);
   }
-  if (!meterSocket || meterConnectionState !== "connected") {
-    throw new Error("Separate Meter Monitor WhatsApp is not connected.");
-  }
-  return meterSocket.sendMessage(recipientJid, content);
+  publishMeterMessages([sentMessage], "sent", config.accountMode);
+  return sentMessage;
 }
 
 async function sendMissingReminders(config, status, clock, session) {
@@ -643,17 +659,28 @@ export async function startMeterMonitorClient(force = false) {
       printQRInTerminal: false,
       logger: Pino({ level: "silent" }),
       browser: ["Rider Meter Monitor", "Chrome", "1.0.0"],
+      syncFullHistory: true,
     });
     meterSocket = nextSocket;
 
     nextSocket.ev.on("creds.update", saveCreds);
     nextSocket.ev.on("messages.upsert", ({ messages, type }) => {
+      publishMeterMessages(messages, type, "separate");
       if (type !== "notify") return;
       for (const message of messages || []) {
         recordPhotoSubmission(message, "separate").catch((error) => {
           console.error("[meter-monitor-photo]", error.message || error);
         });
       }
+    });
+    nextSocket.ev.on("messaging-history.set", ({ messages, chats, contacts }) => {
+      publishMeterMessages(messages, "history", "separate", { chats, contacts });
+    });
+    nextSocket.ev.on("chats.upsert", (chats) => {
+      publishMeterMessages([], "chats", "separate", { chats });
+    });
+    nextSocket.ev.on("contacts.upsert", (contacts) => {
+      publishMeterMessages([], "contacts", "separate", { contacts });
     });
     nextSocket.ev.on("connection.update", async ({ connection, lastDisconnect, qr }) => {
       if (qr) {
@@ -698,6 +725,28 @@ export async function getMeterMonitorStatus() {
     config,
     today: buildMeterTodayStatus(config, state),
   };
+}
+
+export async function getMeterMonitorAccountMode() {
+  return (await readConfig()).accountMode;
+}
+
+export function subscribeToMeterMonitorMessages(listener) {
+  if (typeof listener !== "function") return () => undefined;
+  meterMessageListeners.add(listener);
+  return () => meterMessageListeners.delete(listener);
+}
+
+export async function sendMeterChatText(recipientJid, text) {
+  const config = await readConfig();
+  const jid = String(recipientJid || "").trim();
+  const message = String(text || "").trim();
+  if (!jid || !/@(g\.us|s\.whatsapp\.net|lid)$/.test(jid)) {
+    throw new Error("Select a valid WhatsApp chat.");
+  }
+  if (!message) throw new Error("Message cannot be empty.");
+  if (message.length > 4000) throw new Error("Message is too long. Use 4000 characters or fewer.");
+  return sendMeterMessage(config, jid, { text: message });
 }
 
 export async function getMeterMonitorQr() {

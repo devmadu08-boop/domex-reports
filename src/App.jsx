@@ -16,6 +16,7 @@ import {
   KeyRound,
   ListChecks,
   LogOut,
+  MessagesSquare,
   Package,
   PackageCheck,
   RotateCcw,
@@ -41,6 +42,7 @@ import OperationReportForm, { emptyOperationForm } from "./components/OperationR
 import { CourierPerformanceReport, OperationReport } from "./components/ReportTable.jsx";
 import SendToWhatsAppButton from "./components/SendToWhatsAppButton.jsx";
 import SettingsPage from "./components/SettingsPage.jsx";
+import MeterChatsDashboard from "./components/MeterChatsDashboard.jsx";
 import DailyWorkflowWizard from "./components/DailyWorkflowWizard.jsx";
 import SystemHealthPanel from "./components/SystemHealthPanel.jsx";
 import SystemRecoveryPanel from "./components/SystemRecoveryPanel.jsx";
@@ -110,6 +112,7 @@ const tabs = [
   { id: "allReports", label: "All Reports", mobileLabel: "All", icon: FileSpreadsheet },
   { id: "deliveredConverter", label: "Delivered Report", mobileLabel: "Delivered", icon: FileText },
   { id: "reschedule", label: "Reschedule Report", mobileLabel: "Reschedule", icon: CalendarClock },
+  { id: "meterChats", label: "Meter Chats", mobileLabel: "Chats", icon: MessagesSquare, adminOnly: true },
   { id: "settings", label: "Settings", mobileLabel: "Settings", icon: Settings },
   { id: "users", label: "User Management", mobileLabel: "Users", icon: ShieldCheck, adminOnly: true },
 ];
@@ -1146,7 +1149,7 @@ export default function App() {
           <p className="text-xs font-semibold text-[#6f6597]">Mobile app mode</p>
         </div>
 
-        {activeTab !== "deliveredConverter" && activeTab !== "settings" && activeTab !== "dashboard" && (
+        {!["deliveredConverter", "settings", "dashboard", "meterChats"].includes(activeTab) && (
           <DateSelector
             selectedDate={selectedDate}
             onDateChange={setSelectedDate}
@@ -1291,6 +1294,8 @@ export default function App() {
         {activeTab === "reschedule" && (
           <RescheduleReport selectedDate={selectedDate} branchName={settings.branchName || "Middeniya"} />
         )}
+
+        {activeTab === "meterChats" && session.role === "admin" && <MeterChatsDashboard />}
 
         {activeTab === "settings" && (
           <>

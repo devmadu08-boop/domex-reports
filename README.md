@@ -65,6 +65,12 @@ IN and OUT photos are recorded separately. Incoming selected-group photos are de
 
 Every Sunday is automatically treated as a branch holiday. Settings can also store branch-wide special holidays and rider-specific leave dates; those days/riders are excluded from photo checks and reminders. The monitor session is stored separately in `backend/data/whatsapp-meter-auth/`; the existing report account remains in its original auth directory.
 
+### Meter Chats Dashboard
+
+Admins can open `Meter Chats` to view the Meter Monitor account's private chats and groups, read synchronized messages, and send text replies. The dashboard follows the active Meter Monitor mode, so it works with either the primary report account or the separate meter account.
+
+Chat history is stored only on the backend in `backend/data/meter-chat-store.json`. The store is capped per account and does not contain WhatsApp authentication files or downloaded media. Access is protected by a separate key stored in `backend/data/meter-chat-access-key`, or supplied with the `METER_CHAT_ACCESS_KEY` environment variable. Enter this key when the dashboard asks for it; the browser keeps it only for the current tab session.
+
 ## DOMEX Delivered Report Automation
 
 The Delivered Report page reconciles an Out for Delivery PDF, a rider Delivered CSV, and the branch Reschedule CSV before creating the existing collection-value report.

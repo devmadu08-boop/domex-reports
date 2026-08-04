@@ -9,12 +9,27 @@ import {
   reconnectMeterMonitor,
   saveMeterMonitorConfig,
 } from "./meterMonitorService.js";
+import {
+  getMeterChatMessages,
+  isMeterChatAccessAllowed,
+  listMeterChats,
+  markMeterChatRead,
+  sendMeterChatReply,
+} from "./meterChatService.js";
 
 const router = express.Router();
 
 function sendError(response, error) {
   console.error("[meter-monitor-api]", error);
   response.status(500).json({ error: error.message || "Rider Meter Monitor API error." });
+}
+
+async function requireMeterChatAccess(request, response, next) {
+  if (await isMeterChatAccessAllowed(request.get("x-meter-chat-key"))) {
+    next();
+    return;
+  }
+  response.status(401).json({ error: "Enter the Meter Chats access key." });
 }
 
 router.get("/status", async (_request, response) => {
@@ -78,6 +93,38 @@ router.post("/run-check", async (request, response) => {
     response.json(await queueMeterPhotoCheck({
       sessionKey: String(request.body?.sessionKey || ""),
     }));
+  } catch (error) {
+    sendError(response, error);
+  }
+});
+
+router.get("/chats", requireMeterChatAccess, async (_request, response) => {
+  try {
+    response.json(await listMeterChats());
+  } catch (error) {
+    sendError(response, error);
+  }
+});
+
+router.get("/chats/messages", requireMeterChatAccess, async (request, response) => {
+  try {
+    response.json(await getMeterChatMessages(request.query.jid, request.query.limit));
+  } catch (error) {
+    sendError(response, error);
+  }
+});
+
+router.post("/chats/read", requireMeterChatAccess, async (request, response) => {
+  try {
+    response.json(await markMeterChatRead(request.body?.jid));
+  } catch (error) {
+    sendError(response, error);
+  }
+});
+
+router.post("/chats/send", requireMeterChatAccess, async (request, response) => {
+  try {
+    response.json(await sendMeterChatReply(request.body?.jid, request.body?.text));
   } catch (error) {
     sendError(response, error);
   }

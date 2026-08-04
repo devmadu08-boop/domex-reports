@@ -162,6 +162,7 @@ export async function startWhatsAppClient(force = false) {
     printQRInTerminal: false,
     logger: Pino({ level: "silent" }),
     browser: ["Daily Report System", "Chrome", "1.0.0"],
+    syncFullHistory: true,
   });
 
   socket.ev.on("creds.update", saveCreds);
@@ -171,6 +172,33 @@ export async function startWhatsAppClient(force = false) {
         listener({ messages: messages || [], type });
       } catch (error) {
         console.error("[whatsapp-message-listener]", error.message || error);
+      }
+    }
+  });
+  socket.ev.on("messaging-history.set", ({ messages, chats, contacts }) => {
+    for (const listener of primaryMessageListeners) {
+      try {
+        listener({ messages: messages || [], chats, contacts, type: "history" });
+      } catch (error) {
+        console.error("[whatsapp-history-listener]", error.message || error);
+      }
+    }
+  });
+  socket.ev.on("chats.upsert", (chats) => {
+    for (const listener of primaryMessageListeners) {
+      try {
+        listener({ messages: [], chats, type: "chats" });
+      } catch (error) {
+        console.error("[whatsapp-chat-listener]", error.message || error);
+      }
+    }
+  });
+  socket.ev.on("contacts.upsert", (contacts) => {
+    for (const listener of primaryMessageListeners) {
+      try {
+        listener({ messages: [], contacts, type: "contacts" });
+      } catch (error) {
+        console.error("[whatsapp-contact-listener]", error.message || error);
       }
     }
   });
