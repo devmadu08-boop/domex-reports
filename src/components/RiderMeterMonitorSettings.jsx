@@ -320,6 +320,16 @@ export default function RiderMeterMonitorSettings() {
         </button>
       </div>
 
+      {!connected && accountMode === "separate" && status?.connectionError ? (
+        <div className={`mb-4 rounded-2xl border p-4 text-sm font-bold ${
+          status.needsRelink
+            ? "border-amber-300 bg-amber-50 text-amber-950"
+            : "border-cyan-200 bg-cyan-50 text-cyan-950"
+        }`}>
+          {status.connectionError}
+        </div>
+      ) : null}
+
       <div className="grid min-w-0 gap-4 xl:grid-cols-[290px_minmax(0,1fr)]">
         <div className="whatsapp-settings-card text-center">
           {connected ? (
@@ -344,7 +354,9 @@ export default function RiderMeterMonitorSettings() {
             </>
           ) : (
             <div className="grid min-h-[260px] place-items-center text-sm font-bold text-blue-950/65">
-              Click Connect Monitor Account to generate its own QR.
+              {status?.needsRelink
+                ? "Remove the expired monitor session, then connect again to generate a new QR."
+                : "Click Connect Monitor Account to generate its own QR."}
             </div>
           )}
         </div>

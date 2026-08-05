@@ -46,6 +46,8 @@ let meterQr = "";
 let meterQrDataUrl = "";
 let meterConnectionState = "disconnected";
 let meterConnectedNumber = "";
+let meterConnectionError = "";
+let meterNeedsRelink = false;
 let meterReconnecting = false;
 let meterSchedulerStarted = false;
 let meterSchedulerTickRunning = false;
@@ -755,6 +757,10 @@ export async function startMeterMonitorClient(force = false) {
   await ensureDataDir();
   try {
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
+    meterNeedsRelink = state.creds.registered === false && Boolean(state.creds.me?.id);
+    if (meterNeedsRelink) {
+      meterConnectionError = "The separate Meter WhatsApp session is no longer registered. Remove the old session and scan a new QR code.";
+    }
     const { version } = await fetchLatestBaileysVersion();
     const nextSocket = makeWASocket({
       auth: state,
@@ -797,12 +803,16 @@ export async function startMeterMonitorClient(force = false) {
         meterQr = qr;
         meterQrDataUrl = await QRCode.toDataURL(qr, { margin: 1, width: 280 });
         meterConnectionState = "qr";
+        meterConnectionError = "";
+        meterNeedsRelink = false;
       }
       if (connection === "open") {
         meterQr = "";
         meterQrDataUrl = "";
         meterConnectionState = "connected";
         meterConnectedNumber = jidDigits(nextSocket.user?.id);
+        meterConnectionError = "";
+        meterNeedsRelink = false;
       }
       if (connection === "close") {
         if (meterSocket !== nextSocket) return;
@@ -810,7 +820,12 @@ export async function startMeterMonitorClient(force = false) {
         const loggedOut = statusCode === DisconnectReason.loggedOut;
         meterConnectionState = "disconnected";
         meterConnectedNumber = "";
+        meterNeedsRelink = loggedOut || meterNeedsRelink;
+        meterConnectionError = loggedOut
+          ? "The separate Meter WhatsApp session was logged out. Remove the old session and scan a new QR code."
+          : `The separate Meter WhatsApp connection closed${statusCode ? ` (code ${statusCode})` : ""}. Reconnecting automatically.`;
         meterSocket = null;
+        console.warn("[meter-monitor-connection]", meterConnectionError);
         if (!loggedOut) {
           setTimeout(() => startMeterMonitorClient(true).catch(console.error), 2500);
         }
@@ -832,6 +847,8 @@ export async function getMeterMonitorStatus() {
     accountMode: config.accountMode,
     connectionSource: config.accountMode === "primary" ? "Primary Report WhatsApp" : "Separate Monitor WhatsApp",
     hasQr: config.accountMode === "separate" && Boolean(meterQrDataUrl),
+    needsRelink: config.accountMode === "separate" && meterNeedsRelink,
+    connectionError: config.accountMode === "separate" ? meterConnectionError : "",
     config,
     today: buildMeterTodayStatus(config, state),
   };
@@ -882,6 +899,7 @@ export async function reconnectMeterMonitor() {
     }
   }
   meterConnectionState = "disconnected";
+  meterConnectionError = "";
   await startMeterMonitorClient(true);
   return getMeterMonitorStatus();
 }
@@ -904,6 +922,8 @@ export async function logoutMeterMonitor() {
   meterQrDataUrl = "";
   meterConnectionState = "disconnected";
   meterConnectedNumber = "";
+  meterConnectionError = "";
+  meterNeedsRelink = false;
   await fs.rm(authDir, { recursive: true, force: true });
   return getMeterMonitorStatus();
 }
