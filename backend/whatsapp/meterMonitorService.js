@@ -21,10 +21,11 @@ const configPath = path.join(dataDir, "whatsapp-meter-config.json");
 const statePath = path.join(dataDir, "whatsapp-meter-state.json");
 const FIXED_METER_SCHEDULE = {
   inWindowStart: "08:00",
-  inWindowEnd: "11:30",
-  outWindowStart: "15:00",
-  outWindowEnd: "17:00",
+  inWindowEnd: "11:00",
+  outWindowStart: "17:00",
+  outWindowEnd: "20:00",
 };
+const METER_APPROVAL_REACTION = "👍";
 export const METER_SCAN_INTERVAL_MS = 10_000;
 const DEFAULT_CONFIG = {
   accountMode: "separate",
@@ -32,20 +33,14 @@ const DEFAULT_CONFIG = {
   groupJid: "",
   groupName: "",
   ...FIXED_METER_SCHEDULE,
-  reminderIntervalMinutes: 60,
   specialHolidays: [],
-  groupReminder: true,
-  privateReminder: true,
   groupReminderTemplate: "📸 *{type} Photo Reminder*\n📅 {date}\n⏰ {start} - {end}\n\nPhoto not received from:\n{missingRiders}\n\nPlease send the {type} photo now.",
-  reminderTemplate: "📸 *Daily Rider {type} Photo Reminder*\n\n{name}, please send today's {type} photo before {end}.",
   riders: [],
 };
 const METER_SESSIONS = [
   { key: "in", label: "IN Meter", startField: "inWindowStart", endField: "inWindowEnd" },
   { key: "out", label: "OUT Meter", startField: "outWindowStart", endField: "outWindowEnd" },
 ];
-const LEGACY_REMINDER_TEMPLATE = "📸 *Daily Rider Meter Photo Reminder*\n\n{name}, please send today's rider meter photo before the daily check closes.";
-
 let meterSocket = null;
 let meterQr = "";
 let meterQrDataUrl = "";
@@ -53,6 +48,7 @@ let meterConnectionState = "disconnected";
 let meterConnectedNumber = "";
 let meterReconnecting = false;
 let meterSchedulerStarted = false;
+let meterSchedulerTickRunning = false;
 let stateWriteQueue = Promise.resolve();
 const meterMessageListeners = new Set();
 
@@ -109,11 +105,6 @@ function validTime(value, fallback) {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value || "")) ? String(value) : fallback;
 }
 
-function validReminderInterval(value) {
-  const minutes = Number(value);
-  return Number.isInteger(minutes) && minutes >= 15 && minutes <= 240 ? minutes : 60;
-}
-
 function normalizeDateList(values) {
   return [...new Set(
     (Array.isArray(values) ? values : [])
@@ -159,7 +150,6 @@ function normalizeRiders(riders) {
 }
 
 function normalizeConfig(config = {}) {
-  const reminderTemplate = String(config.reminderTemplate || "");
   const groupReminderTemplate = String(config.groupReminderTemplate || "").trim();
   return {
     accountMode: normalizeMeterAccountMode(config.accountMode),
@@ -167,14 +157,8 @@ function normalizeConfig(config = {}) {
     groupJid: String(config.groupJid || "").trim(),
     groupName: String(config.groupName || "").trim(),
     ...FIXED_METER_SCHEDULE,
-    reminderIntervalMinutes: validReminderInterval(config.reminderIntervalMinutes),
     specialHolidays: normalizeDateList(config.specialHolidays),
-    groupReminder: config.groupReminder !== false,
-    privateReminder: config.privateReminder !== false,
     groupReminderTemplate: groupReminderTemplate || DEFAULT_CONFIG.groupReminderTemplate,
-    reminderTemplate: !reminderTemplate || reminderTemplate === LEGACY_REMINDER_TEMPLATE
-      ? DEFAULT_CONFIG.reminderTemplate
-      : reminderTemplate,
     riders: normalizeRiders(config.riders),
   };
 }
@@ -295,6 +279,7 @@ function getSessionState(day, sessionKey) {
   }
   day.sessions[sessionKey].submissions ||= {};
   day.sessions[sessionKey].reminderHistory ||= [];
+  day.sessions[sessionKey].pendingApprovals ||= [];
   return day.sessions[sessionKey];
 }
 
@@ -374,8 +359,16 @@ async function recordPhotoSubmission(message, sourceMode) {
   await writeState(state);
 }
 
-subscribeToPrimaryWhatsAppMessages(({ messages, type, chats, contacts }) => {
+subscribeToPrimaryWhatsAppMessages(({ messages, type, chats, contacts, reactions }) => {
   publishMeterMessages(messages, type, "primary", { chats, contacts });
+  if (type === "reaction") {
+    for (const reactionUpdate of reactions || []) {
+      handleMeterApprovalReaction(reactionUpdate, "primary").catch((error) => {
+        console.error("[meter-monitor-primary-approval]", error.message || error);
+      });
+    }
+    return;
+  }
   if (type !== "notify") return;
   for (const message of messages) {
     recordPhotoSubmission(message, "primary").catch((error) => {
@@ -415,6 +408,8 @@ export function buildMeterTodayStatus(config, state, date = getColomboClock().da
       riderCount: requiredRiders.length,
       lastReminderSlot: sessionState.lastReminderSlot || "",
       reminderHistory: sessionState.reminderHistory || [],
+      pendingApprovals: sessionState.pendingApprovals || [],
+      latestApproval: sessionState.pendingApprovals?.at(-1) || null,
       submissions: sessionState.submissions || {},
     }];
   }));
@@ -431,16 +426,6 @@ export function buildMeterTodayStatus(config, state, date = getColomboClock().da
     missingCount: sessions.in.missingCount + sessions.out.missingCount,
     riderCount: requiredRiders.length,
   };
-}
-
-function formatReminder(template, rider, config, clock, session) {
-  return String(template || DEFAULT_CONFIG.reminderTemplate)
-    .replaceAll("{name}", rider.name || "Rider")
-    .replaceAll("{date}", clock.date)
-    .replaceAll("{group}", config.groupName || "Rider group")
-    .replaceAll("{type}", session.label)
-    .replaceAll("{start}", session.start)
-    .replaceAll("{end}", session.end);
 }
 
 export function formatGroupReminder(template, riderMentions, config, clock, session) {
@@ -480,7 +465,33 @@ async function sendMeterMessage(config, recipientJid, content) {
   return sentMessage;
 }
 
-async function sendMissingReminders(config, status, clock, session) {
+function getReportWhatsAppRecipient() {
+  const reportRuntime = getPrimaryWhatsAppRuntimeStatus();
+  if (!reportRuntime.connected) {
+    throw new Error("Primary Report WhatsApp is not connected. Connect it before using Meter approvals.");
+  }
+  const number = String(reportRuntime.connectedNumber || "").split(":")[0];
+  const recipientJid = normalizeRecipientJid(number);
+  if (!recipientJid) throw new Error("Primary Report WhatsApp number is unavailable.");
+  return { ...reportRuntime, recipientJid };
+}
+
+export function buildMeterApprovalMessage({ config, status, clock, session, reminderText }) {
+  return [
+    "🔐 *Meter Reminder Approval*",
+    `📅 Date: ${clock.date}`,
+    `📸 Check: ${session.label} (${session.start} - ${session.end})`,
+    `🏢 Group: ${config.groupName || "Meter photo group"}`,
+    `⚠️ Missing riders: ${status.missingCount}`,
+    "",
+    reminderText,
+    "",
+    `React with ${METER_APPROVAL_REACTION} to send this reminder to the selected group.`,
+    "No private rider messages will be sent.",
+  ].join("\n");
+}
+
+async function requestMeterReminderApproval(config, status, clock, session, slot) {
   if (!getMeterRuntimeStatus(config).connected) {
     throw new Error(
       config.accountMode === "primary"
@@ -488,38 +499,47 @@ async function sendMissingReminders(config, status, clock, session) {
         : "Separate Meter Monitor WhatsApp is not connected.",
     );
   }
-  if (!status.missing.length) return { groupSent: false, privateSent: 0 };
-
-  let groupSent = false;
-  let messagesSent = 0;
-  if (config.groupReminder && config.groupJid) {
-    const riderMentions = status.missing.map(buildMeterRiderMention);
-    const mentions = [...new Set(riderMentions.flatMap((rider) => rider.jids))];
-    await sendMeterMessage(config, config.groupJid, {
-      text: formatGroupReminder(config.groupReminderTemplate, riderMentions, config, clock, session),
-      mentions,
+  const { recipientJid } = getReportWhatsAppRecipient();
+  if (!status.missing.length) {
+    await sendMeterMessage(config, recipientJid, {
+      text: [
+        "✅ *Meter Check Complete*",
+        `📅 Date: ${clock.date}`,
+        `📸 Check: ${session.label} (${session.start} - ${session.end})`,
+        "All required riders have submitted their photos. No group reminder is required.",
+      ].join("\n"),
     });
-    groupSent = true;
-    messagesSent += 1;
+    return { approvalRequested: false, approvalRecipientJid: recipientJid, requestMessage: null };
   }
 
-  let privateSent = 0;
-  if (config.privateReminder) {
-    for (const rider of status.missing) {
-      const recipientJid = normalizeRecipientJid(rider.phoneJid || rider.phoneNumber || rider.jid);
-      if (!recipientJid) continue;
-      await sendMeterMessage(config, recipientJid, {
-        text: formatReminder(config.reminderTemplate, rider, config, clock, session),
-      });
-      privateSent += 1;
-      messagesSent += 1;
-    }
-  }
-
+  const riderMentions = status.missing.map(buildMeterRiderMention);
+  const mentions = [...new Set(riderMentions.flatMap((rider) => rider.jids))];
+  const reminderText = formatGroupReminder(config.groupReminderTemplate, riderMentions, config, clock, session);
+  const requestMessage = await sendMeterMessage(config, recipientJid, {
+    text: buildMeterApprovalMessage({ config, status, clock, session, reminderText }),
+  });
+  if (!requestMessage.key?.id) throw new Error("Meter approval message ID was not returned by WhatsApp.");
   return {
-    groupSent,
-    privateSent,
-    messagesSent,
+    approvalRequested: true,
+    approvalRecipientJid: recipientJid,
+    requestMessage,
+    pendingApproval: {
+      id: `${clock.date}-${session.key}-${slot}-${requestMessage.key.id}`,
+      status: "pending",
+      date: clock.date,
+      sessionKey: session.key,
+      sessionLabel: session.label,
+      slot,
+      requestedAt: clock.timestamp,
+      requestMessageId: requestMessage.key.id,
+      recipientJid,
+      groupJid: config.groupJid,
+      groupName: config.groupName,
+      reminderText,
+      mentions,
+      missingCount: status.missingCount,
+      reaction: METER_APPROVAL_REACTION,
+    },
   };
 }
 
@@ -542,14 +562,21 @@ export async function runMeterPhotoCheck({ force = false, sessionKey = "" } = {}
   const state = await readState();
   const todayStatus = buildMeterTodayStatus(config, state, clock.date);
   const status = todayStatus.sessions[session.key];
-  const sent = await sendMissingReminders(config, status, clock, session);
+  const slot = force ? "manual" : clock.time;
+  const approval = await requestMeterReminderApproval(config, status, clock, session, slot);
   const day = state.days[clock.date] || { sessions: {} };
   const sessionState = getSessionState(day, session.key);
   sessionState.reminderHistory.push({
     sentAt: clock.timestamp,
-    slot: force ? "manual" : clock.time,
+    slot,
     missingCount: status.missingCount,
+    status: approval.approvalRequested ? "awaiting-approval" : "not-required",
   });
+  sessionState.pendingApprovals ||= [];
+  if (approval.pendingApproval) {
+    sessionState.pendingApprovals.push(approval.pendingApproval);
+    sessionState.pendingApprovals = sessionState.pendingApprovals.slice(-8);
+  }
   sessionState.missingAtLastReminder = status.missing.map((rider) => ({
     name: rider.name,
     jid: rider.jid,
@@ -562,7 +589,8 @@ export async function runMeterPhotoCheck({ force = false, sessionKey = "" } = {}
     sessionKey: session.key,
     sessionLabel: session.label,
     ...status,
-    ...sent,
+    approvalRequested: approval.approvalRequested,
+    approvalRecipientJid: approval.approvalRecipientJid,
     reminderSentAt: clock.timestamp,
   };
 }
@@ -603,6 +631,73 @@ export async function queueMeterPhotoCheck({ sessionKey = "" } = {}) {
   return runMeterPhotoCheck({ force: true, sessionKey: session.key });
 }
 
+function comparableMeterReaction(value) {
+  return String(value || "").trim().replaceAll("\uFE0F", "");
+}
+
+function findPendingApproval(state, requestMessageId) {
+  for (const [date, day] of Object.entries(state.days || {})) {
+    for (const [sessionKey, sessionState] of Object.entries(day.sessions || {})) {
+      const pendingApproval = (sessionState.pendingApprovals || []).find(
+        (approval) => approval.requestMessageId === requestMessageId,
+      );
+      if (pendingApproval) return { date, sessionKey, sessionState, pendingApproval };
+    }
+  }
+  return null;
+}
+
+async function updatePendingApproval(requestMessageId, changes) {
+  const state = await readState();
+  const found = findPendingApproval(state, requestMessageId);
+  if (!found) return null;
+  Object.assign(found.pendingApproval, changes);
+  await writeState(state);
+  return found.pendingApproval;
+}
+
+async function handleMeterApprovalReaction({ key, reaction }, sourceMode) {
+  if (!key?.id) return;
+  if (comparableMeterReaction(reaction?.text) !== comparableMeterReaction(METER_APPROVAL_REACTION)) return;
+
+  const config = await readConfig();
+  if (config.accountMode !== sourceMode) return;
+  const state = await readState();
+  const found = findPendingApproval(state, key.id);
+  if (!found || found.pendingApproval.status !== "pending") return;
+
+  const pending = found.pendingApproval;
+  const jidCandidates = [
+    key.remoteJid,
+    key.remoteJidAlt,
+    reaction?.key?.remoteJid,
+    reaction?.key?.remoteJidAlt,
+  ].filter(Boolean);
+  const recipientDigits = jidDigits(pending.recipientJid);
+  if (!jidCandidates.some((jid) => jid === pending.recipientJid || jidDigits(jid) === recipientDigits)) return;
+
+  pending.status = "sending";
+  pending.approvedAt = new Date().toISOString();
+  await writeState(state);
+  try {
+    await sendMeterMessage(config, pending.groupJid, {
+      text: pending.reminderText,
+      mentions: pending.mentions || [],
+    });
+    await updatePendingApproval(key.id, {
+      status: "sent",
+      sentAt: new Date().toISOString(),
+      lastError: "",
+    });
+  } catch (error) {
+    await updatePendingApproval(key.id, {
+      status: "pending",
+      lastError: error.message || "Group reminder send failed.",
+    });
+    throw error;
+  }
+}
+
 async function schedulerTick() {
   const config = await readConfig();
   const clock = getColomboClock();
@@ -622,19 +717,27 @@ async function schedulerTick() {
   );
   if (!dueSlot) return;
 
-  // Claim the slot before sending so a partial failure cannot trigger repeated batches.
-  sessionState.lastReminderSlot = dueSlot;
-  day.sessions[session.key] = sessionState;
-  state.days[clock.date] = day;
-  await writeState(state);
   await runMeterPhotoCheck({ sessionKey: session.key });
+  const latestState = await readState();
+  const latestDay = latestState.days[clock.date] || { sessions: {} };
+  const latestSessionState = getSessionState(latestDay, session.key);
+  latestSessionState.lastReminderSlot = dueSlot;
+  latestDay.sessions[session.key] = latestSessionState;
+  latestState.days[clock.date] = latestDay;
+  await writeState(latestState);
 }
 
 export function startMeterMonitorScheduler() {
   if (meterSchedulerStarted) return;
   meterSchedulerStarted = true;
   setInterval(() => {
-    schedulerTick().catch((error) => console.error("[meter-monitor-scheduler]", error.message || error));
+    if (meterSchedulerTickRunning) return;
+    meterSchedulerTickRunning = true;
+    schedulerTick()
+      .catch((error) => console.error("[meter-monitor-scheduler]", error.message || error))
+      .finally(() => {
+        meterSchedulerTickRunning = false;
+      });
   }, METER_SCAN_INTERVAL_MS);
 }
 
@@ -681,6 +784,13 @@ export async function startMeterMonitorClient(force = false) {
     });
     nextSocket.ev.on("contacts.upsert", (contacts) => {
       publishMeterMessages([], "contacts", "separate", { contacts });
+    });
+    nextSocket.ev.on("messages.reaction", (reactions) => {
+      for (const reactionUpdate of reactions || []) {
+        handleMeterApprovalReaction(reactionUpdate, "separate").catch((error) => {
+          console.error("[meter-monitor-approval]", error.message || error);
+        });
+      }
     });
     nextSocket.ev.on("connection.update", async ({ connection, lastDisconnect, qr }) => {
       if (qr) {

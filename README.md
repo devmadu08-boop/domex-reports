@@ -59,9 +59,9 @@ Settings includes a selectable WhatsApp connection for daily rider meter-photo c
 2. Choose `Use Primary Report WhatsApp`, or choose `Use Separate Monitor Account` and scan its independent QR code.
 3. Fetch groups and select the group where riders post meter photos.
 4. Load group members, select the required riders, and add readable names and WhatsApp phone numbers.
-5. Confirm the fixed reminder checkpoints (`08:00`, `11:30`, `15:00`, and `17:00`), enable the required reminder options, and save.
+5. Confirm the fixed approval checkpoints (`08:00`, `11:00`, `17:00`, and `20:00`), enable the monitor, and save.
 
-IN and OUT photos are recorded separately. Incoming selected-group photos are detected immediately and the monitor status is evaluated every 10 seconds. Automatic reminder messages still run only at the four fixed checkpoint times. Only riders who are still missing that session's photo are listed by readable rider name and mentioned directly in the selected group; they can also receive a private reminder. Manual checks send immediately on every request without duplicate-batch blocking or an inter-message delay.
+IN and OUT photos are recorded separately. Incoming selected-group photos are detected immediately and the monitor status is evaluated every 10 seconds. At each fixed checkpoint, the Meter WhatsApp sends an approval request to the connected Primary Report WhatsApp number. The selected group receives one reminder only after that request is reacted to with `👍`. Riders are mentioned in the group message, but private rider reminders are never sent.
 
 Every Sunday is automatically treated as a branch holiday. Settings can also store branch-wide special holidays and rider-specific leave dates; those days/riders are excluded from photo checks and reminders. The monitor session is stored separately in `backend/data/whatsapp-meter-auth/`; the existing report account remains in its original auth directory.
 

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildMeterRiderMention,
+  buildMeterApprovalMessage,
   formatGroupReminder,
   buildMeterTodayStatus,
   buildReminderSlots,
@@ -20,12 +21,12 @@ test("group reminder templates include the missing rider list and summary placeh
     [{ text: "*Akila* - @94770000001" }, { text: "*Sudesh* - @94770000002" }],
     { groupName: "Meter Group" },
     { date: "2026-08-04" },
-    { label: "OUT Meter", start: "15:00", end: "17:00" },
+    { label: "OUT Meter", start: "17:00", end: "20:00" },
   );
 
   assert.equal(
     text,
-    "*OUT Meter* 2026-08-04 (2)\n• *Akila* - @94770000001\n• *Sudesh* - @94770000002\nMeter Group 15:00-17:00",
+    "*OUT Meter* 2026-08-04 (2)\n• *Akila* - @94770000001\n• *Sudesh* - @94770000002\nMeter Group 17:00-20:00",
   );
 });
 
@@ -53,6 +54,20 @@ test("group reminders include the rider name and all usable WhatsApp mention ide
   );
 });
 
+test("meter approval request requires a thumbs-up and promises group-only delivery", () => {
+  const text = buildMeterApprovalMessage({
+    config: { groupName: "Middeniya Meter Photo" },
+    status: { missingCount: 2 },
+    clock: { date: "2026-08-05" },
+    session: { label: "IN Meter", start: "08:00", end: "11:00" },
+    reminderText: "Akila and Sudesh are missing.",
+  });
+
+  assert.match(text, /React with 👍/);
+  assert.match(text, /Missing riders: 2/);
+  assert.match(text, /No private rider messages will be sent/);
+});
+
 test("meter photo window supports normal and overnight ranges", () => {
   assert.equal(isTimeWithinWindow("18:15", "17:00", "19:00"), true);
   assert.equal(isTimeWithinWindow("19:01", "17:00", "19:00"), false);
@@ -71,15 +86,15 @@ test("meter monitor detects regular, view-once, and image document messages", ()
 
 test("meter reminders run only at each window start and end", () => {
   assert.deepEqual(
-    buildReminderSlots("08:00", "11:30"),
-    ["08:00", "11:30"],
+    buildReminderSlots("08:00", "11:00"),
+    ["08:00", "11:00"],
   );
   assert.deepEqual(
-    buildReminderSlots("15:00", "17:00"),
-    ["15:00", "17:00"],
+    buildReminderSlots("17:00", "20:00"),
+    ["17:00", "20:00"],
   );
   assert.deepEqual(buildReminderSlots("08:00", "08:00"), ["08:00"]);
-  assert.deepEqual(buildReminderSlots("invalid", "11:30"), []);
+  assert.deepEqual(buildReminderSlots("invalid", "11:00"), []);
 });
 
 test("meter status scheduler checks the selected group state every ten seconds", () => {
@@ -87,10 +102,10 @@ test("meter status scheduler checks the selected group state every ten seconds",
 });
 
 test("meter scheduler sends only in the exact checkpoint minute", () => {
-  assert.equal(getDueReminderSlot("08:00", "11:30", "08:00"), "08:00");
-  assert.equal(getDueReminderSlot("08:00", "11:30", "08:01"), "");
-  assert.equal(getDueReminderSlot("08:00", "11:30", "11:30", "08:00"), "11:30");
-  assert.equal(getDueReminderSlot("08:00", "11:30", "11:30", "11:30"), "");
+  assert.equal(getDueReminderSlot("08:00", "11:00", "08:00"), "08:00");
+  assert.equal(getDueReminderSlot("08:00", "11:00", "08:01"), "");
+  assert.equal(getDueReminderSlot("08:00", "11:00", "11:00", "08:00"), "11:00");
+  assert.equal(getDueReminderSlot("08:00", "11:00", "11:00", "11:00"), "");
 });
 
 test("meter WhatsApp account mode preserves separate mode and supports primary mode", () => {
@@ -118,9 +133,9 @@ test("Sundays and special branch holidays disable the meter monitor", () => {
 test("today status separates IN and OUT submissions and missing riders", () => {
   const config = {
     inWindowStart: "08:00",
-    inWindowEnd: "11:30",
-    outWindowStart: "15:00",
-    outWindowEnd: "17:00",
+    inWindowEnd: "11:00",
+    outWindowStart: "17:00",
+    outWindowEnd: "20:00",
     riders: [
       { name: "Akila", jid: "94770000001@s.whatsapp.net", phoneNumber: "94770000001" },
       {

@@ -203,6 +203,13 @@ export async function startWhatsAppClient(force = false) {
     }
   });
   socket.ev.on("messages.reaction", (reactions) => {
+    for (const listener of primaryMessageListeners) {
+      try {
+        listener({ messages: [], reactions: reactions || [], type: "reaction" });
+      } catch (error) {
+        console.error("[whatsapp-reaction-listener]", error.message || error);
+      }
+    }
     for (const reactionUpdate of reactions) {
       handleRescheduleApprovalReaction(reactionUpdate).catch((error) => {
         console.error("[whatsapp-approval-reaction]", error.message || error);

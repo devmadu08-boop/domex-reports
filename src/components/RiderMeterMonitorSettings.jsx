@@ -29,15 +29,11 @@ const EMPTY_CONFIG = {
   groupJid: "",
   groupName: "",
   inWindowStart: "08:00",
-  inWindowEnd: "11:30",
-  outWindowStart: "15:00",
-  outWindowEnd: "17:00",
-  reminderIntervalMinutes: 60,
+  inWindowEnd: "11:00",
+  outWindowStart: "17:00",
+  outWindowEnd: "20:00",
   specialHolidays: [],
-  groupReminder: true,
-  privateReminder: true,
   groupReminderTemplate: "📸 *{type} Photo Reminder*\n📅 {date}\n⏰ {start} - {end}\n\nPhoto not received from:\n{missingRiders}\n\nPlease send the {type} photo now.",
-  reminderTemplate: "📸 *Daily Rider {type} Photo Reminder*\n\n{name}, please send today's {type} photo before {end}.",
   riders: [],
 };
 
@@ -254,8 +250,8 @@ export default function RiderMeterMonitorSettings() {
       () => runMeterMonitorCheck(sessionKey),
       (result) => {
         if (result.skipped) return result.reason || "Reminder check skipped.";
-        return result.missingCount
-          ? `${result.sessionLabel}: reminders sent immediately for ${result.missingCount} missing rider${result.missingCount === 1 ? "" : "s"}.`
+        return result.approvalRequested
+          ? `${result.sessionLabel}: approval request sent to Report WhatsApp for ${result.missingCount} missing rider${result.missingCount === 1 ? "" : "s"}. React with 👍 to send the group reminder.`
           : `All required riders have sent today's ${result.sessionLabel} photo.`;
       },
     );
@@ -429,7 +425,7 @@ export default function RiderMeterMonitorSettings() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <span className="rounded-xl bg-white/80 px-3 py-3 text-center text-sm font-black text-amber-900">08:00</span>
-                  <span className="rounded-xl bg-white/80 px-3 py-3 text-center text-sm font-black text-amber-900">11:30</span>
+                  <span className="rounded-xl bg-white/80 px-3 py-3 text-center text-sm font-black text-amber-900">11:00</span>
                 </div>
               </div>
 
@@ -439,28 +435,20 @@ export default function RiderMeterMonitorSettings() {
                   <p className="text-xs font-semibold text-indigo-800/70">Two checks only, at the opening and closing times.</p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <span className="rounded-xl bg-white/80 px-3 py-3 text-center text-sm font-black text-indigo-900">15:00</span>
                   <span className="rounded-xl bg-white/80 px-3 py-3 text-center text-sm font-black text-indigo-900">17:00</span>
+                  <span className="rounded-xl bg-white/80 px-3 py-3 text-center text-sm font-black text-indigo-900">20:00</span>
                 </div>
               </div>
             </div>
 
             <p className="rounded-2xl bg-cyan-50 p-3 text-sm font-bold text-cyan-900">
-              Photos are monitored continuously and status is checked every 10 seconds. Automatic reminders run only at 08:00, 11:30, 15:00, and 17:00; riders who already submitted the correct photo are skipped.
+              Photos are monitored continuously. At 08:00, 11:00, 17:00, and 20:00 the Meter account sends an approval request to the connected Report WhatsApp. The selected group receives the reminder only after that message is reacted to with 👍.
             </p>
 
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3">
               <label className="flex cursor-pointer items-center gap-3 rounded-2xl bg-white/70 p-3 text-sm font-black text-[#071537]">
                 <input type="checkbox" checked={config.enabled} onChange={(event) => setConfig((current) => ({ ...current, enabled: event.target.checked }))} className="h-5 w-5 accent-cyan-600" />
                 Enable daily monitor
-              </label>
-              <label className="flex cursor-pointer items-center gap-3 rounded-2xl bg-white/70 p-3 text-sm font-black text-[#071537]">
-                <input type="checkbox" checked={config.groupReminder} onChange={(event) => setConfig((current) => ({ ...current, groupReminder: event.target.checked }))} className="h-5 w-5 accent-cyan-600" />
-                Group reminder
-              </label>
-              <label className="flex cursor-pointer items-center gap-3 rounded-2xl bg-white/70 p-3 text-sm font-black text-[#071537]">
-                <input type="checkbox" checked={config.privateReminder} onChange={(event) => setConfig((current) => ({ ...current, privateReminder: event.target.checked }))} className="h-5 w-5 accent-cyan-600" />
-                Private reminder
               </label>
             </div>
 
@@ -477,18 +465,9 @@ export default function RiderMeterMonitorSettings() {
               </span>
             </label>
 
-            <label className="grid gap-2 text-sm font-black text-[#071537]">
-              Private reminder template
-              <textarea
-                rows="3"
-                value={config.reminderTemplate}
-                onChange={(event) => setConfig((current) => ({ ...current, reminderTemplate: event.target.value }))}
-                className="whatsapp-control min-h-24 resize-y px-4 py-3 text-sm"
-              />
-              <span className="text-xs font-semibold text-blue-950/55">
-                Available: {"{name}"}, {"{date}"}, {"{group}"}, {"{type}"}, {"{start}"}, {"{end}"}
-              </span>
-            </label>
+            <p className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-bold text-emerald-900">
+              Private rider reminders are disabled. Approval can send only one message to the selected meter group.
+            </p>
           </div>
 
           <div className="whatsapp-settings-card grid gap-4">
@@ -533,7 +512,7 @@ export default function RiderMeterMonitorSettings() {
               <div>
                 <p className="text-sm font-black text-[#071537]">Required Riders</p>
                 <p className="text-xs font-semibold text-blue-950/60">
-                  Select riders, then add a readable name and phone number for private reminders.
+                  Select riders and add readable names so missing riders can be mentioned in the group reminder.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -675,7 +654,16 @@ export default function RiderMeterMonitorSettings() {
                   )}
                   {item.status.lastReminderSlot && (
                     <p className="flex items-center gap-2 text-xs font-bold text-emerald-700">
-                      <CheckCircle2 className="h-4 w-4" /> Last hourly check: {item.status.lastReminderSlot}
+                      <CheckCircle2 className="h-4 w-4" /> Last approval checkpoint: {item.status.lastReminderSlot}
+                    </p>
+                  )}
+                  {item.status.latestApproval && (
+                    <p className={`rounded-xl p-2 text-xs font-black ${
+                      item.status.latestApproval.status === "sent"
+                        ? "bg-emerald-100 text-emerald-800"
+                        : "bg-amber-100 text-amber-900"
+                    }`}>
+                      Approval: {item.status.latestApproval.status === "sent" ? "Group reminder sent" : "Waiting for 👍 reaction"}
                     </p>
                   )}
                 </div>
@@ -690,11 +678,11 @@ export default function RiderMeterMonitorSettings() {
             </button>
             <button type="button" disabled={loading || !connected || today.inactive} onClick={() => handleCheckNow("in")} className="primary-action primary-action-blue disabled:opacity-50">
               <Send className="h-5 w-5" />
-              Remind Missing IN
+              Request IN Approval
             </button>
             <button type="button" disabled={loading || !connected || today.inactive} onClick={() => handleCheckNow("out")} className="primary-action primary-action-purple disabled:opacity-50">
               <Send className="h-5 w-5" />
-              Remind Missing OUT
+              Request OUT Approval
             </button>
           </div>
 
