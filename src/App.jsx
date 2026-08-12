@@ -31,11 +31,13 @@ import {
   Truck,
   UserRound,
   UserPlus,
+  WalletCards,
 } from "lucide-react";
 import CourierPerformanceForm, { emptyCourierForm } from "./components/CourierPerformanceForm.jsx";
 import DateSelector from "./components/DateSelector.jsx";
 import DeliveredReportConverter from "./components/DeliveredReportConverter.jsx";
 import RescheduleReport from "./components/RescheduleReport.jsx";
+import PettyCashManagement from "./components/PettyCashManagement.jsx";
 import ExportButtons from "./components/ExportButtons.jsx";
 import AllInOneReports from "./components/AllInOneReports.jsx";
 import OperationReportForm, { emptyOperationForm } from "./components/OperationReportForm.jsx";
@@ -112,6 +114,7 @@ const tabs = [
   { id: "allReports", label: "All Reports", mobileLabel: "All", icon: FileSpreadsheet },
   { id: "deliveredConverter", label: "Delivered Report", mobileLabel: "Delivered", icon: FileText },
   { id: "reschedule", label: "Reschedule Report", mobileLabel: "Reschedule", icon: CalendarClock },
+  { id: "pettyCash", label: "Petty Cash Management", mobileLabel: "Petty Cash", icon: WalletCards },
   { id: "meterChats", label: "Meter Chats", mobileLabel: "Chats", icon: MessagesSquare, adminOnly: true },
   { id: "settings", label: "Settings", mobileLabel: "Settings", icon: Settings },
   { id: "users", label: "User Management", mobileLabel: "Users", icon: ShieldCheck, adminOnly: true },
@@ -1293,6 +1296,14 @@ export default function App() {
 
         {activeTab === "reschedule" && (
           <RescheduleReport selectedDate={selectedDate} branchName={settings.branchName || "Middeniya"} />
+        )}
+
+        {activeTab === "pettyCash" && (
+          <PettyCashManagement
+            selectedDate={selectedDate}
+            branchName={settings.branchName || session.branchName || "Middeniya"}
+            companyName={settings.companyName}
+          />
         )}
 
         {activeTab === "meterChats" && session.role === "admin" && <MeterChatsDashboard />}

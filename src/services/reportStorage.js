@@ -30,6 +30,7 @@ const emptyReport = {
   operation: null,
   delivered: {},
   rescheduleRows: [],
+  pettyCash: null,
 };
 
 function normalizeDelivered(value) {

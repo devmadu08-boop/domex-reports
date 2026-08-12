@@ -447,6 +447,169 @@ textarea {
   box-shadow: var(--shadow-pressed), 0 8px 18px rgba(128, 104, 178, 0.1);
 }
 
+.petty-cash-workspace {
+  width: 100%;
+  overflow: hidden;
+  background: linear-gradient(145deg, #fff9f5, #f5efff 60%, #edfff8);
+}
+
+.petty-cash-section,
+.petty-cash-workspace,
+.petty-cash-workspace > div,
+.petty-cash-preview {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.petty-cash-workspace .overflow-x-auto,
+.petty-cash-preview {
+  width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.petty-cash-upload {
+  display: grid;
+  min-height: 132px;
+  place-items: center;
+  gap: 6px;
+  border: 2px dashed #bca9eb;
+  border-radius: 24px;
+  background: #fffaf7;
+  padding: 18px;
+  text-align: center;
+  box-shadow: inset 6px 6px 14px rgba(128, 104, 178, 0.08), inset -6px -6px 14px rgba(255, 255, 255, 0.9);
+}
+
+.petty-field {
+  display: grid;
+  gap: 7px;
+  color: #292550;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.petty-field input {
+  min-height: 48px;
+  width: 100%;
+  border: 1px solid #ded3ed;
+  border-radius: 16px;
+  background: #fffdfb;
+  padding: 0 14px;
+  color: #15143b;
+  font-size: 14px;
+  font-weight: 750;
+  outline: none;
+  box-shadow: inset 4px 4px 10px rgba(128, 104, 178, 0.07);
+}
+
+.petty-field input:focus {
+  border-color: #8b5cf6;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.12);
+}
+
+.petty-total-card {
+  display: grid;
+  min-height: 72px;
+  align-content: center;
+  border: 1px solid #a7e5c9;
+  border-radius: 18px;
+  background: #eafff4;
+  padding: 12px 16px;
+  color: #075f43;
+  box-shadow: 7px 8px 18px rgba(5, 150, 105, 0.1);
+}
+
+.petty-total-card span { font-size: 11px; font-weight: 900; text-transform: uppercase; }
+.petty-total-card strong { font-size: 20px; }
+
+.petty-action {
+  display: inline-flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 16px;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 900;
+  color: white;
+  box-shadow: 6px 7px 14px rgba(41, 37, 80, 0.14);
+}
+
+.petty-action-green { background: linear-gradient(145deg, #059669, #22c55e); }
+.petty-action-blue { background: linear-gradient(145deg, #2563eb, #38bdf8); }
+.petty-action-red { background: linear-gradient(145deg, #ef4444, #e11d48); }
+.petty-action-neutral { border: 1px solid #ded3ed; background: #fffaf7; color: #5b4b8a; }
+.petty-icon-button { display: grid; height: 38px; width: 38px; place-items: center; border-radius: 13px; background: #fffaf7; box-shadow: 4px 5px 12px rgba(128, 104, 178, 0.12); }
+
+.petty-edit-table { width: 100%; border-collapse: collapse; color: #292550; font-size: 12px; }
+.petty-edit-table th { background: #f0eaff; padding: 12px 10px; text-align: left; font-weight: 900; }
+.petty-edit-table td { border-top: 1px solid #eee8f5; padding: 10px; vertical-align: top; }
+.petty-edit-table tbody tr:hover { background: #fff9f4; }
+.petty-edit-table small { display: block; margin-top: 4px; color: #7b709e; font-size: 10px; font-weight: 700; }
+
+.petty-cash-a4-report {
+  box-sizing: border-box;
+  display: flex;
+  width: 1120px;
+  min-width: 1120px;
+  height: 792px;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fff;
+  padding: 26px 24px 22px;
+  color: #000;
+  font-family: Arial, Helvetica, sans-serif;
+  box-shadow: 0 12px 30px rgba(24, 20, 50, 0.18);
+}
+
+.petty-report-heading { text-align: center; }
+.petty-report-heading h2 { margin: 0; font-size: 25px; font-weight: 800; letter-spacing: 0; }
+.petty-report-heading h1 { margin: 6px 0 0; font-size: 19px; font-weight: 800; letter-spacing: 0; text-decoration: underline; }
+.petty-report-meta { position: relative; display: grid; width: 460px; gap: 7px; margin: 20px 0 14px 60px; font-size: 13px; }
+.petty-report-meta p { display: grid; grid-template-columns: 100px 1fr; margin: 0; }
+.petty-report-meta span { border-bottom: 1px dotted #000; font-weight: 700; }
+.petty-report-meta .petty-page-number { position: absolute; left: 880px; width: 110px; display: block; font-weight: 800; }
+
+.petty-report-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 8px; line-height: 1.25; }
+.petty-report-table th, .petty-report-table td { overflow-wrap: anywhere; border: 1px solid #000; padding: 4px 3px; text-align: center; vertical-align: middle; }
+.petty-report-table thead th { height: 38px; background: #f2f2f2; font-size: 8px; font-weight: 800; }
+.petty-report-table tbody td { height: 31px; }
+.petty-report-table th:nth-child(1) { width: 28px; }
+.petty-report-table th:nth-child(2) { width: 72px; }
+.petty-report-table th:nth-child(3) { width: 54px; }
+.petty-report-table th:nth-child(4) { width: 96px; }
+.petty-report-table th:nth-child(5) { width: 62px; }
+.petty-report-table th:nth-child(6) { width: 56px; }
+.petty-report-table th:nth-child(7), .petty-report-table th:nth-child(8), .petty-report-table th:nth-child(9) { width: 43px; }
+.petty-report-table th:nth-child(10) { width: 75px; }
+.petty-report-table th:nth-child(11) { width: 62px; }
+.petty-report-table th:nth-child(12) { width: 105px; }
+.petty-report-table th:nth-child(13) { width: 80px; }
+.petty-report-table th:nth-child(14) { width: 60px; }
+.petty-report-table th:nth-child(15) { width: 66px; }
+.petty-report-table td:nth-child(12), .petty-report-table td:nth-child(13) { text-align: left; }
+.petty-report-table td:nth-child(14), .petty-report-table tfoot th:nth-last-child(2) { text-align: right; font-weight: 800; }
+.petty-report-table tfoot th { height: 30px; font-size: 10px; }
+
+.petty-report-footer { margin-top: auto; }
+.petty-amount-words { display: grid; grid-template-columns: 150px 1fr; gap: 15px; border-bottom: 1px dotted #000; padding: 10px 8px 8px; font-size: 9px; }
+.petty-signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 90px; padding: 34px 75px 0; }
+.petty-signatures p { display: grid; min-height: 43px; align-content: end; margin: 0; border-top: 1px dotted #000; text-align: center; }
+.petty-signatures span { min-height: 20px; font-size: 9px; }
+.petty-signatures strong { font-size: 10px; }
+.petty-continued { margin: auto 0 0; text-align: center; font-size: 10px; font-weight: 800; }
+
+@media (max-width: 640px) {
+  .petty-action { flex: 1 1 140px; }
+  .petty-cash-upload { min-height: 112px; }
+}
+
+@media print {
+  .petty-cash-a4-report { box-shadow: none; }
+}
+
 .dashboard-layout {
   display: grid;
   gap: 22px;

@@ -17,6 +17,7 @@ A simple React + Vite web app for entering daily courier branch data and exporti
 - Automatic branch-scoped realtime sync plus manual cloud upload/download recovery actions
 - Export each report as PNG or PDF
 - Export both reports into one A4 landscape PDF
+- Petty Cash Management with official CSV import, editable vouchers, automatic totals, and A4 landscape PNG/PDF exports
 - Responsive desktop/mobile interface with large office-friendly controls
 
 ## Run
