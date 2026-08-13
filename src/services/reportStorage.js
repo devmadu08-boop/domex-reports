@@ -31,6 +31,7 @@ const emptyReport = {
   delivered: {},
   rescheduleRows: [],
   pettyCash: null,
+  audit: null,
 };
 
 function normalizeDelivered(value) {
@@ -626,6 +627,7 @@ export function getSettings() {
     deliveredExportAutoWhatsApp: false,
     convertDefaultGroupJids: [],
     rescheduleDefaultGroupJids: [],
+    auditDefaultGroupJids: [],
     backupWhatsappNumber: "",
     pettyCashVehicleEmployees: [],
     rescheduleApprovalReaction: "✅",

@@ -4,6 +4,7 @@ import {
   BarChart3,
   CalendarClock,
   CalendarDays,
+  ClipboardCheck,
   CheckCircle2,
   Download,
   Eye,
@@ -38,6 +39,7 @@ import DateSelector from "./components/DateSelector.jsx";
 import DeliveredReportConverter from "./components/DeliveredReportConverter.jsx";
 import RescheduleReport from "./components/RescheduleReport.jsx";
 import PettyCashManagement from "./components/PettyCashManagement.jsx";
+import AuditReport from "./components/AuditReport.jsx";
 import ExportButtons from "./components/ExportButtons.jsx";
 import AllInOneReports from "./components/AllInOneReports.jsx";
 import OperationReportForm, { emptyOperationForm } from "./components/OperationReportForm.jsx";
@@ -115,6 +117,7 @@ const tabs = [
   { id: "deliveredConverter", label: "Delivered Report", mobileLabel: "Delivered", icon: FileText },
   { id: "reschedule", label: "Reschedule Report", mobileLabel: "Reschedule", icon: CalendarClock },
   { id: "pettyCash", label: "Petty Cash Management", mobileLabel: "Petty Cash", icon: WalletCards },
+  { id: "audit", label: "Audit Report", mobileLabel: "Audit", icon: ClipboardCheck },
   { id: "meterChats", label: "Meter Chats", mobileLabel: "Chats", icon: MessagesSquare, adminOnly: true },
   { id: "settings", label: "Settings", mobileLabel: "Settings", icon: Settings },
   { id: "users", label: "User Management", mobileLabel: "Users", icon: ShieldCheck, adminOnly: true },
@@ -1304,6 +1307,13 @@ export default function App() {
             branchName={settings.branchName || session.branchName || "Middeniya"}
             companyName={settings.companyName}
             vehicleEmployeeMappings={settings.pettyCashVehicleEmployees || []}
+          />
+        )}
+
+        {activeTab === "audit" && (
+          <AuditReport
+            selectedDate={selectedDate}
+            branchName={settings.branchName || session.branchName || "Middeniya"}
           />
         )}
 

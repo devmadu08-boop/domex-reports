@@ -9,6 +9,7 @@ import {
   logoutWhatsApp,
   reconnectWhatsApp,
   saveConvertWhatsAppGroup,
+  saveAuditWhatsAppGroup,
   saveDefaultWhatsAppGroup,
   saveRescheduleWhatsAppGroup,
   sendRescheduleApprovalNow,
@@ -52,6 +53,7 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
   const [selectedGroups, setSelectedGroups] = useState([]);
   const [selectedConvertGroups, setSelectedConvertGroups] = useState(settings.convertDefaultGroupJids || []);
   const [selectedRescheduleGroups, setSelectedRescheduleGroups] = useState(settings.rescheduleDefaultGroupJids || []);
+  const [selectedAuditGroups, setSelectedAuditGroups] = useState(settings.auditDefaultGroupJids || []);
   const [captionTemplates, setCaptionTemplates] = useState(settings.whatsappCaptionTemplates || {});
   const [customTemplates, setCustomTemplates] = useState(settings.whatsappCustomCaptionTemplates || {});
   const [riderDefaultTemplate, setRiderDefaultTemplate] = useState(settings.deliveredRiderDefaultCaptionTemplate || DEFAULT_DELIVERED_RIDER_TEMPLATE);
@@ -73,7 +75,8 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
     setRiderTemplates(settings.deliveredRiderCaptionTemplates || {});
     setSelectedConvertGroups((current) => (current.length ? current : settings.convertDefaultGroupJids || []));
     setSelectedRescheduleGroups((current) => (current.length ? current : settings.rescheduleDefaultGroupJids || []));
-  }, [settings.whatsappCaptionTemplates, settings.whatsappCustomCaptionTemplates, settings.deliveredRiderDefaultCaptionTemplate, settings.deliveredRiderCaptionTemplates, settings.convertDefaultGroupJids, settings.rescheduleDefaultGroupJids]);
+    setSelectedAuditGroups((current) => (current.length ? current : settings.auditDefaultGroupJids || []));
+  }, [settings.whatsappCaptionTemplates, settings.whatsappCustomCaptionTemplates, settings.deliveredRiderDefaultCaptionTemplate, settings.deliveredRiderCaptionTemplates, settings.convertDefaultGroupJids, settings.rescheduleDefaultGroupJids, settings.auditDefaultGroupJids]);
 
   async function refreshStatus() {
     try {
@@ -84,10 +87,16 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
       const savedRescheduleGroups = nextStatus.rescheduleDefaultGroupJids?.length
         ? nextStatus.rescheduleDefaultGroupJids
         : [nextStatus.rescheduleDefaultGroupJid].filter(Boolean);
+      const savedAuditGroups = nextStatus.auditDefaultGroupJids?.length
+        ? nextStatus.auditDefaultGroupJids
+        : [nextStatus.auditDefaultGroupJid].filter(Boolean);
       setSelectedGroups((current) => (current.length ? current : savedGroups));
       setSelectedConvertGroups((current) => (current.length ? current : savedConvertGroups.length ? savedConvertGroups : settings.convertDefaultGroupJids || []));
       setSelectedRescheduleGroups((current) => (
         current.length ? current : savedRescheduleGroups.length ? savedRescheduleGroups : settings.rescheduleDefaultGroupJids || []
+      ));
+      setSelectedAuditGroups((current) => (
+        current.length ? current : savedAuditGroups.length ? savedAuditGroups : settings.auditDefaultGroupJids || []
       ));
 
       if (!nextStatus.connected) {
@@ -172,6 +181,22 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
     }
   }
 
+  async function handleSaveAuditGroup() {
+    setLoading(true);
+    setMessage("");
+    try {
+      await saveAuditWhatsAppGroup(selectedAuditGroups);
+      await onSaveSettings({ ...settings, auditDefaultGroupJids: selectedAuditGroups });
+      setMessage("Audit Report default WhatsApp groups saved.");
+      await refreshStatus();
+    } catch (error) {
+      await onSaveSettings({ ...settings, auditDefaultGroupJids: selectedAuditGroups });
+      setMessage(`${error.message} Audit group selection was saved in app settings, but update/restart the VPS WhatsApp backend to send to that group.`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleSendRescheduleApprovalNow() {
     setLoading(true);
     setMessage("");
@@ -200,6 +225,10 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
     setSelectedRescheduleGroups((current) => (current.includes(jid) ? current.filter((item) => item !== jid) : [...current, jid]));
   }
 
+  function toggleAuditGroup(jid) {
+    setSelectedAuditGroups((current) => (current.includes(jid) ? current.filter((item) => item !== jid) : [...current, jid]));
+  }
+
   function clearSelectedGroups() {
     setSelectedGroups([]);
   }
@@ -210,6 +239,10 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
 
   function clearSelectedRescheduleGroups() {
     setSelectedRescheduleGroups([]);
+  }
+
+  function clearSelectedAuditGroups() {
+    setSelectedAuditGroups([]);
   }
 
   function updateTemplate(type, value) {
@@ -284,7 +317,13 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
       && !savedMissingGroups.some((group) => group.jid === jid)
       && !savedMissingConvertGroups.some((group) => group.jid === jid))
     .map((jid) => ({ jid, name: jid, participants: 0 }));
-  const groupOptions = [...groups, ...savedMissingGroups, ...savedMissingConvertGroups, ...savedMissingRescheduleGroups];
+  const savedMissingAuditGroups = selectedAuditGroups
+    .filter((jid) => !groups.some((group) => group.jid === jid)
+      && !savedMissingGroups.some((group) => group.jid === jid)
+      && !savedMissingConvertGroups.some((group) => group.jid === jid)
+      && !savedMissingRescheduleGroups.some((group) => group.jid === jid))
+    .map((jid) => ({ jid, name: jid, participants: 0 }));
+  const groupOptions = [...groups, ...savedMissingGroups, ...savedMissingConvertGroups, ...savedMissingRescheduleGroups, ...savedMissingAuditGroups];
 
   return (
     <div className="glass-panel p-4 lg:col-span-2">
@@ -471,6 +510,22 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
               onClear={clearSelectedRescheduleGroups}
               onSave={handleSaveRescheduleGroup}
               saveLabel="Save Reschedule Groups"
+            />
+          </div>
+
+          <div className="whatsapp-settings-card">
+            <GroupSelector
+              title="Audit Report Default Groups"
+              helper="Outstanding Audit Reports are sent only to the WhatsApp groups selected here."
+              groups={groupOptions}
+              selectedGroups={selectedAuditGroups}
+              loading={loading}
+              connected={connected}
+              onFetchGroups={handleFetchGroups}
+              onToggleGroup={toggleAuditGroup}
+              onClear={clearSelectedAuditGroups}
+              onSave={handleSaveAuditGroup}
+              saveLabel="Save Audit Groups"
             />
           </div>
 

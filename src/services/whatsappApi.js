@@ -31,6 +31,9 @@ async function requestJson(path, options = {}) {
       if (path === "/reschedule-default-group" || path === "/send-reschedule-report") {
         throw new Error("Reschedule Report WhatsApp group API was not found. Pull the latest GitHub code on the VPS and restart the backend.");
       }
+      if (path === "/audit-default-group" || path === "/send-audit-report") {
+        throw new Error("Audit Report WhatsApp group API was not found. Pull the latest GitHub code on the VPS and restart the backend.");
+      }
       if (path.startsWith("/backup") || path === "/send-backup-now") {
         throw new Error("WhatsApp backup API was not found. Pull the latest GitHub code on the VPS and restart the backend.");
       }
@@ -120,6 +123,15 @@ export function saveRescheduleWhatsAppGroup(groupJids) {
   });
 }
 
+export function saveAuditWhatsAppGroup(groupJids) {
+  return requestJson("/audit-default-group", {
+    method: "POST",
+    body: JSON.stringify({
+      groupJids: Array.isArray(groupJids) ? groupJids : [groupJids].filter(Boolean),
+    }),
+  });
+}
+
 export function sendReportToWhatsApp({ imageDataUrl, imageDataUrls, caption }) {
   return requestJson("/send-report", {
     method: "POST",
@@ -136,6 +148,13 @@ export function sendConvertReportToWhatsApp({ imageDataUrl, imageDataUrls, capti
 
 export function sendRescheduleReportToWhatsApp({ imageDataUrl, imageDataUrls, caption }) {
   return requestJson("/send-reschedule-report", {
+    method: "POST",
+    body: JSON.stringify({ imageDataUrl, imageDataUrls, caption }),
+  });
+}
+
+export function sendAuditReportToWhatsApp({ imageDataUrl, imageDataUrls, caption }) {
+  return requestJson("/send-audit-report", {
     method: "POST",
     body: JSON.stringify({ imageDataUrl, imageDataUrls, caption }),
   });

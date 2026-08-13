@@ -43,6 +43,8 @@ async function readConfig() {
       convertDefaultGroupJids: [],
       rescheduleDefaultGroupJid: "",
       rescheduleDefaultGroupJids: [],
+      auditDefaultGroupJid: "",
+      auditDefaultGroupJids: [],
     };
   }
 }
@@ -126,6 +128,9 @@ function normalizeConfig(config = {}) {
   const rescheduleDefaultGroupJids = normalizeGroupJids(
     config.rescheduleDefaultGroupJids?.length ? config.rescheduleDefaultGroupJids : config.rescheduleDefaultGroupJid,
   );
+  const auditDefaultGroupJids = normalizeGroupJids(
+    config.auditDefaultGroupJids?.length ? config.auditDefaultGroupJids : config.auditDefaultGroupJid,
+  );
   return {
     ...config,
     defaultGroupJid: defaultGroupJids[0] || "",
@@ -134,6 +139,8 @@ function normalizeConfig(config = {}) {
     convertDefaultGroupJids,
     rescheduleDefaultGroupJid: rescheduleDefaultGroupJids[0] || "",
     rescheduleDefaultGroupJids,
+    auditDefaultGroupJid: auditDefaultGroupJids[0] || "",
+    auditDefaultGroupJids,
     backupWhatsappNumber: String(config.backupWhatsappNumber || ""),
     rescheduleApprovalReaction: normalizeApprovalReaction(
       config.rescheduleApprovalReaction
@@ -262,6 +269,8 @@ export async function getWhatsAppStatus() {
     convertDefaultGroupJids: config.convertDefaultGroupJids || [],
     rescheduleDefaultGroupJid: config.rescheduleDefaultGroupJid || "",
     rescheduleDefaultGroupJids: config.rescheduleDefaultGroupJids || [],
+    auditDefaultGroupJid: config.auditDefaultGroupJid || "",
+    auditDefaultGroupJids: config.auditDefaultGroupJids || [],
     backupWhatsappNumber: config.backupWhatsappNumber || "",
     rescheduleApprovalReaction: config.rescheduleApprovalReaction,
     hasBackupSnapshot: Boolean(config.latestBackupSnapshot),
@@ -375,6 +384,16 @@ export async function saveRescheduleDefaultGroupJids(groupJids) {
   }));
 }
 
+export async function saveAuditDefaultGroupJids(groupJids) {
+  const nextGroupJids = normalizeGroupJids(groupJids);
+  if (!nextGroupJids.length) throw new Error("At least one Audit Report group JID is required.");
+  return writeConfig(normalizeConfig({
+    ...(await readConfig()),
+    auditDefaultGroupJid: nextGroupJids[0],
+    auditDefaultGroupJids: nextGroupJids,
+  }));
+}
+
 function getReportImageBuffers({ imageDataUrl, imageDataUrls }) {
   const urls = Array.isArray(imageDataUrls) && imageDataUrls.length
     ? imageDataUrls
@@ -480,6 +499,20 @@ export async function sendReportToRescheduleDefaultGroup({ imageDataUrl, imageDa
     caption,
     groupJids: rescheduleDefaultGroupJids,
     missingGroupMessage: "Reschedule Report default WhatsApp groups are not selected. Select them in Settings.",
+  });
+}
+
+export async function sendReportToAuditDefaultGroup({ imageDataUrl, imageDataUrls, caption }) {
+  const config = await readConfig();
+  const auditDefaultGroupJids = normalizeGroupJids(
+    config.auditDefaultGroupJids?.length ? config.auditDefaultGroupJids : config.auditDefaultGroupJid,
+  );
+  return sendReportToGroups({
+    imageDataUrl,
+    imageDataUrls,
+    caption,
+    groupJids: auditDefaultGroupJids,
+    missingGroupMessage: "Audit Report default WhatsApp groups are not selected. Select them in Settings.",
   });
 }
 

@@ -9,12 +9,14 @@ import {
   saveBackupConfig,
   saveDefaultGroupJids,
   saveRescheduleDefaultGroupJids,
+  saveAuditDefaultGroupJids,
   saveLatestBackupSnapshot,
   sendBackupToWhatsApp,
   sendRescheduleApprovalRequest,
   sendReportToConvertDefaultGroup,
   sendReportToDefaultGroup,
   sendReportToRescheduleDefaultGroup,
+  sendReportToAuditDefaultGroup,
   sendReportToRecipient,
   sendTextToRecipient,
 } from "./whatsappService.js";
@@ -32,6 +34,7 @@ configureWhatsAppQueue(async (type, payload) => {
   if (type === "default-report") return sendReportToDefaultGroup(payload);
   if (type === "delivered-report") return sendReportToConvertDefaultGroup(payload);
   if (type === "reschedule-report") return sendReportToRescheduleDefaultGroup(payload);
+  if (type === "audit-report") return sendReportToAuditDefaultGroup(payload);
   if (type === "recipient-report") return sendReportToRecipient(payload);
   if (type === "recipient-text") return sendTextToRecipient(payload);
   if (type === "backup-now") return sendBackupToWhatsApp({ force: true });
@@ -111,6 +114,15 @@ router.post("/reschedule-default-group", async (request, response) => {
   }
 });
 
+router.post("/audit-default-group", async (request, response) => {
+  try {
+    const config = await saveAuditDefaultGroupJids(request.body.groupJids || request.body.groupJid);
+    response.json(config);
+  } catch (error) {
+    sendError(response, error);
+  }
+});
+
 router.post("/send-report", async (request, response) => {
   try {
     response.json(await sendWithWhatsAppQueue("default-report", request.body));
@@ -130,6 +142,14 @@ router.post("/send-convert-report", async (request, response) => {
 router.post("/send-reschedule-report", async (request, response) => {
   try {
     response.json(await sendWithWhatsAppQueue("reschedule-report", request.body));
+  } catch (error) {
+    sendError(response, error);
+  }
+});
+
+router.post("/send-audit-report", async (request, response) => {
+  try {
+    response.json(await sendWithWhatsAppQueue("audit-report", request.body));
   } catch (error) {
     sendError(response, error);
   }
