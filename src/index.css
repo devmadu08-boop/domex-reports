@@ -483,7 +483,14 @@ textarea {
 
 .audit-input-table tfoot {
   color: #fff;
-  background: #1768d7;
+  background: #941b2b;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.audit-input-table .audit-inline-total {
+  color: #fff;
+  background: #b0192e;
   font-size: 11px;
   font-weight: 900;
 }
@@ -553,8 +560,8 @@ textarea {
   min-width: 1280px;
   height: 720px;
   overflow: hidden;
-  background: #f8fbff;
-  color: #111b35;
+  background: #fffdf9;
+  color: #2a1720;
   font-family: Arial, sans-serif;
   box-shadow: 0 18px 45px rgba(24, 31, 54, .24);
 }
@@ -566,13 +573,27 @@ textarea {
   justify-content: space-between;
   padding: 0 42px;
   color: #fff;
-  background: #172a52;
-  border-bottom: 7px solid #f5b82e;
+  background: #8e1628;
+  border-bottom: 7px solid #efb52f;
 }
 
-.audit-landscape-report > header div:first-child { display: grid; }
-.audit-landscape-report > header span { color: #ffc83d; font-size: 34px; font-weight: 950; letter-spacing: 0; }
-.audit-landscape-report > header small { font-size: 9px; font-weight: 900; letter-spacing: 2px; }
+.audit-report-brand {
+  width: 255px;
+  height: 64px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #8e1628;
+}
+
+.audit-report-brand img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  object-position: center;
+}
+
+.audit-landscape-report > header small { color: #ffd65d; font-size: 9px; font-weight: 900; letter-spacing: 2px; }
 .audit-landscape-report > header div:last-child { text-align: right; }
 .audit-landscape-report > header p { margin: 0; font-size: 17px; font-weight: 950; }
 
@@ -586,8 +607,8 @@ textarea {
 }
 
 .audit-report-title small { color: #53617c; font-size: 10px; font-weight: 850; }
-.audit-report-title h1 { margin: 2px 0 0; color: #e14b55; font-size: 31px; font-weight: 950; letter-spacing: 0; }
-.audit-report-title > div:last-child { min-width: 155px; border-radius: 12px; background: #e14b55; padding: 10px 18px; color: #fff; }
+.audit-report-title h1 { margin: 2px 0 0; color: #a5162b; font-size: 31px; font-weight: 950; letter-spacing: 0; }
+.audit-report-title > div:last-child { min-width: 155px; border-radius: 12px; background: #a5162b; padding: 10px 18px; color: #fff; }
 .audit-report-title > div:last-child span { display: block; font-size: 9px; font-weight: 800; }
 .audit-report-title > div:last-child strong { font-size: 16px; }
 
@@ -611,25 +632,26 @@ textarea {
   margin: 0;
   padding: 8px 11px;
   color: #fff;
-  background: #168aad;
+  background: #a5162b;
   font-size: 11px;
   font-weight: 950;
   text-transform: uppercase;
 }
 
 .audit-wide { grid-row: 1 / 3; }
-.audit-wide h2 { background: #1768d7; }
-.audit-report-panel:nth-child(3) h2 { background: #e75b75; }
-.audit-report-panel:nth-child(4) h2 { background: #f39a25; }
-.audit-balance h2 { background: #139b78; }
+.audit-wide h2 { background: #a5162b; }
+.audit-report-panel:nth-child(3) h2 { background: #c5273e; }
+.audit-report-panel:nth-child(4) h2 { background: #d79a13; }
+.audit-balance h2 { background: #8e1628; }
 
 .audit-wide table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .audit-wide th, .audit-wide td { border: 1px solid #dbe4ee; padding: 5px 4px; font-size: 7.8px; text-align: right; }
 .audit-wide th:first-child { width: 25%; text-align: left; }
-.audit-wide thead th { height: 31px; color: #fff; background: #173c71; font-size: 7px; text-align: center; }
+.audit-wide thead th { height: 31px; color: #fff; background: #72101f; font-size: 7px; text-align: center; }
 .audit-wide tbody .group-a { background: #fff1f1; }
 .audit-wide tbody .group-b { background: #edf9f6; }
-.audit-wide tfoot { color: #fff; background: #1768d7; font-weight: 900; }
+.audit-wide tfoot { color: #fff; background: #851326; font-weight: 900; }
+.audit-wide .audit-inline-total { color: #fff; background: #b0192e; font-weight: 900; }
 
 .audit-kpi {
   display: flex;
@@ -642,7 +664,7 @@ textarea {
 
 .audit-kpi span { color: #65728c; font-size: 8px; font-weight: 800; }
 .audit-kpi b { font-size: 9px; white-space: nowrap; }
-.audit-kpi.strong { color: #fff; background: #173c71; }
+.audit-kpi.strong { color: #fff; background: #851326; }
 .audit-kpi.strong span { color: #fff; }
 
 .audit-balance > div {
@@ -666,7 +688,8 @@ textarea {
   justify-content: space-between;
   padding: 0 42px;
   color: #fff;
-  background: #172a52;
+  background: #72101f;
+  border-top: 5px solid #efb52f;
 }
 
 .audit-landscape-report > footer p { margin: 0; max-width: 70%; font-size: 9px; }
