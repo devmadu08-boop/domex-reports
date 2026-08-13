@@ -572,10 +572,10 @@ textarea {
 .petty-report-meta span { border-bottom: 1px dotted #000; font-weight: 700; }
 .petty-report-meta .petty-page-number { position: absolute; left: 880px; width: 110px; display: block; font-weight: 800; }
 
-.petty-report-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 8px; line-height: 1.25; }
+.petty-report-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: var(--petty-dynamic-font, 8px); line-height: 1.2; }
 .petty-report-table th, .petty-report-table td { overflow-wrap: anywhere; border: 1px solid #000; padding: 4px 3px; text-align: center; vertical-align: middle; }
-.petty-report-table thead th { height: 38px; background: #f2f2f2; font-size: 8px; font-weight: 800; }
-.petty-report-table tbody td { height: 31px; }
+.petty-report-table thead th { height: 38px; background: #f2f2f2; font-size: clamp(8px, var(--petty-dynamic-font, 8px), 11px); font-weight: 800; }
+.petty-report-table tbody td { height: var(--petty-row-height, 31px); }
 .petty-report-table th:nth-child(1) { width: 28px; }
 .petty-report-table th:nth-child(2) { width: 72px; }
 .petty-report-table th:nth-child(3) { width: 54px; }

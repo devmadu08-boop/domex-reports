@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { amountToWords, parsePettyCashCsv } from "../src/utils/pettyCash.js";
+import { applyPettyCashEmployeeMappings, amountToWords, getPettyCashPageLayout, normalizeVehicleNumber, paginatePettyCashEntries, parsePettyCashCsv } from "../src/utils/pettyCash.js";
 
 const SAMPLE = `Key,Value
 CompanyName,Domex Pvt Ltd
@@ -21,4 +21,18 @@ test("petty cash CSV parser maps official voucher fields", () => {
 
 test("petty cash amount is converted to readable Sri Lankan words", () => {
   assert.equal(amountToWords(8282.56), "Sri Lankan Rupees Eight Thousand Two Hundred and Eighty Two and Cents Fifty Six Only");
+});
+
+test("petty cash vehicle mapping replaces incorrect CSV employee names", () => {
+  const entries = [{ vehicleNo: "BKZ-8841", employeeName: "Wrong CSV Name" }];
+  const mapped = applyPettyCashEmployeeMappings(entries, [{ vehicleNo: "bkz 8841", employeeName: "Correct Employee" }]);
+  assert.equal(normalizeVehicleNumber("BKZ-8841"), "BKZ8841");
+  assert.equal(mapped[0].employeeName, "Correct Employee");
+});
+
+test("petty cash keeps up to twenty vouchers on one A4 page", () => {
+  assert.equal(paginatePettyCashEntries(Array.from({ length: 20 }), 20).length, 1);
+  assert.equal(paginatePettyCashEntries(Array.from({ length: 21 }), 20).length, 2);
+  assert.deepEqual(getPettyCashPageLayout(4), { rowHeight: 104, fontSize: 13 });
+  assert.deepEqual(getPettyCashPageLayout(20), { rowHeight: 21, fontSize: 7.5 });
 });

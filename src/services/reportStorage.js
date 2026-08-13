@@ -627,6 +627,7 @@ export function getSettings() {
     convertDefaultGroupJids: [],
     rescheduleDefaultGroupJids: [],
     backupWhatsappNumber: "",
+    pettyCashVehicleEmployees: [],
     rescheduleApprovalReaction: "✅",
     ...savedSettings,
     whatsappCaptionTemplates: {

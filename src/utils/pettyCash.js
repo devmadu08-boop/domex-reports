@@ -31,6 +31,39 @@ export function parsePettyCashCsv(text) {
   return { entries, branchName: entries.find((entry) => entry.branchName)?.branchName || "", sourceTitle: metadata.Title || "Voucher Request History", sourceTimestamp: metadata.TimeStamp || "" };
 }
 
+export function normalizeVehicleNumber(value) {
+  return clean(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+export function applyPettyCashEmployeeMappings(entries, mappings = []) {
+  const employeeByVehicle = new Map(
+    (Array.isArray(mappings) ? mappings : [])
+      .map((item) => [normalizeVehicleNumber(item?.vehicleNo), clean(item?.employeeName)])
+      .filter(([vehicleNo, employeeName]) => vehicleNo && employeeName),
+  );
+
+  return (Array.isArray(entries) ? entries : []).map((entry) => {
+    const employeeName = employeeByVehicle.get(normalizeVehicleNumber(entry?.vehicleNo));
+    return employeeName ? { ...entry, employeeName } : entry;
+  });
+}
+
+export function paginatePettyCashEntries(entries, rowsPerPage = 20) {
+  const rows = Array.isArray(entries) ? entries : [];
+  if (!rows.length) return [[]];
+  const pages = [];
+  for (let index = 0; index < rows.length; index += rowsPerPage) pages.push(rows.slice(index, index + rowsPerPage));
+  return pages;
+}
+
+export function getPettyCashPageLayout(rowCount) {
+  const count = Math.max(Number(rowCount) || 0, 1);
+  return {
+    rowHeight: Math.max(20, Math.min(104, Math.floor(420 / count))),
+    fontSize: count <= 4 ? 13 : count <= 8 ? 11 : count <= 12 ? 9.5 : count <= 16 ? 8.5 : 7.5,
+  };
+}
+
 export function normalizePettyCashDate(value) {
   const text = clean(value);
   const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);

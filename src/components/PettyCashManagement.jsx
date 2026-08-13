@@ -2,12 +2,12 @@ import { Download, FileDown, Pencil, Plus, Save, Trash2, Upload, WalletCards, X 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { deleteReportType, getReportByDate, saveReportType } from "../services/reportStorage.js";
 import { exportElementsAsLandscapePdf, exportElementsAsPng } from "../utils/exportReports.js";
-import { amountToWords, emptyPettyCashEntry, formatPettyCashDate, parsePettyCashCsv } from "../utils/pettyCash.js";
+import { applyPettyCashEmployeeMappings, amountToWords, emptyPettyCashEntry, formatPettyCashDate, getPettyCashPageLayout, paginatePettyCashEntries, parsePettyCashCsv } from "../utils/pettyCash.js";
 
-const ROWS_PER_PAGE = 14;
+const ROWS_PER_PAGE = 20;
 const currency = (value) => Number(value || 0).toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-export default function PettyCashManagement({ selectedDate, branchName = "Middeniya", companyName = "Domestic Express (pvt) ltd" }) {
+export default function PettyCashManagement({ selectedDate, branchName = "Middeniya", companyName = "Domestic Express (pvt) ltd", vehicleEmployeeMappings = [] }) {
   const [entries, setEntries] = useState([]);
   const [reportBranch, setReportBranch] = useState(branchName);
   const [preparedBy, setPreparedBy] = useState("");
@@ -19,23 +19,21 @@ export default function PettyCashManagement({ selectedDate, branchName = "Midden
 
   useEffect(() => {
     const saved = getReportByDate(selectedDate).pettyCash;
-    setEntries(Array.isArray(saved?.entries) ? saved.entries : []);
+    setEntries(applyPettyCashEmployeeMappings(saved?.entries, vehicleEmployeeMappings));
     setReportBranch(saved?.branchName || branchName || "Middeniya");
     setPreparedBy(saved?.preparedBy || ""); setAuthorizedBy(saved?.authorizedBy || ""); setEditing(null);
     setMessage(saved?.entries?.length ? "Saved Petty Cash report loaded." : "Upload the Voucher Request History CSV to begin.");
-  }, [selectedDate, branchName]);
+  }, [selectedDate, branchName, vehicleEmployeeMappings]);
 
   const total = useMemo(() => entries.reduce((sum, entry) => sum + (Number(entry.value) || 0), 0), [entries]);
   const pages = useMemo(() => {
-    if (!entries.length) return [[]]; const chunks = [];
-    for (let index = 0; index < entries.length; index += ROWS_PER_PAGE) chunks.push(entries.slice(index, index + ROWS_PER_PAGE));
-    return chunks;
+    return paginatePettyCashEntries(entries, ROWS_PER_PAGE);
   }, [entries]);
 
   async function handleFile(file) {
     if (!file) return; setBusy(true);
     try {
-      const parsed = parsePettyCashCsv(await file.text()); setEntries(parsed.entries); setReportBranch(parsed.branchName || branchName || "Middeniya");
+      const parsed = parsePettyCashCsv(await file.text()); setEntries(applyPettyCashEmployeeMappings(parsed.entries, vehicleEmployeeMappings)); setReportBranch(parsed.branchName || branchName || "Middeniya");
       setMessage(`${parsed.entries.length} voucher row${parsed.entries.length === 1 ? "" : "s"} imported successfully.`);
     } catch (error) { setMessage(error.message || "Petty Cash CSV import failed."); } finally { setBusy(false); }
   }
@@ -86,5 +84,7 @@ function PettyCashEditor({ entry, setEntry, onSubmit, onClose }) {
 
 function PettyCashReportPage({ reportRef, companyName, branchName, reportDate, rows, startIndex, pageIndex, pageCount, total, preparedBy, authorizedBy }) {
   const finalPage = pageIndex === pageCount - 1;
-  return <article ref={reportRef} className="petty-cash-a4-report"><header className="petty-report-heading"><h2>{String(companyName || "DOMESTIC EXPRESS ( PVT ) LTD").toUpperCase()}</h2><h1>SUMMARY OF PETTY CASH EXPENCES</h1></header><div className="petty-report-meta"><p><strong>BRANCH</strong><span>{String(branchName || "-").toUpperCase()}</span></p><p><strong>DATE</strong><span>{formatPettyCashDate(reportDate)}</span></p><p className="petty-page-number">PAGE {pageIndex + 1} / {pageCount}</p></div><table className="petty-report-table"><thead><tr><th>No</th><th>Reference No</th><th>Payment Date</th><th>Payment Type</th><th>Payment For</th><th>Vehicle No</th><th>From KMs</th><th>To KMs</th><th>Total KMs</th><th>Employee Name</th><th>OFD Report No</th><th>Memo</th><th>Note</th><th>Value</th><th>Signature</th></tr></thead><tbody>{rows.map((entry, index) => <tr key={entry.id}><td>{String(startIndex + index + 1).padStart(2, "0")}</td><td>{entry.referenceNo}</td><td>{formatPettyCashDate(entry.paymentDate)}</td><td>{entry.paymentType}</td><td>{entry.paymentFor}</td><td>{entry.vehicleNo}</td><td>{entry.fromKms}</td><td>{entry.toKms}</td><td>{entry.totalKms}</td><td>{entry.employeeName}</td><td>{entry.ofdReportNo}</td><td>{entry.memo}</td><td>{entry.note}</td><td>{currency(entry.value)}</td><td /></tr>)}</tbody>{finalPage ? <tfoot><tr><th colSpan="13">FULL TOTAL</th><th>{currency(total)}</th><th /></tr></tfoot> : null}</table>{finalPage ? <footer className="petty-report-footer"><div className="petty-amount-words"><strong>AMOUNT IN WORDS</strong><span>{amountToWords(total).toUpperCase()}</span></div><div className="petty-signatures"><p><span>{preparedBy}</span><strong>PREPARED BY</strong></p><p><span>{authorizedBy}</span><strong>AUTHORIZED BY</strong></p></div></footer> : <p className="petty-continued">CONTINUED ON NEXT A4 PAGE...</p>}</article>;
+  const { rowHeight, fontSize } = getPettyCashPageLayout(rows.length);
+  const reportStyle = { "--petty-row-height": `${rowHeight}px`, "--petty-dynamic-font": `${fontSize}px` };
+  return <article ref={reportRef} style={reportStyle} className="petty-cash-a4-report"><header className="petty-report-heading"><h2>{String(companyName || "DOMESTIC EXPRESS ( PVT ) LTD").toUpperCase()}</h2><h1>SUMMARY OF PETTY CASH EXPENCES</h1></header><div className="petty-report-meta"><p><strong>BRANCH</strong><span>{String(branchName || "-").toUpperCase()}</span></p><p><strong>DATE</strong><span>{formatPettyCashDate(reportDate)}</span></p><p className="petty-page-number">PAGE {pageIndex + 1} / {pageCount}</p></div><table className="petty-report-table"><thead><tr><th>No</th><th>Reference No</th><th>Payment Date</th><th>Payment Type</th><th>Payment For</th><th>Vehicle No</th><th>From KMs</th><th>To KMs</th><th>Total KMs</th><th>Employee Name</th><th>OFD Report No</th><th>Memo</th><th>Note</th><th>Value</th><th>Signature</th></tr></thead><tbody>{rows.map((entry, index) => <tr key={entry.id}><td>{String(startIndex + index + 1).padStart(2, "0")}</td><td>{entry.referenceNo}</td><td>{formatPettyCashDate(entry.paymentDate)}</td><td>{entry.paymentType}</td><td>{entry.paymentFor}</td><td>{entry.vehicleNo}</td><td>{entry.fromKms}</td><td>{entry.toKms}</td><td>{entry.totalKms}</td><td>{entry.employeeName}</td><td>{entry.ofdReportNo}</td><td>{entry.memo}</td><td>{entry.note}</td><td>{currency(entry.value)}</td><td /></tr>)}</tbody>{finalPage ? <tfoot><tr><th colSpan="13">FULL TOTAL</th><th>{currency(total)}</th><th /></tr></tfoot> : null}</table>{finalPage ? <footer className="petty-report-footer"><div className="petty-amount-words"><strong>AMOUNT IN WORDS</strong><span>{amountToWords(total).toUpperCase()}</span></div><div className="petty-signatures"><p><span>{preparedBy}</span><strong>PREPARED BY</strong></p><p><span>{authorizedBy}</span><strong>AUTHORIZED BY</strong></p></div></footer> : <p className="petty-continued">CONTINUED ON NEXT A4 PAGE...</p>}</article>;
 }

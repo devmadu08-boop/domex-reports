@@ -1303,6 +1303,7 @@ export default function App() {
             selectedDate={selectedDate}
             branchName={settings.branchName || session.branchName || "Middeniya"}
             companyName={settings.companyName}
+            vehicleEmployeeMappings={settings.pettyCashVehicleEmployees || []}
           />
         )}
 

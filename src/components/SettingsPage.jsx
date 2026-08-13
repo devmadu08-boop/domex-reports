@@ -7,6 +7,7 @@ import {
   DatabaseBackup,
   Download,
   MessageCircle,
+  ReceiptText,
   RotateCcw,
   Save,
   Settings,
@@ -49,6 +50,8 @@ export default function SettingsPage({
   const [newCourierName, setNewCourierName] = useState("");
   const [newRiderName, setNewRiderName] = useState("");
   const [newRiderPhone, setNewRiderPhone] = useState("");
+  const [newPettyVehicleNo, setNewPettyVehicleNo] = useState("");
+  const [newPettyEmployeeName, setNewPettyEmployeeName] = useState("");
   const [restoreStatus, setRestoreStatus] = useState("");
   const [domexConfig, setDomexConfig] = useState({ username: "", password: "", branchName: "Middeniya" });
   const [domexStatus, setDomexStatus] = useState("");
@@ -118,6 +121,29 @@ export default function SettingsPage({
     updateSetting("deliveredRiderWhatsAppNumbers", nextNumbers);
   }
 
+  function handleAddPettyCashVehicle() {
+    const vehicleNo = newPettyVehicleNo.trim();
+    const employeeName = newPettyEmployeeName.trim();
+    if (!vehicleNo || !employeeName) return;
+    const normalizedVehicle = vehicleNo.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const mappings = Array.isArray(draftSettings.pettyCashVehicleEmployees) ? draftSettings.pettyCashVehicleEmployees : [];
+    const nextMappings = [
+      ...mappings.filter((item) => String(item.vehicleNo || "").toUpperCase().replace(/[^A-Z0-9]/g, "") !== normalizedVehicle),
+      { vehicleNo, employeeName },
+    ].sort((a, b) => a.vehicleNo.localeCompare(b.vehicleNo));
+    updateSetting("pettyCashVehicleEmployees", nextMappings);
+    setNewPettyVehicleNo("");
+    setNewPettyEmployeeName("");
+  }
+
+  function updatePettyCashVehicle(index, field, value) {
+    updateSetting("pettyCashVehicleEmployees", (draftSettings.pettyCashVehicleEmployees || []).map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item));
+  }
+
+  function deletePettyCashVehicle(index) {
+    updateSetting("pettyCashVehicleEmployees", (draftSettings.pettyCashVehicleEmployees || []).filter((_, itemIndex) => itemIndex !== index));
+  }
+
   const deliveredRiderNames = [
     ...new Set([
       ...getAllDeliveredRiderNames(),
@@ -163,6 +189,7 @@ export default function SettingsPage({
             { id: "whatsapp", label: "Report WhatsApp", helper: "Groups & templates", icon: MessageCircle },
             { id: "meter", label: "Meter Monitor", helper: "Photos & reminders", icon: Camera },
             { id: "people", label: "People", helper: "Couriers & riders", icon: Users },
+            { id: "pettyCash", label: "Petty Cash", helper: "Vehicle employees", icon: ReceiptText },
             { id: "automation", label: "Automation", helper: "DOMEX login", icon: Bot },
             { id: "data", label: "Data & Backup", helper: "Sync & recovery", icon: DatabaseBackup },
           ].map((item) => {
@@ -276,6 +303,49 @@ export default function SettingsPage({
       <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {activeSection === "whatsapp" && <WhatsAppSettings settings={settings} onSaveSettings={onSaveSettings} />}
         {activeSection === "meter" && <RiderMeterMonitorSettings />}
+
+        {activeSection === "pettyCash" && <div className="glass-panel p-4 lg:col-span-2">
+          <div className="mb-4 flex items-center gap-3">
+            <span className="grid h-11 w-11 place-items-center rounded-2xl bg-amber-100 text-amber-700 shadow-inner">
+              <ReceiptText className="h-6 w-6" />
+            </span>
+            <div>
+              <h3 className="text-lg font-black text-[#071537]">Petty Cash Vehicle Employees</h3>
+              <p className="text-sm font-semibold text-blue-950/65">Replace incorrect CSV employee names using the saved vehicle number.</p>
+            </div>
+          </div>
+
+          <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto] sm:items-end">
+            <Field label="Vehicle No" value={newPettyVehicleNo} onChange={setNewPettyVehicleNo} placeholder="Example: BKZ 8841" />
+            <Field label="Employee Name" value={newPettyEmployeeName} onChange={setNewPettyEmployeeName} placeholder="Correct employee name" />
+            <button type="button" onClick={handleAddPettyCashVehicle} className="primary-action primary-action-blue">
+              <UserPlus className="h-5 w-5" />
+              Add Mapping
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-2">
+            {(draftSettings.pettyCashVehicleEmployees || []).length === 0 ? (
+              <p className="rounded-2xl bg-white/55 p-4 text-sm font-semibold text-blue-950/60">No vehicle employee mappings saved yet.</p>
+            ) : (draftSettings.pettyCashVehicleEmployees || []).map((item, index) => (
+              <div key={`${item.vehicleNo}-${index}`} className="grid gap-3 rounded-2xl border border-white/70 bg-white/55 p-3 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_auto] sm:items-center">
+                <input value={item.vehicleNo || ""} onChange={(event) => updatePettyCashVehicle(index, "vehicleNo", event.target.value)} aria-label="Vehicle number" className="h-11 rounded-2xl border border-white/80 bg-white/75 px-4 font-bold outline-none focus:border-amber-500 focus:ring-4 focus:ring-amber-100" />
+                <input value={item.employeeName || ""} onChange={(event) => updatePettyCashVehicle(index, "employeeName", event.target.value)} aria-label="Employee name" className="h-11 rounded-2xl border border-white/80 bg-white/75 px-4 font-bold outline-none focus:border-amber-500 focus:ring-4 focus:ring-amber-100" />
+                <button type="button" onClick={() => deletePettyCashVehicle(index)} className="history-action text-red-600" aria-label={`Delete ${item.vehicleNo} mapping`}>
+                  <Trash2 className="h-5 w-5" />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button type="button" onClick={handleSaveSettings} className="primary-action primary-action-green">
+              <Save className="h-5 w-5" />
+              Save Petty Cash Settings
+            </button>
+            <p className="text-sm font-semibold text-blue-950/65">Saved mappings are applied automatically to newly uploaded and previously saved Petty Cash reports.</p>
+          </div>
+        </div>}
 
         {activeSection === "automation" && <div className="glass-panel p-4 lg:col-span-2">
           <div className="mb-4 flex items-center gap-3">
