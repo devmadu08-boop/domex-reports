@@ -1,8 +1,8 @@
-import { Calculator, Image, MessageCircle, Plus, Save, Trash2 } from "lucide-react";
+import { Calculator, FileDown, Image, MessageCircle, Minus, Plus, RotateCcw, Save, Trash2 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { getReportByDate, saveReportType } from "../services/reportStorage.js";
 import { sendAuditReportToWhatsApp } from "../services/whatsappApi.js";
-import { captureElementAsPngDataUrl, exportElementAsPng } from "../utils/exportReports.js";
+import { captureElementAsPngDataUrl, exportElementsAsLandscapePdf, exportElementsAsPng } from "../utils/exportReports.js";
 import { AUDIT_DENOMINATIONS, AUDIT_STATUS_ROWS, calculateAuditReport, createAuditListRow, normalizeAuditReport } from "../utils/auditReport.js";
 
 const money = (value) => Number(value || 0).toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -13,7 +13,8 @@ export default function AuditReport({ selectedDate, branchName = "Middeniya" }) 
   const [section, setSection] = useState("outstanding");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
-  const reportRef = useRef(null);
+  const [previewZoom, setPreviewZoom] = useState(0.75);
+  const reportRefs = useRef([]);
 
   useEffect(() => {
     setReport(normalizeAuditReport(getReportByDate(selectedDate).audit, selectedDate, branchName));
@@ -34,21 +35,32 @@ export default function AuditReport({ selectedDate, branchName = "Middeniya" }) 
   }
 
   async function exportPng() {
-    if (!reportRef.current) return;
+    const elements = reportRefs.current.filter(Boolean);
+    if (!elements.length) return;
     setBusy(true); setStatus("");
-    try { await exportElementAsPng(reportRef.current, "Audit_Report", selectedDate); setStatus("Audit Report PNG exported successfully."); }
+    try { const result = await exportElementsAsPng(elements, "Audit_Report", selectedDate); setStatus(`${result.pageCount} Audit Report PNG pages exported successfully.`); }
     catch (error) { setStatus(error.message || "Audit Report export failed."); }
     finally { setBusy(false); }
   }
 
+  async function exportPdf() {
+    const elements = reportRefs.current.filter(Boolean);
+    if (!elements.length) return;
+    setBusy(true); setStatus("");
+    try { const result = await exportElementsAsLandscapePdf(elements, "Audit_Report", selectedDate); setStatus(`${result.pageCount}-page Audit Report PDF exported successfully.`); }
+    catch (error) { setStatus(error.message || "Audit Report PDF export failed."); }
+    finally { setBusy(false); }
+  }
+
   async function sendWhatsApp() {
-    if (!reportRef.current) return;
+    const elements = reportRefs.current.filter(Boolean);
+    if (!elements.length) return;
     setBusy(true); setStatus("");
     try {
-      const imageDataUrl = await captureElementAsPngDataUrl(reportRef.current);
+      const imageDataUrls = await Promise.all(elements.map((element) => captureElementAsPngDataUrl(element)));
       const caption = `📊 *Outstanding Audit Report*\n📅 Date: *${selectedDate}*\n🏢 Branch: *${report.branchName || branchName}*\n\n💵 Cash in hand: *LKR ${money(calculated.cashInHandTotal)}*\n⚖️ Float difference: *LKR ${money(calculated.floatDifference)}*`;
-      const result = await sendAuditReportToWhatsApp({ imageDataUrl, caption });
-      setStatus(result.queued ? "Audit Report added to the WhatsApp send queue." : "Audit Report sent to the assigned WhatsApp groups.");
+      const result = await sendAuditReportToWhatsApp({ imageDataUrls, caption });
+      setStatus(result.queued ? `${imageDataUrls.length}-page Audit Report added to the WhatsApp send queue.` : `${imageDataUrls.length}-page Audit Report sent to the assigned WhatsApp groups.`);
     } catch (error) { setStatus(error.message || "Audit Report WhatsApp send failed."); }
     finally { setBusy(false); }
   }
@@ -57,7 +69,7 @@ export default function AuditReport({ selectedDate, branchName = "Middeniya" }) 
     <div className="audit-entry-shell">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-3"><span className="audit-feature-icon"><Calculator className="h-6 w-6" /></span><div><p className="text-xs font-black uppercase text-cyan-700">Formula-driven audit workspace</p><h2 className="text-2xl font-black text-[#101a3b]">Outstanding Audit Report</h2><p className="text-sm font-semibold text-[#66708e]">Enter only source values. Totals, differences, and float balancing are calculated automatically.</p></div></div>
-        <div className="flex flex-wrap gap-2"><button type="button" onClick={saveReport} className="primary-action primary-action-green"><Save className="h-5 w-5" /> Save Report</button><button type="button" onClick={exportPng} disabled={busy} className="primary-action primary-action-blue"><Image className="h-5 w-5" /> Export PNG</button><button type="button" onClick={sendWhatsApp} disabled={busy} className="primary-action primary-action-purple"><MessageCircle className="h-5 w-5" /> {busy ? "Working..." : "Send WhatsApp"}</button></div>
+        <div className="flex flex-wrap gap-2"><button type="button" onClick={saveReport} className="primary-action primary-action-green"><Save className="h-5 w-5" /> Save Report</button><button type="button" onClick={exportPng} disabled={busy} className="primary-action primary-action-blue"><Image className="h-5 w-5" /> Export PNG</button><button type="button" onClick={exportPdf} disabled={busy} className="primary-action primary-action-red"><FileDown className="h-5 w-5" /> Export PDF</button><button type="button" onClick={sendWhatsApp} disabled={busy} className="primary-action primary-action-purple"><MessageCircle className="h-5 w-5" /> {busy ? "Working..." : "Send WhatsApp"}</button></div>
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2"><Field label="Audit Date" type="date" value={report.date} onChange={(value) => update("date", value)} /><Field label="Branch" value={report.branchName} onChange={(value) => update("branchName", value)} /></div>
       <div className="audit-entry-tabs mt-4">{[["outstanding","Outstanding"],["cash","Cash Count"],["vouchers","Petty Cash & Vouchers"],["iou","IOU & Notes"]].map(([id,label]) => <button key={id} type="button" onClick={() => setSection(id)} className={section === id ? "active" : ""}>{label}</button>)}</div>
@@ -67,7 +79,10 @@ export default function AuditReport({ selectedDate, branchName = "Middeniya" }) 
       {section === "iou" && <div className="mt-4 grid gap-4"><IouEntry rows={report.ious} updateList={updateList} addListRow={addListRow} deleteListRow={deleteListRow} total={calculated.iouTotal} /><div className="grid gap-3 sm:grid-cols-2"><label className="audit-field sm:col-span-2"><span>Note</span><textarea value={report.note} onChange={(event) => update("note", event.target.value)} rows="3" /></label><Field label="Branch Head" value={report.branchHead} onChange={(value) => update("branchHead", value)} /></div></div>}
       {status && <p className="mt-4 rounded-2xl bg-cyan-50 px-4 py-3 text-sm font-black text-cyan-900">{status}</p>}
     </div>
-    <div className="audit-preview-shell"><AuditLandscapeReport reportRef={reportRef} report={report} calculated={calculated} /></div>
+    <div className="audit-preview-section">
+      <div className="audit-preview-toolbar"><div><strong>Report Preview</strong><span>2 landscape pages</span></div><div className="audit-zoom-controls"><button type="button" onClick={() => setPreviewZoom((value) => Math.max(0.35, Number((value - 0.1).toFixed(2))))} title="Zoom out"><Minus className="h-4 w-4" /></button><strong>{Math.round(previewZoom * 100)}%</strong><button type="button" onClick={() => setPreviewZoom((value) => Math.min(1.5, Number((value + 0.1).toFixed(2))))} title="Zoom in"><Plus className="h-4 w-4" /></button><button type="button" onClick={() => setPreviewZoom(0.75)} title="Reset zoom"><RotateCcw className="h-4 w-4" /></button></div></div>
+      <div className="audit-preview-shell"><AuditPreviewPage zoom={previewZoom}><AuditLandscapeReport reportRef={(element) => { reportRefs.current[0] = element; }} report={report} calculated={calculated} /></AuditPreviewPage><AuditPreviewPage zoom={previewZoom}><AuditDetailsReport reportRef={(element) => { reportRefs.current[1] = element; }} report={report} calculated={calculated} /></AuditPreviewPage></div>
+    </div>
   </section>;
 }
 
@@ -99,5 +114,41 @@ function Field({ label, type="text", value, onChange }) { return <label classNam
 function AuditLandscapeReport({ reportRef, report, calculated }) {
   return <article ref={reportRef} className="audit-landscape-report"><header><div className="audit-report-brand"><img src="/report-assets/domex-logo.png" alt="DOMEX" /></div><div><p>{String(report.branchName || "Middeniya").toUpperCase()} BRANCH</p><small>Daily Operations Audit</small></div></header><section className="audit-report-title"><div><small>DOMEX {report.branchName || "Middeniya"} Branch</small><h1>OUTSTANDING AUDIT REPORT</h1></div><div><span>DATE</span><strong>{report.date}</strong></div></section><div className="audit-report-grid"><section className="audit-report-panel audit-wide"><h2>Outstanding Summary</h2><table><thead><tr><th>Description</th><th>Cash Bill</th><th>Cash Amount</th><th>COD Bill</th><th>COD Amount</th><th>E-Com Bill</th><th>E-Com Amount</th></tr></thead><tbody>{AUDIT_STATUS_ROWS.map(([key,label,group], index) => <Fragment key={key}><tr className={group === "A" ? "group-a" : "group-b"}><th>{label}</th><td>{count(report.statuses[key].cashBills)}</td><td>{money(report.statuses[key].cashAmount)}</td><td>{count(report.statuses[key].codBills)}</td><td>{money(report.statuses[key].codAmount)}</td><td>{count(report.statuses[key].ecomBills)}</td><td>{money(report.statuses[key].ecomAmount)}</td></tr>{index === 1 && <AuditReportTotal label="Total A" values={calculated.totalA} className="audit-inline-total" />}</Fragment>)}</tbody><tfoot><AuditReportTotal label="Total B" values={calculated.totalB}/><AuditReportTotal label="Difference A-B" values={calculated.difference}/></tfoot></table></section><section className="audit-report-panel"><h2>Outstanding Amount</h2><Kpi label="Cash" value={calculated.outstandingAmounts.cash}/><Kpi label="COD" value={calculated.outstandingAmounts.cod}/><Kpi label="E-Commerce" value={calculated.outstandingAmounts.ecom}/><Kpi label="Total" value={calculated.outstandingAmounts.total} strong/></section><section className="audit-report-panel"><h2>Cash Position</h2><Kpi label="Sales Cash" value={calculated.salesCashTotal}/><Kpi label="Cash In Hand" value={calculated.cashInHandTotal}/><Kpi label="Petty Cash Used" value={calculated.cashUsedForPettyCash}/><Kpi label="EX / Short" value={report.exShort}/></section><section className="audit-report-panel"><h2>Petty Cash & Vouchers</h2><Kpi label="Pending Petty Cash" value={calculated.pendingPettyCashTotal}/><Kpi label="In Hand Voucher" value={calculated.inHandVoucherTotal}/><Kpi label="IOU" value={calculated.iouTotal}/><Kpi label="Balancing Total" value={calculated.balancingTotal} strong/></section><section className="audit-report-panel audit-balance"><h2>Float Balancing</h2><div><small>Petty Cash Float</small><strong>LKR {money(report.pettyCashFloat)}</strong></div><div><small>Recorded Total</small><strong>LKR {money(calculated.balancingTotal)}</strong></div><div className={calculated.floatDifference === 0 ? "balanced" : "difference"}><small>Difference</small><strong>LKR {money(calculated.floatDifference)}</strong></div></section></div><footer><p><strong>NOTE:</strong> {report.note || "Daily branch audit completed."}</p><p><span>{report.branchHead || "Branch Head"}</span><small>Authorized by</small></p></footer></article>;
 }
+
+function AuditPreviewPage({ zoom, children }) {
+  return <div className="audit-preview-page" style={{ width: 1280 * zoom, height: 720 * zoom }}><div style={{ transform: `scale(${zoom})`, transformOrigin: "top left" }}>{children}</div></div>;
+}
+
+function AuditDetailsReport({ reportRef, report, calculated }) {
+  return <article ref={reportRef} className="audit-landscape-report audit-details-report">
+    <AuditReportHeader report={report} />
+    <section className="audit-report-title audit-details-title"><div><small>DOMEX {report.branchName || "Middeniya"} Branch</small><h1>CASH & VOUCHER DETAILS</h1></div><div><span>DATE</span><strong>{report.date}</strong></div></section>
+    <div className="audit-detail-grid">
+      <DenominationReportTable title="Sales Cash Denomination" values={report.salesCashDenominations} coins={report.salesCashCoins} total={calculated.salesCashTotal} />
+      <DenominationReportTable title="Cash In Hand Denomination" values={report.cashInHandDenominations} coins={report.cashInHandCoins} total={calculated.cashInHandTotal} />
+      <VoucherReportTable title="Pending Petty Cash" rows={report.pendingPettyCash} total={calculated.pendingPettyCashTotal} />
+      <VoucherReportTable title="In Hand Vouchers" rows={report.inHandVouchers} total={calculated.inHandVoucherTotal} />
+    </div>
+    <AuditReportFooter report={report} note="Cash denominations and voucher serials verified with the daily audit." />
+  </article>;
+}
+
+function AuditReportHeader({ report }) {
+  return <header><div className="audit-report-brand"><img src="/report-assets/domex-logo.png" alt="DOMEX" /></div><div><p>{String(report.branchName || "Middeniya").toUpperCase()} BRANCH</p><small>Daily Operations Audit</small></div></header>;
+}
+
+function AuditReportFooter({ report, note }) {
+  return <footer><p><strong>NOTE:</strong> {note || report.note || "Daily branch audit completed."}</p><p><span>{report.branchHead || "Branch Head"}</span><small>Authorized by</small></p></footer>;
+}
+
+function DenominationReportTable({ title, values, coins, total }) {
+  return <section className="audit-detail-panel"><h2>{title}</h2><table><thead><tr><th>Note Value</th><th>Count</th><th>Amount</th></tr></thead><tbody>{AUDIT_DENOMINATIONS.map((value) => <tr key={value}><th>{money(value)}</th><td>{count(values[value])}</td><td>{money(value * Number(values[value] || 0))}</td></tr>)}<tr><th>Coins</th><td>-</td><td>{money(coins)}</td></tr></tbody><tfoot><tr><th colSpan="2">Total</th><td>{money(total)}</td></tr></tfoot></table></section>;
+}
+
+function VoucherReportTable({ title, rows, total }) {
+  const displayRows = rows.length ? rows : [{ id: "empty", voucher: "-", amount: 0 }];
+  return <section className={`audit-detail-panel ${displayRows.length > 14 ? "compact" : ""}`}><h2>{title}</h2><table><thead><tr><th>No</th><th>Voucher Serial</th><th>Amount</th></tr></thead><tbody>{displayRows.map((row, index) => <tr key={row.id || `${row.voucher}-${index}`}><td>{index + 1}</td><th>{row.voucher || "-"}</th><td>{money(row.amount)}</td></tr>)}</tbody><tfoot><tr><th colSpan="2">Total</th><td>{money(total)}</td></tr></tfoot></table></section>;
+}
+
 function AuditReportTotal({label,values,className=""}) { return <tr className={className}><th>{label}</th><td>{count(values.cashBills)}</td><td>{money(values.cashAmount)}</td><td>{count(values.codBills)}</td><td>{money(values.codAmount)}</td><td>{count(values.ecomBills)}</td><td>{money(values.ecomAmount)}</td></tr>; }
 function Kpi({label,value,strong=false}) { return <div className={strong ? "audit-kpi strong" : "audit-kpi"}><span>{label}</span><b>LKR {money(value)}</b></div>; }
