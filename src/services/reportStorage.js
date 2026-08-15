@@ -1,4 +1,5 @@
 import { DEFAULT_DELIVERED_RIDER_TEMPLATE } from "../utils/deliveredRiderWhatsAppTemplates.js";
+import { LEGACY_BRANCH_ACCESS, normalizeUserPermissions } from "../permissions.js";
 
 const STORAGE_KEY = "daily-courier-report-system-v1";
 const COURIER_NAMES_KEY = "daily-courier-report-system-courier-names-v1";
@@ -12,7 +13,7 @@ const BACKUP_VERSION = 1;
 const MAX_UNDO_HISTORY = 5;
 const MAX_PERSISTED_HISTORY_CHARS = 1_200_000;
 const DEFAULT_COMPANY_NAME = "Domestic Express (pvt) ltd";
-const ADMIN_USER = { branchName: "madu", password: "2006", role: "admin", createdAt: "system" };
+const ADMIN_USER = { id: "system-admin", branchName: "madu", password: "2006", role: "admin", permissions: LEGACY_BRANCH_ACCESS, createdAt: "system" };
 const DEFAULT_WHATSAPP_CAPTION_TEMPLATES = {
   courier: "Branch Courier Performance Report - {date}\nSent automatically from Daily Report System",
   operation: "Operation Report - {date}\nSent automatically from Daily Report System",
@@ -242,31 +243,51 @@ export function getUsers() {
   const users = readRawJson(USERS_KEY, []);
   const normalizedUsers = Array.isArray(users) ? users : [];
   const hasAdmin = normalizedUsers.some((user) => normalizeBranchName(user.branchName) === ADMIN_USER.branchName);
-  return (hasAdmin ? normalizedUsers : [ADMIN_USER, ...normalizedUsers]).sort((a, b) => a.branchName.localeCompare(b.branchName));
+  return (hasAdmin ? normalizedUsers : [ADMIN_USER, ...normalizedUsers])
+    .map(normalizeStoredUser)
+    .sort((a, b) => a.branchName.localeCompare(b.branchName));
 }
 
 export function saveUserAccount(user) {
   const branchName = normalizeBranchName(user.branchName);
-  const password = String(user.password || "").trim();
-  if (!branchName || !password) throw new Error("Branch name and password are required.");
+  if (!branchName) throw new Error("Branch name is required.");
   if (branchName === ADMIN_USER.branchName) throw new Error("Admin account cannot be edited.");
 
   const users = getUsers().filter((item) => normalizeBranchName(item.branchName) !== ADMIN_USER.branchName);
+  const userId = String(user.id || "").trim();
+  const existing = users.find((item) => (userId && item.id === userId) || (!userId && item.authProvider !== "google" && normalizeBranchName(item.branchName) === branchName));
+  const authProvider = user.authProvider || existing?.authProvider || "password";
+  const password = String(user.password || existing?.password || "").trim();
+  if (authProvider !== "google" && !password) throw new Error("Password is required for a branch login.");
+  const nextUser = normalizeStoredUser({
+    ...existing,
+    ...user,
+    id: userId || existing?.id || `branch-${branchName}`,
+    branchName,
+    password,
+    role: user.role === "admin" ? "admin" : "branch",
+    authProvider,
+    status: user.status || existing?.status || "approved",
+    permissions: normalizeUserPermissions(user.permissions, { legacyDefault: existing ? !Array.isArray(existing.permissions) : false }),
+    createdAt: existing?.createdAt || user.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
   const nextUsers = [
-    ...users.filter((item) => normalizeBranchName(item.branchName) !== branchName),
-    { branchName, password, role: "branch", createdAt: user.createdAt || new Date().toISOString() },
+    ...users.filter((item) => item.id !== nextUser.id && !(authProvider !== "google" && item.authProvider !== "google" && normalizeBranchName(item.branchName) === branchName)),
+    nextUser,
   ].sort((a, b) => a.branchName.localeCompare(b.branchName));
 
   writeRawJson(USERS_KEY, nextUsers);
   return getUsers();
 }
 
-export function deleteUserAccount(branchName) {
-  const cleanBranchName = normalizeBranchName(branchName);
-  if (cleanBranchName === ADMIN_USER.branchName) throw new Error("Admin account cannot be deleted.");
+export function deleteUserAccount(identifier) {
+  const cleanIdentifier = String(identifier || "").trim();
+  const cleanBranchName = normalizeBranchName(identifier);
+  if (cleanIdentifier === ADMIN_USER.id || cleanBranchName === ADMIN_USER.branchName) throw new Error("Admin account cannot be deleted.");
   writeRawJson(
     USERS_KEY,
-    getUsers().filter((user) => normalizeBranchName(user.branchName) !== cleanBranchName && normalizeBranchName(user.branchName) !== ADMIN_USER.branchName),
+    getUsers().filter((user) => user.id !== cleanIdentifier && !(user.id === `branch-${cleanBranchName}`) && normalizeBranchName(user.branchName) !== ADMIN_USER.branchName),
   );
   return getUsers();
 }
@@ -274,29 +295,53 @@ export function deleteUserAccount(branchName) {
 export function replaceUserAccounts(users) {
   const nextUsers = (Array.isArray(users) ? users : [])
     .filter((user) => normalizeBranchName(user.branchName) && normalizeBranchName(user.branchName) !== ADMIN_USER.branchName)
-    .map((user) => ({
-      branchName: normalizeBranchName(user.branchName),
-      password: String(user.password || ""),
-      role: "branch",
-      createdAt: user.createdAt || new Date().toISOString(),
-    }));
+    .map(normalizeStoredUser);
   writeRawJson(USERS_KEY, nextUsers);
   return getUsers();
 }
 
 export function loginWithBranch(branchName, password) {
   const cleanBranchName = normalizeBranchName(branchName);
-  const user = getUsers().find((item) => normalizeBranchName(item.branchName) === cleanBranchName && String(item.password) === String(password || ""));
+  const user = getUsers().find((item) => item.authProvider !== "google" && item.status !== "disabled" && normalizeBranchName(item.branchName) === cleanBranchName && String(item.password) === String(password || ""));
   if (!user) throw new Error("Invalid branch name or password.");
 
+  return createSessionFromUser(user, { authProvider: "password" });
+}
+
+export function createSessionFromUser(user, authDetails = {}) {
+  if (!user?.branchName) throw new Error("This account does not have an assigned branch.");
+  if (user.status === "pending") throw new Error("This account is waiting for administrator approval.");
+  if (user.status === "disabled") throw new Error("This account has been disabled by the administrator.");
   const session = {
     branchName: normalizeBranchName(user.branchName),
     role: user.role || "branch",
+    userId: user.id || "",
+    email: user.email || authDetails.email || "",
+    displayName: user.displayName || authDetails.displayName || "",
+    photoURL: user.photoURL || authDetails.photoURL || "",
+    authProvider: authDetails.authProvider || user.authProvider || "password",
+    permissions: normalizeUserPermissions(user.permissions),
     loggedAt: new Date().toISOString(),
   };
   setActiveBranch(session.branchName);
   saveStoredSession(session);
   return session;
+}
+
+function normalizeStoredUser(user) {
+  const branchName = normalizeBranchName(user?.branchName);
+  const isAdmin = branchName === ADMIN_USER.branchName || user?.role === "admin" || user?.role === "superadmin";
+  return {
+    ...user,
+    id: user?.id || (isAdmin ? "system-admin" : user?.uid ? `google-${user.uid}` : `branch-${branchName}`),
+    branchName,
+    password: String(user?.password || ""),
+    role: isAdmin ? "admin" : "branch",
+    authProvider: user?.authProvider || "password",
+    status: user?.status || "approved",
+    permissions: isAdmin ? [...LEGACY_BRANCH_ACCESS] : normalizeUserPermissions(user?.permissions),
+    createdAt: user?.createdAt || new Date().toISOString(),
+  };
 }
 
 function writeMeta(meta) {

@@ -139,6 +139,18 @@ The first version uses `localStorage`. The storage code is isolated in `src/serv
 
 ## Firebase
 
+### Google login and branch access
+
+The app keeps existing branch/password accounts and adds optional Firebase Google sign-in. Existing branch report paths and saved report data are not migrated or deleted.
+
+1. Open Firebase Console > Authentication > Sign-in method.
+2. Enable the Google provider and choose the project support email.
+3. Enable the Anonymous provider. Existing branch/password users use a persisted anonymous Firebase session so Realtime Database sync can satisfy authenticated database rules; the app's own branch credentials and permissions still control the visible system sections.
+4. Under Authentication > Settings > Authorized domains, add every frontend hostname used by the system, including `domexrep.vercel.app` and any custom frontend domain.
+5. First-time Google users appear in the super admin `User Management` tab. The super admin must assign a branch and select the allowed sections before that account can enter the system.
+
+User account metadata and pending Google approvals are stored under `reportSystemAdmin/users`. Branch reports and settings continue to use their existing isolated `reportSystems/domexDailyCourier_<branch>` paths.
+
 Firebase is configured in `src/services/firebase.js`.
 
 To use Firebase Realtime Database sync:

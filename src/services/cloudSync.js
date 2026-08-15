@@ -1,4 +1,4 @@
-import { get, onValue, ref, runTransaction, serverTimestamp, set } from "firebase/database";
+import { get, onValue, ref, runTransaction, serverTimestamp, set, update } from "firebase/database";
 import { realtimeDb } from "./firebase.js";
 import { createBackupData, getActiveBranch, getUsers } from "./reportStorage.js";
 
@@ -272,7 +272,7 @@ export async function restoreSystemVersionToFirebase(versionId, sourceClientId =
   );
 
   if (Array.isArray(version.snapshot.users)) {
-    await set(ref(realtimeDb, "reportSystemAdmin/users"), {
+    await update(ref(realtimeDb, "reportSystemAdmin/users"), {
       users: toFirebaseJson(version.snapshot.users),
       updatedAt: serverTimestamp(),
     });
@@ -292,7 +292,7 @@ export function subscribeToFirebaseSnapshot(onSnapshotData, onError) {
 }
 
 export async function uploadUsersToFirebase() {
-  await set(ref(realtimeDb, "reportSystemAdmin/users"), {
+  await update(ref(realtimeDb, "reportSystemAdmin/users"), {
     users: toFirebaseJson(getUsers()),
     updatedAt: serverTimestamp(),
   });
@@ -302,4 +302,65 @@ export async function downloadUsersFromFirebase() {
   const usersSnapshot = await get(ref(realtimeDb, "reportSystemAdmin/users"));
   if (!usersSnapshot.exists()) return [];
   return fromFirebaseJson(usersSnapshot.val()?.users || []);
+}
+
+export function subscribeToUsers(onUsers, onError) {
+  return onValue(
+    ref(realtimeDb, "reportSystemAdmin/users"),
+    (snapshot) => onUsers(snapshot.exists() ? fromFirebaseJson(snapshot.val()?.users || []) : []),
+    onError,
+  );
+}
+
+export async function requestGoogleLoginApproval(profile) {
+  if (!profile?.uid || !profile?.email) throw new Error("Google did not return a valid account.");
+  const approvalRef = ref(realtimeDb, `reportSystemAdmin/users/googleApprovals/${safeFirebaseKey(profile.uid)}`);
+  const existing = await get(approvalRef);
+  const current = existing.val() || {};
+  if (current.status === "approved") return fromFirebaseJson(current);
+  const request = {
+    ...current,
+    uid: profile.uid,
+    email: profile.email,
+    displayName: profile.displayName || profile.email,
+    photoURL: profile.photoURL || "",
+    status: "pending",
+    requestedAt: current.requestedAt || new Date().toISOString(),
+    lastAttemptAt: new Date().toISOString(),
+  };
+  await set(approvalRef, toFirebaseJson(request));
+  return request;
+}
+
+export async function getGoogleApproval(uid) {
+  if (!uid) return null;
+  const snapshot = await get(ref(realtimeDb, `reportSystemAdmin/users/googleApprovals/${safeFirebaseKey(uid)}`));
+  return snapshot.exists() ? fromFirebaseJson(snapshot.val()) : null;
+}
+
+export function subscribeToGoogleApprovals(onApprovals, onError) {
+  return onValue(
+    ref(realtimeDb, "reportSystemAdmin/users/googleApprovals"),
+    (snapshot) => {
+      const approvals = Object.values(snapshot.val() || {})
+        .map(fromFirebaseJson)
+        .sort((a, b) => String(b.requestedAt || "").localeCompare(String(a.requestedAt || "")));
+      onApprovals(approvals);
+    },
+    onError,
+  );
+}
+
+export async function saveGoogleApproval(approval) {
+  if (!approval?.uid) throw new Error("Google approval request is invalid.");
+  const nextApproval = {
+    ...approval,
+    status: approval.status || "approved",
+    updatedAt: new Date().toISOString(),
+  };
+  await set(
+    ref(realtimeDb, `reportSystemAdmin/users/googleApprovals/${safeFirebaseKey(approval.uid)}`),
+    toFirebaseJson(nextApproval),
+  );
+  return nextApproval;
 }

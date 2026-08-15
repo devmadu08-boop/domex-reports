@@ -20,6 +20,7 @@ import {
   MessagesSquare,
   Package,
   PackageCheck,
+  Pencil,
   RotateCcw,
   Search,
   Send,
@@ -60,6 +61,7 @@ import {
   downloadBackupFile,
   addDataChangeListener,
   clearStoredSession,
+  createSessionFromUser,
   getCourierNames,
   getReportByDate,
   getReportHistory,
@@ -91,12 +93,19 @@ import {
   flushPendingCloudSync,
   getPendingCloudSync,
   listSystemVersions,
+  getGoogleApproval,
+  requestGoogleLoginApproval,
   restoreSystemVersionToFirebase,
   saveWeeklyBackupToFirebase,
   subscribeToFirebaseSnapshot,
+  subscribeToGoogleApprovals,
+  subscribeToUsers,
+  saveGoogleApproval,
   syncLocalSnapshotWithRecovery,
   uploadUsersToFirebase,
 } from "./services/cloudSync.js";
+import { ensureFirebaseAuthForSession, loginWithGoogleAccount, logoutFirebaseAccount } from "./services/authService.js";
+import { canAccessTab, getFirstAccessibleTab, hasPermission, normalizeUserPermissions, SYSTEM_ACCESS_OPTIONS } from "./permissions.js";
 import {
   getBackendHealth,
   getSystemHealth,
@@ -185,8 +194,10 @@ export default function App() {
   const [session, setSession] = useState(initialSession);
   const [firebaseStatus, setFirebaseStatus] = useState("Firebase waiting for login.");
   const [firebaseBootstrapped, setFirebaseBootstrapped] = useState(false);
+  const [firebaseAuthReady, setFirebaseAuthReady] = useState(false);
   const [backendStatus, setBackendStatus] = useState("Checking backend...");
   const [users, setUsers] = useState(getUsers);
+  const [googleApprovals, setGoogleApprovals] = useState([]);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [selectedDate, setSelectedDate] = useState(todayIso());
   const [searchDate, setSearchDate] = useState("");
@@ -222,7 +233,36 @@ export default function App() {
   const syncClientIdRef = useRef(getSyncClientId());
   const versionBootstrapRef = useRef({ branchName: "", promise: null });
 
-  const visibleTabs = useMemo(() => tabs.filter((tab) => !tab.adminOnly || session?.role === "admin"), [session?.role]);
+  const visibleTabs = useMemo(
+    () => tabs.filter((tab) => (tab.adminOnly ? session?.role === "admin" : canAccessTab(session, tab.id))),
+    [session],
+  );
+
+  useEffect(() => {
+    if (!session) return;
+    if (!canAccessTab(session, activeTab) && !(session.role === "admin" && tabs.some((tab) => tab.id === activeTab && tab.adminOnly))) {
+      setActiveTab(getFirstAccessibleTab(session, tabs));
+    }
+  }, [session, activeTab]);
+
+  useEffect(() => {
+    if (!session?.branchName) {
+      setFirebaseAuthReady(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setFirebaseAuthReady(false);
+    ensureFirebaseAuthForSession(session.authProvider || "password")
+      .then(() => {
+        if (!cancelled) setFirebaseAuthReady(true);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setFirebaseStatus("Firebase authentication required");
+        setCloudStatus(error.message || "Firebase authentication failed.");
+      });
+    return () => { cancelled = true; };
+  }, [session?.branchName, session?.authProvider, session?.userId]);
 
   useEffect(() => {
     if (!session?.branchName) return;
@@ -235,7 +275,37 @@ export default function App() {
   }, [session?.branchName]);
 
   useEffect(() => {
-    if (!session?.branchName || session.role !== "admin") return undefined;
+    if (!session?.branchName || session.role === "admin" || !firebaseAuthReady) return undefined;
+    return subscribeToUsers((cloudUsers) => {
+      if (!cloudUsers.length) return;
+      const nextUsers = replaceUserAccounts(cloudUsers);
+      setUsers(nextUsers);
+      const account = nextUsers.find((user) =>
+        (session.userId && user.id === session.userId)
+        || (session.authProvider === "google" && user.authProvider === "google" && user.email === session.email)
+        || (session.authProvider !== "google" && user.authProvider !== "google" && user.branchName === session.branchName),
+      );
+      if (!account) return;
+      if (account.status === "disabled") {
+        showNotice("This account has been disabled by the administrator.");
+        handleLogout();
+        return;
+      }
+      const nextPermissions = normalizeUserPermissions(account.permissions);
+      const permissionsChanged = JSON.stringify(nextPermissions) !== JSON.stringify(normalizeUserPermissions(session.permissions));
+      const branchChanged = account.branchName !== session.branchName;
+      if (!permissionsChanged && !branchChanged) return;
+      const refreshedSession = createSessionFromUser(account, { authProvider: account.authProvider, email: account.email });
+      setFirebaseBootstrapped(false);
+      bootstrappedCloudRef.current = false;
+      setSession(refreshedSession);
+      setActiveTab(getFirstAccessibleTab(refreshedSession, tabs));
+      showNotice("Your account access was updated by the administrator.");
+    }, () => {});
+  }, [session?.userId, session?.branchName, session?.authProvider, session?.email, session?.role, firebaseAuthReady]);
+
+  useEffect(() => {
+    if (!session?.branchName || session.role !== "admin" || !firebaseAuthReady) return undefined;
     let cancelled = false;
     if (versionBootstrapRef.current.branchName !== session.branchName) {
       versionBootstrapRef.current = {
@@ -260,10 +330,10 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [session?.branchName, session?.role]);
+  }, [session?.branchName, session?.role, firebaseAuthReady]);
 
   useEffect(() => {
-    if (!session?.branchName) return undefined;
+    if (!session?.branchName || !firebaseAuthReady) return undefined;
     const refresh = () => refreshRecoveryState();
     const unsubscribe = addDataChangeListener(refresh);
     window.addEventListener("online", refresh);
@@ -271,10 +341,10 @@ export default function App() {
       unsubscribe();
       window.removeEventListener("online", refresh);
     };
-  }, [session?.branchName]);
+  }, [session?.branchName, firebaseAuthReady]);
 
   useEffect(() => {
-    if (!session?.branchName) return undefined;
+    if (!session?.branchName || !firebaseAuthReady) return undefined;
     let cancelled = false;
 
     async function recoverCloudQueue() {
@@ -300,10 +370,10 @@ export default function App() {
       window.removeEventListener("online", recoverCloudQueue);
       window.clearInterval(timer);
     };
-  }, [session?.branchName]);
+  }, [session?.branchName, firebaseAuthReady]);
 
   useEffect(() => {
-    if (session?.role !== "admin") return;
+    if (session?.role !== "admin" || !firebaseAuthReady) return;
     downloadUsersFromFirebase()
       .then((cloudUsers) => {
         if (cloudUsers.length) setUsers(replaceUserAccounts(cloudUsers));
@@ -311,7 +381,18 @@ export default function App() {
       .catch(() => {
         setUsers(getUsers());
       });
-  }, [session?.role]);
+  }, [session?.role, firebaseAuthReady]);
+
+  useEffect(() => {
+    if (session?.role !== "admin" || !firebaseAuthReady) {
+      setGoogleApprovals([]);
+      return undefined;
+    }
+    return subscribeToGoogleApprovals(
+      setGoogleApprovals,
+      (error) => showNotice(error.message || "Google approval queue could not be loaded."),
+    );
+  }, [session?.role, firebaseAuthReady]);
 
   useEffect(() => {
     if (!session?.branchName) return;
@@ -358,7 +439,7 @@ export default function App() {
   }, [session?.branchName, settings.backupWhatsappNumber, settings.rescheduleApprovalReaction]);
 
   useEffect(() => {
-    if (!session?.branchName) return undefined;
+    if (!session?.branchName || !firebaseAuthReady) return undefined;
 
     let cancelled = false;
     setCloudStatus("Loading Firebase branch data...");
@@ -442,7 +523,7 @@ export default function App() {
       unsubscribeLocal();
       unsubscribeCloud();
     };
-  }, [session?.branchName, selectedDate, firebaseBootstrapped]);
+  }, [session?.branchName, selectedDate, firebaseBootstrapped, firebaseAuthReady]);
 
   useEffect(() => {
     if (!notice) return undefined;
@@ -579,12 +660,16 @@ export default function App() {
 
   async function handleLogin(branchName, password) {
     try {
+      await ensureFirebaseAuthForSession("password").catch((error) => {
+        setFirebaseStatus("Firebase authentication required");
+        setCloudStatus(error.message || "Enable Firebase Anonymous authentication for branch sync.");
+      });
       const cloudUsers = await downloadUsersFromFirebase().catch(() => []);
       if (cloudUsers.length) setUsers(replaceUserAccounts(cloudUsers));
       const nextSession = loginWithBranch(branchName, password);
       setFirebaseBootstrapped(false);
       setSession(nextSession);
-      setActiveTab("dashboard");
+      setActiveTab(getFirstAccessibleTab(nextSession, tabs));
       bootstrappedCloudRef.current = false;
       showNotice(`Logged in as ${nextSession.branchName}.`);
     } catch (error) {
@@ -592,7 +677,44 @@ export default function App() {
     }
   }
 
+  async function handleGoogleLogin() {
+    const profile = await loginWithGoogleAccount();
+    const cloudUsers = await downloadUsersFromFirebase().catch(() => []);
+    if (cloudUsers.length) setUsers(replaceUserAccounts(cloudUsers));
+    const availableUsers = cloudUsers.length ? cloudUsers : getUsers();
+    const approvedUser = availableUsers.find((user) =>
+      user.authProvider === "google"
+      && user.status !== "disabled"
+      && (user.authUid === profile.uid || String(user.email || "").toLowerCase() === profile.email.toLowerCase()),
+    );
+    const approval = await getGoogleApproval(profile.uid).catch(() => null);
+    const account = approvedUser || (approval?.status === "approved" && approval.branchName ? {
+      id: `google-${profile.uid}`,
+      authUid: profile.uid,
+      authProvider: "google",
+      status: "approved",
+      role: "branch",
+      branchName: approval.branchName,
+      permissions: approval.permissions,
+      ...profile,
+    } : null);
+
+    if (!account) {
+      await requestGoogleLoginApproval(profile);
+      return { pending: true, email: profile.email };
+    }
+
+    const nextSession = createSessionFromUser(account, { ...profile, authProvider: "google" });
+    setFirebaseBootstrapped(false);
+    setSession(nextSession);
+    setActiveTab(getFirstAccessibleTab(nextSession, tabs));
+    bootstrappedCloudRef.current = false;
+    showNotice(`Google login successful: ${nextSession.branchName}.`);
+    return { pending: false };
+  }
+
   function handleLogout() {
+    logoutFirebaseAccount().catch(() => {});
     clearStoredSession();
     setSession(null);
     setActiveTab("dashboard");
@@ -602,6 +724,7 @@ export default function App() {
     setCourierNames([]);
     setFirebaseStatus("Firebase waiting for login.");
     setFirebaseBootstrapped(false);
+    setFirebaseAuthReady(false);
     setBackendStatus("Checking backend...");
   }
 
@@ -893,15 +1016,64 @@ export default function App() {
     }
   }
 
-  async function handleDeleteUser(branchName) {
-    if (!confirm(`Delete branch user "${branchName}"?`)) return;
+  async function handleDeleteUser(userId) {
+    if (!confirm("Delete this user account? Existing branch report data will not be deleted.")) return;
     try {
-      const nextUsers = deleteUserAccount(branchName);
+      const account = users.find((user) => user.id === userId);
+      if (account?.authProvider === "google" && account.authUid) {
+        await saveGoogleApproval({
+          uid: account.authUid,
+          email: account.email,
+          displayName: account.displayName,
+          status: "revoked",
+          revokedAt: new Date().toISOString(),
+        });
+      }
+      const nextUsers = deleteUserAccount(userId);
       setUsers(nextUsers);
       await uploadUsersToFirebase();
       showNotice("Branch user deleted and synced.");
     } catch (error) {
       showNotice(error.message || "Could not delete user.");
+    }
+  }
+
+  async function handleApproveGoogleUser(approval, branchName, permissions) {
+    try {
+      const approved = await saveGoogleApproval({
+        ...approval,
+        branchName,
+        permissions: normalizeUserPermissions(permissions, { legacyDefault: false }),
+        status: "approved",
+        approvedAt: new Date().toISOString(),
+        approvedBy: session.branchName,
+      });
+      const nextUsers = saveUserAccount({
+        id: `google-${approval.uid}`,
+        authUid: approval.uid,
+        authProvider: "google",
+        email: approval.email,
+        displayName: approval.displayName,
+        photoURL: approval.photoURL,
+        branchName,
+        permissions: approved.permissions,
+        status: "approved",
+        role: "branch",
+      });
+      setUsers(nextUsers);
+      await uploadUsersToFirebase();
+      showNotice(`${approval.email} approved for ${branchName}.`);
+    } catch (error) {
+      showNotice(error.message || "Google user approval failed.");
+    }
+  }
+
+  async function handleRejectGoogleUser(approval) {
+    try {
+      await saveGoogleApproval({ ...approval, status: "rejected", rejectedAt: new Date().toISOString() });
+      showNotice(`${approval.email} login request rejected.`);
+    } catch (error) {
+      showNotice(error.message || "Google user rejection failed.");
     }
   }
 
@@ -1038,10 +1210,11 @@ export default function App() {
     };
   }, [selectedDate, history, courierRows, operation, systemHealth]);
 
-  const activeTabLabel = visibleTabs.find((tab) => tab.id === activeTab)?.label || "Dashboard";
+  const effectiveActiveTab = visibleTabs.some((tab) => tab.id === activeTab) ? activeTab : getFirstAccessibleTab(session, tabs);
+  const activeTabLabel = visibleTabs.find((tab) => tab.id === effectiveActiveTab)?.label || "Account Access";
 
   if (!session) {
-    return <LoginScreen onLogin={handleLogin} />;
+    return <LoginScreen onLogin={handleLogin} onGoogleLogin={handleGoogleLogin} />;
   }
 
   return (
@@ -1070,7 +1243,7 @@ export default function App() {
         <nav className="sidebar-nav mt-7 grid gap-3">
           {visibleTabs.map((tab) => {
             const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
+            const isActive = effectiveActiveTab === tab.id;
             return (
               <button
                 key={tab.id}
@@ -1082,6 +1255,7 @@ export default function App() {
                   <Icon className="h-5 w-5" />
                 </span>
                 {tab.label}
+                {tab.id === "users" && googleApprovals.filter((approval) => approval.status === "pending").length > 0 ? <span className="approval-count">{googleApprovals.filter((approval) => approval.status === "pending").length}</span> : null}
               </button>
             );
           })}
@@ -1155,7 +1329,7 @@ export default function App() {
           <p className="text-xs font-semibold text-[#6f6597]">Mobile app mode</p>
         </div>
 
-        {!["deliveredConverter", "settings", "dashboard", "meterChats"].includes(activeTab) && (
+        {!["deliveredConverter", "settings", "dashboard", "meterChats"].includes(effectiveActiveTab) && effectiveActiveTab !== "noAccess" && (
           <DateSelector
             selectedDate={selectedDate}
             onDateChange={setSelectedDate}
@@ -1165,7 +1339,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === "dashboard" && (
+        {effectiveActiveTab === "dashboard" && (
           <section className="dashboard-layout">
             <div className="dashboard-main-column">
               <DateSelector
@@ -1217,7 +1391,7 @@ export default function App() {
           </section>
         )}
 
-        {activeTab === "courier" && (
+        {effectiveActiveTab === "courier" && (
           <CourierPerformanceForm
             selectedDate={selectedDate}
             rows={courierRows}
@@ -1239,7 +1413,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === "operation" && (
+        {effectiveActiveTab === "operation" && (
           <OperationReportForm
             selectedDate={selectedDate}
             form={operationForm}
@@ -1252,7 +1426,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === "exports" && (
+        {effectiveActiveTab === "exports" && (
           <section className="grid gap-5">
             <div className="glass-panel p-4">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -1291,17 +1465,17 @@ export default function App() {
           </section>
         )}
 
-        {activeTab === "allReports" && (
+        {effectiveActiveTab === "allReports" && (
           <AllInOneReports companyName={settings.companyName} branchName={settings.branchName || session.branchName} />
         )}
 
-        {activeTab === "deliveredConverter" && <DeliveredReportConverter onSaved={handleDeliveredReportSaved} companyName={settings.companyName} defaultBranchName={settings.branchName} />}
+        {effectiveActiveTab === "deliveredConverter" && <DeliveredReportConverter onSaved={handleDeliveredReportSaved} companyName={settings.companyName} defaultBranchName={settings.branchName} />}
 
-        {activeTab === "reschedule" && (
+        {effectiveActiveTab === "reschedule" && (
           <RescheduleReport selectedDate={selectedDate} branchName={settings.branchName || "Middeniya"} />
         )}
 
-        {activeTab === "pettyCash" && (
+        {effectiveActiveTab === "pettyCash" && (
           <PettyCashManagement
             selectedDate={selectedDate}
             branchName={settings.branchName || session.branchName || "Middeniya"}
@@ -1309,19 +1483,20 @@ export default function App() {
             vehicleEmployeeMappings={settings.pettyCashVehicleEmployees || []}
             floatAmount={settings.pettyCashFloatAmount || 0}
             onSaveFloatAmount={(value) => handleSaveAppSettings({ pettyCashFloatAmount: value })}
+            canManageFloat={hasPermission(session, "pettyCash.float")}
           />
         )}
 
-        {activeTab === "audit" && (
+        {effectiveActiveTab === "audit" && (
           <AuditReport
             selectedDate={selectedDate}
             branchName={settings.branchName || session.branchName || "Middeniya"}
           />
         )}
 
-        {activeTab === "meterChats" && session.role === "admin" && <MeterChatsDashboard />}
+        {effectiveActiveTab === "meterChats" && session.role === "admin" && <MeterChatsDashboard />}
 
-        {activeTab === "settings" && (
+        {effectiveActiveTab === "settings" && (
           <>
             <SettingsPage
               settings={settings}
@@ -1351,8 +1526,23 @@ export default function App() {
           </>
         )}
 
-        {activeTab === "users" && session.role === "admin" && (
-          <UserManagement users={users} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} />
+        {effectiveActiveTab === "users" && session.role === "admin" && (
+          <UserManagement
+            users={users}
+            googleApprovals={googleApprovals}
+            onSaveUser={handleSaveUser}
+            onDeleteUser={handleDeleteUser}
+            onApproveGoogle={handleApproveGoogleUser}
+            onRejectGoogle={handleRejectGoogleUser}
+          />
+        )}
+
+        {effectiveActiveTab === "noAccess" && (
+          <section className="access-empty-state">
+            <ShieldCheck className="h-12 w-12" />
+            <h2>No sections assigned</h2>
+            <p>Ask the system administrator to assign the sections required for this account.</p>
+          </section>
         )}
       </main>
       </div>
@@ -1361,7 +1551,7 @@ export default function App() {
         <div className="mobile-scrollbar flex gap-1 overflow-x-auto pb-1">
           {visibleTabs.map((tab) => {
             const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
+            const isActive = effectiveActiveTab === tab.id;
             return (
               <button
                 key={tab.id}
@@ -1373,6 +1563,7 @@ export default function App() {
               >
                 <Icon className="h-5 w-5" />
                 <span className="max-w-full truncate">{tab.mobileLabel || tab.label.split(" ")[0]}</span>
+                {tab.id === "users" && googleApprovals.filter((approval) => approval.status === "pending").length > 0 ? <span className="mobile-approval-count">{googleApprovals.filter((approval) => approval.status === "pending").length}</span> : null}
               </button>
             );
           })}
@@ -1572,11 +1763,12 @@ function BottomBanner({ onClick }) {
   );
 }
 
-function LoginScreen({ onLogin }) {
+function LoginScreen({ onLogin, onGoogleLogin }) {
   const [branchName, setBranchName] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loggingIn, setLoggingIn] = useState(false);
+  const [googlePending, setGooglePending] = useState("");
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -1586,6 +1778,20 @@ function LoginScreen({ onLogin }) {
       await onLogin(branchName, password);
     } catch (loginError) {
       setError(loginError.message || "Login failed.");
+    } finally {
+      setLoggingIn(false);
+    }
+  }
+
+  async function handleGoogle() {
+    setError("");
+    setGooglePending("");
+    setLoggingIn(true);
+    try {
+      const result = await onGoogleLogin();
+      if (result?.pending) setGooglePending(`Approval request sent for ${result.email}. Ask the administrator to approve and assign a branch.`);
+    } catch (loginError) {
+      setError(loginError.message || "Google login failed.");
     } finally {
       setLoggingIn(false);
     }
@@ -1615,6 +1821,12 @@ function LoginScreen({ onLogin }) {
             <ShieldCheck className="h-5 w-5" />
             {loggingIn ? "Logging in..." : "Login"}
           </button>
+          <div className="login-divider"><span>or</span></div>
+          <button type="button" onClick={handleGoogle} disabled={loggingIn} className="google-login-button">
+            <span className="google-mark">G</span>
+            Continue with Google
+          </button>
+          {googlePending ? <p className="login-approval-message">{googlePending}</p> : null}
         </div>
       </form>
     </main>
@@ -1631,65 +1843,126 @@ function StatusPill({ icon: Icon, label, value, ok }) {
   );
 }
 
-function UserManagement({ users, onSaveUser, onDeleteUser }) {
-  const [branchName, setBranchName] = useState("");
-  const [password, setPassword] = useState("");
+function UserManagement({ users, googleApprovals, onSaveUser, onDeleteUser, onApproveGoogle, onRejectGoogle }) {
+  const emptyForm = { id: "", branchName: "", password: "", permissions: [], authProvider: "password", authUid: "", email: "", displayName: "", photoURL: "" };
+  const [form, setForm] = useState(emptyForm);
+  const groupedPermissions = useMemo(
+    () => SYSTEM_ACCESS_OPTIONS.reduce((groups, option) => ({ ...groups, [option.group]: [...(groups[option.group] || []), option] }), {}),
+    [],
+  );
+
+  function togglePermission(permission) {
+    setForm((current) => ({
+      ...current,
+      permissions: current.permissions.includes(permission)
+        ? current.permissions.filter((item) => item !== permission)
+        : [...current.permissions, permission],
+    }));
+  }
 
   function handleSave(event) {
     event.preventDefault();
-    onSaveUser({ branchName, password });
-    setBranchName("");
-    setPassword("");
+    onSaveUser({ ...form, status: "approved" });
+    setForm(emptyForm);
   }
 
+  function editUser(user) {
+    setForm({
+      id: user.id,
+      branchName: user.branchName,
+      password: "",
+      permissions: normalizeUserPermissions(user.permissions),
+      authProvider: user.authProvider || "password",
+      authUid: user.authUid || "",
+      email: user.email || "",
+      displayName: user.displayName || "",
+      photoURL: user.photoURL || "",
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  const pendingApprovals = (googleApprovals || []).filter((approval) => approval.status === "pending");
+
   return (
-    <section className="grid gap-5">
-      <div className="glass-panel p-4">
-        <div className="mb-4 flex items-center gap-3">
-          <span className="grid h-12 w-12 place-items-center rounded-2xl bg-violet-100 text-violet-700 shadow-inner">
-            <UserPlus className="h-6 w-6" />
-          </span>
-          <div>
-            <h2 className="text-xl font-black text-[#071537]">User Management</h2>
-            <p className="text-sm font-semibold text-blue-950/65">Create branch accounts. Each branch keeps separate Firebase synced data.</p>
+    <section className="user-management-grid">
+      {pendingApprovals.length ? (
+        <div className="glass-panel user-approval-panel">
+          <div className="user-management-heading">
+            <span><ShieldCheck className="h-6 w-6" /></span>
+            <div><h2>Google Login Approvals</h2><p>Assign a branch and the exact sections each new Google account may use.</p></div>
+          </div>
+          <div className="grid gap-3">
+            {pendingApprovals.map((approval) => (
+              <GoogleApprovalCard key={approval.uid} approval={approval} onApprove={onApproveGoogle} onReject={onRejectGoogle} />
+            ))}
           </div>
         </div>
+      ) : null}
 
-        <form onSubmit={handleSave} className="grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
-          <label className="grid gap-2">
-            <span className="text-sm font-black text-[#071537]">Branch Name</span>
-            <input value={branchName} onChange={(event) => setBranchName(event.target.value)} className="login-input" placeholder="branch name" />
-          </label>
-          <label className="grid gap-2">
-            <span className="text-sm font-black text-[#071537]">Password</span>
-            <input value={password} onChange={(event) => setPassword(event.target.value)} className="login-input" placeholder="password" />
-          </label>
-          <button type="submit" className="primary-action primary-action-green">
-            <SaveUserIcon />
-            Save User
-          </button>
+      <div className="glass-panel user-editor-panel">
+        <div className="user-management-heading">
+          <span><UserPlus className="h-6 w-6" /></span>
+          <div><h2>{form.id ? "Edit Branch Access" : "Create Branch Account"}</h2><p>Every branch keeps its own reports, settings, riders, and Firebase snapshot.</p></div>
+        </div>
+        <form onSubmit={handleSave} className="grid gap-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="grid gap-2"><span className="text-sm font-black text-[#071537]">Branch Name</span><input required value={form.branchName} onChange={(event) => setForm({ ...form, branchName: event.target.value })} className="login-input" placeholder="kahawatta" /></label>
+            {form.authProvider === "google" ? <div className="google-account-readonly"><strong>Google account</strong><span>{form.email}</span></div> : <label className="grid gap-2"><span className="text-sm font-black text-[#071537]">Password {form.id ? "(leave blank to keep current)" : ""}</span><input required={!form.id} type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} className="login-input" placeholder="Secure password" /></label>}
+          </div>
+          <PermissionPicker groupedPermissions={groupedPermissions} selected={form.permissions} onToggle={togglePermission} onSelectAll={() => setForm({ ...form, permissions: SYSTEM_ACCESS_OPTIONS.map((option) => option.id) })} onClear={() => setForm({ ...form, permissions: [] })} />
+          <div className="flex flex-wrap justify-end gap-2">
+            {form.id ? <button type="button" onClick={() => setForm(emptyForm)} className="petty-action petty-action-neutral">Cancel Edit</button> : null}
+            <button type="submit" className="primary-action primary-action-green"><SaveUserIcon />{form.id ? "Update Access" : "Create User"}</button>
+          </div>
         </form>
       </div>
 
-      <div className="glass-panel p-4">
-        <h3 className="mb-3 text-lg font-black text-[#071537]">Branch Accounts</h3>
-        <div className="grid gap-2">
-          {users.map((user) => (
-            <div key={user.branchName} className="grid gap-3 rounded-2xl border border-[#eadff2] bg-[#fff8f4] px-4 py-3 md:grid-cols-[1fr_auto_auto] md:items-center">
-              <span>
-                <span className="block font-black text-[#071537]">{user.branchName}</span>
-                <span className="text-xs font-bold text-blue-950/60">{user.role === "admin" ? "Admin login" : "Branch account"}</span>
-              </span>
-              <span className="rounded-2xl bg-violet-50 px-3 py-2 text-xs font-black text-violet-700">{user.role || "branch"}</span>
-              <button type="button" disabled={user.role === "admin"} onClick={() => onDeleteUser(user.branchName)} className="history-action text-red-600 disabled:cursor-not-allowed disabled:opacity-40" aria-label={`Delete ${user.branchName}`}>
-                <Trash2 className="h-5 w-5" />
-              </button>
-            </div>
-          ))}
+      <div className="glass-panel user-list-panel">
+        <h3>Accounts & Access</h3>
+        <div className="grid gap-3">
+          {users.map((user) => {
+            const userPermissions = normalizeUserPermissions(user.permissions);
+            return <article key={user.id || user.branchName} className="user-account-row">
+              <div className="user-account-identity">
+                {user.photoURL ? <img src={user.photoURL} alt="" referrerPolicy="no-referrer" /> : <span><UserRound className="h-5 w-5" /></span>}
+                <div><strong>{user.displayName || user.branchName}</strong><small>{user.email || `${user.branchName} branch login`}</small></div>
+              </div>
+              <div className="user-access-summary">
+                <span className="user-branch-pill">{user.branchName}</span>
+                <span>{user.role === "admin" ? "Full super admin access" : `${userPermissions.length} permission${userPermissions.length === 1 ? "" : "s"}`}</span>
+                {user.role !== "admin" ? <div>{userPermissions.map((permission) => <small key={permission}>{SYSTEM_ACCESS_OPTIONS.find((option) => option.id === permission)?.label || permission}</small>)}</div> : null}
+              </div>
+              <div className="user-account-actions">
+                <span className={user.authProvider === "google" ? "google" : "password"}>{user.authProvider === "google" ? "Google" : "Password"}</span>
+                <button type="button" disabled={user.role === "admin"} onClick={() => editUser(user)} className="history-action text-blue-700 disabled:opacity-30" aria-label={`Edit ${user.branchName}`}><Pencil className="h-5 w-5" /></button>
+                <button type="button" disabled={user.role === "admin"} onClick={() => onDeleteUser(user.id)} className="history-action text-red-600 disabled:opacity-30" aria-label={`Delete ${user.branchName}`}><Trash2 className="h-5 w-5" /></button>
+              </div>
+            </article>;
+          })}
         </div>
       </div>
     </section>
   );
+}
+
+function PermissionPicker({ groupedPermissions, selected, onToggle, onSelectAll, onClear }) {
+  return <div className="permission-picker">
+    <div className="permission-picker-heading"><div><strong>Section Access</strong><small>Only selected sections appear after login.</small></div><div><button type="button" onClick={onSelectAll}>Select All</button><button type="button" onClick={onClear}>Clear</button></div></div>
+    <div className="permission-groups">{Object.entries(groupedPermissions).map(([group, options]) => <fieldset key={group}><legend>{group}</legend>{options.map((option) => <label key={option.id}><input type="checkbox" checked={selected.includes(option.id)} onChange={() => onToggle(option.id)} /><span><CheckCircle2 className="h-4 w-4" />{option.label}</span></label>)}</fieldset>)}</div>
+  </div>;
+}
+
+function GoogleApprovalCard({ approval, onApprove, onReject }) {
+  const [branchName, setBranchName] = useState("");
+  const [permissions, setPermissions] = useState([]);
+  const grouped = useMemo(() => SYSTEM_ACCESS_OPTIONS.reduce((groups, option) => ({ ...groups, [option.group]: [...(groups[option.group] || []), option] }), {}), []);
+  function toggle(permission) { setPermissions((current) => current.includes(permission) ? current.filter((item) => item !== permission) : [...current, permission]); }
+  return <article className="google-approval-card">
+    <div className="user-account-identity">{approval.photoURL ? <img src={approval.photoURL} alt="" referrerPolicy="no-referrer" /> : <span><UserRound className="h-5 w-5" /></span>}<div><strong>{approval.displayName}</strong><small>{approval.email}</small></div></div>
+    <label className="grid gap-2"><span className="text-sm font-black">Assign Branch</span><input value={branchName} onChange={(event) => setBranchName(event.target.value)} className="login-input" placeholder="Branch name" /></label>
+    <PermissionPicker groupedPermissions={grouped} selected={permissions} onToggle={toggle} onSelectAll={() => setPermissions(SYSTEM_ACCESS_OPTIONS.map((option) => option.id))} onClear={() => setPermissions([])} />
+    <div className="flex flex-wrap justify-end gap-2"><button type="button" onClick={() => onReject(approval)} className="petty-action petty-action-red">Reject</button><button type="button" disabled={!branchName.trim()} onClick={() => onApprove(approval, branchName, permissions)} className="petty-action petty-action-green disabled:opacity-40"><ShieldCheck className="h-4 w-4" /> Approve & Assign</button></div>
+  </article>;
 }
 
 function SaveUserIcon() {
