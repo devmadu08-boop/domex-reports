@@ -578,6 +578,7 @@ export function getAllReports() {
       operation: value.operation || null,
       delivered: normalizeDelivered(value.delivered),
       rescheduleRows: value.rescheduleRows || [],
+      pettyCash: value.pettyCash || null,
       updatedAt: value.updatedAt,
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
@@ -630,6 +631,7 @@ export function getSettings() {
     auditDefaultGroupJids: [],
     backupWhatsappNumber: "",
     pettyCashVehicleEmployees: [],
+    pettyCashFloatAmount: 0,
     rescheduleApprovalReaction: "✅",
     ...savedSettings,
     whatsappCaptionTemplates: {

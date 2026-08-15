@@ -48,6 +48,54 @@ export function applyPettyCashEmployeeMappings(entries, mappings = []) {
   });
 }
 
+export function getPettyCashVoucherKey(entry) {
+  return clean(entry?.sourceId || entry?.referenceNo).toUpperCase();
+}
+
+export function mergePettyCashFloatEntries(importedEntries, savedEntries = [], importedAt = new Date().toISOString()) {
+  const savedByKey = new Map(
+    (Array.isArray(savedEntries) ? savedEntries : [])
+      .map((entry) => [getPettyCashVoucherKey(entry), entry])
+      .filter(([key]) => key),
+  );
+
+  return (Array.isArray(importedEntries) ? importedEntries : []).map((entry) => {
+    const saved = savedByKey.get(getPettyCashVoucherKey(entry));
+    return {
+      ...entry,
+      floatStatus: saved?.floatStatus === "passed" ? "passed" : "pending",
+      pendingSince: saved?.pendingSince || entry.paymentDate || importedAt.slice(0, 10),
+      passedAt: saved?.floatStatus === "passed" ? saved.passedAt || importedAt : "",
+    };
+  });
+}
+
+export function getPettyCashPendingAgeDays(entry, now = new Date()) {
+  if (entry?.floatStatus === "passed") return 0;
+  const source = entry?.pendingSince || entry?.paymentDate || entry?.importedAt;
+  if (!source) return 0;
+  const start = new Date(`${String(source).slice(0, 10)}T00:00:00`);
+  const end = now instanceof Date ? now : new Date(now);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return 0;
+  return Math.max(0, Math.floor((end.getTime() - start.getTime()) / 86_400_000));
+}
+
+export function calculatePettyCashFloat(entries, floatAmount) {
+  const rows = Array.isArray(entries) ? entries : [];
+  const pending = rows.filter((entry) => entry.floatStatus !== "passed");
+  const passed = rows.filter((entry) => entry.floatStatus === "passed");
+  const sum = (items) => Number(items.reduce((total, entry) => total + (Number(entry.value) || 0), 0).toFixed(2));
+  const pendingTotal = sum(pending);
+  const passedTotal = sum(passed);
+  return {
+    pendingCount: pending.length,
+    passedCount: passed.length,
+    pendingTotal,
+    passedTotal,
+    cashInHand: Number(((Number(floatAmount) || 0) - pendingTotal).toFixed(2)),
+  };
+}
+
 export function paginatePettyCashEntries(entries, rowsPerPage = 20) {
   const rows = Array.isArray(entries) ? entries : [];
   if (!rows.length) return [[]];
@@ -96,5 +144,5 @@ export function amountToWords(value) {
 }
 
 export function emptyPettyCashEntry(branchName = "") {
-  return { id: crypto.randomUUID(), sourceId: "", status: "Pending", referenceNo: "", paymentDate: "", branchName, paymentType: "", paymentFor: "", cashReportNo: "", vehicleNo: "", fromKms: "", toKms: "", totalKms: "", employeeName: "", ofdReportNo: "", memo: "", note: "", value: 0 };
+  return { id: crypto.randomUUID(), sourceId: "", status: "Pending", floatStatus: "pending", pendingSince: "", passedAt: "", referenceNo: "", paymentDate: "", branchName, paymentType: "", paymentFor: "", cashReportNo: "", vehicleNo: "", fromKms: "", toKms: "", totalKms: "", employeeName: "", ofdReportNo: "", memo: "", note: "", value: 0 };
 }

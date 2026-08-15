@@ -1307,6 +1307,8 @@ export default function App() {
             branchName={settings.branchName || session.branchName || "Middeniya"}
             companyName={settings.companyName}
             vehicleEmployeeMappings={settings.pettyCashVehicleEmployees || []}
+            floatAmount={settings.pettyCashFloatAmount || 0}
+            onSaveFloatAmount={(value) => handleSaveAppSettings({ pettyCashFloatAmount: value })}
           />
         )}
 
