@@ -133,6 +133,12 @@ VITE_WHATSAPP_API_BASE_URL=https://your-whatsapp-backend-domain.com
 
 6. Redeploy the Vercel frontend.
 
+### WhatsApp accounts per login
+
+Each non-admin system login has its own WhatsApp QR session, connected number, report groups, backup snapshot, and send-queue scope. The existing admin WhatsApp remains in `backend/data/whatsapp-auth`; additional login sessions are stored separately under `backend/data/whatsapp-accounts/<login-key>/` and are never exposed to the frontend.
+
+After deploying this version, each branch user opens `Settings > Report WhatsApp`, scans that login's QR, fetches its groups, and saves its own destinations. Back up the complete `backend/data/` directory when moving the VPS so every linked WhatsApp session is preserved.
+
 ## Storage
 
 The first version uses `localStorage`. The storage code is isolated in `src/services/reportStorage.js` so Firebase or Supabase can be added later without rewriting the UI.

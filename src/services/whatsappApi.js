@@ -1,4 +1,15 @@
 const whatsappApiBaseUrl = (import.meta.env.VITE_WHATSAPP_API_BASE_URL || "").replace(/\/$/, "");
+let whatsappAccountKey = "default";
+
+export function setWhatsAppAccountContext(session) {
+  if (!session || session.role === "admin" || session.role === "superadmin") {
+    whatsappAccountKey = "default";
+    return whatsappAccountKey;
+  }
+  const identity = String(session.userId || session.branchName || "branch").trim().toLowerCase();
+  whatsappAccountKey = `user-${identity}`.replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-").slice(0, 80);
+  return whatsappAccountKey;
+}
 
 async function requestJson(path, options = {}) {
   let response;
@@ -6,11 +17,12 @@ async function requestJson(path, options = {}) {
 
   try {
     response = await fetch(url, {
+      ...options,
       headers: {
         "Content-Type": "application/json",
+        "X-WhatsApp-Account": whatsappAccountKey,
         ...(options.headers || {}),
       },
-      ...options,
     });
   } catch {
     throw new Error("WhatsApp backend is not reachable. Start it locally with npm run server or set VITE_WHATSAPP_API_BASE_URL in Vercel.");

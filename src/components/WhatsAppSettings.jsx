@@ -46,7 +46,7 @@ const templatePresets = {
   ],
 };
 
-export default function WhatsAppSettings({ settings, onSaveSettings }) {
+export default function WhatsAppSettings({ settings, onSaveSettings, accountLabel = "Current login" }) {
   const [status, setStatus] = useState(null);
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [groups, setGroups] = useState([]);
@@ -335,6 +335,7 @@ export default function WhatsAppSettings({ settings, onSaveSettings }) {
           <div>
             <h3 className="text-lg font-black text-[#071537]">WhatsApp Settings</h3>
             <p className="text-sm font-semibold text-blue-950/65">Connect WhatsApp and choose the default report groups.</p>
+            <p className="mt-1 text-xs font-black uppercase text-violet-700">Account: {accountLabel}</p>
           </div>
         </div>
         <span className={`rounded-2xl px-4 py-2 text-sm font-black ${connected ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-700"}`}>

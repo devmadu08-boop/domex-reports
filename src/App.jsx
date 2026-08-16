@@ -111,6 +111,7 @@ import {
   getSystemHealth,
   retryFailedWhatsAppQueue,
   saveWhatsAppBackupConfig,
+  setWhatsAppAccountContext,
   syncWhatsAppBackupSnapshot,
 } from "./services/whatsappApi.js";
 import { todayIso, displayDate } from "./utils/date.js";
@@ -191,6 +192,7 @@ function reportTypeLabel(type) {
 export default function App() {
   const initialSession = getStoredSession();
   if (initialSession?.branchName) setActiveBranch(initialSession.branchName);
+  setWhatsAppAccountContext(initialSession);
   const [session, setSession] = useState(initialSession);
   const [firebaseStatus, setFirebaseStatus] = useState("Firebase waiting for login.");
   const [firebaseBootstrapped, setFirebaseBootstrapped] = useState(false);
@@ -237,6 +239,10 @@ export default function App() {
     () => tabs.filter((tab) => (tab.adminOnly ? session?.role === "admin" : canAccessTab(session, tab.id))),
     [session],
   );
+
+  useEffect(() => {
+    setWhatsAppAccountContext(session);
+  }, [session?.userId, session?.branchName, session?.role]);
 
   useEffect(() => {
     if (!session) return;
@@ -1509,6 +1515,7 @@ export default function App() {
               onCloudDownload={handleCloudDownload}
               cloudStatus={cloudStatus}
               onThemeChange={handleThemeChange}
+              whatsappAccountLabel={`${session.branchName}${session.email ? ` (${session.email})` : ""}`}
             >
               {session.role === "admin" && (
                 <SystemRecoveryPanel

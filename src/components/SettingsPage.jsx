@@ -44,6 +44,7 @@ export default function SettingsPage({
   onCloudDownload,
   cloudStatus,
   onThemeChange,
+  whatsappAccountLabel,
   children,
 }) {
   const [draftSettings, setDraftSettings] = useState(settings);
@@ -301,7 +302,7 @@ export default function SettingsPage({
       </div>}
 
       <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        {activeSection === "whatsapp" && <WhatsAppSettings settings={settings} onSaveSettings={onSaveSettings} />}
+        {activeSection === "whatsapp" && <WhatsAppSettings settings={settings} onSaveSettings={onSaveSettings} accountLabel={whatsappAccountLabel} />}
         {activeSection === "meter" && <RiderMeterMonitorSettings />}
 
         {activeSection === "pettyCash" && <div className="glass-panel p-4 lg:col-span-2">

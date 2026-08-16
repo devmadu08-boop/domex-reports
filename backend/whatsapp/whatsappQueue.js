@@ -49,11 +49,12 @@ export function configureWhatsAppQueue(nextProcessor) {
   processor = nextProcessor;
 }
 
-export async function sendWithWhatsAppQueue(type, payload) {
+export async function sendWithWhatsAppQueue(type, payload, accountKey = "default") {
   if (!processor) throw new Error("WhatsApp queue processor is not configured.");
   const job = {
     id: crypto.randomUUID(),
     type,
+    accountKey,
     payload,
     status: "pending",
     attempts: 0,
@@ -151,11 +152,12 @@ export function startWhatsAppQueueWorker() {
   }, 15_000);
 }
 
-export async function retryWhatsAppJob(jobId) {
+export async function retryWhatsAppJob(jobId, accountKey = "default") {
   await withQueueLock(async () => {
     const queue = await readQueue();
     const job = queue.find((item) => item.id === jobId);
     if (!job) throw new Error("WhatsApp queue job was not found.");
+    if ((job.accountKey || "default") !== accountKey) throw new Error("WhatsApp queue job belongs to another login.");
     job.status = "pending";
     job.nextRetryAt = new Date().toISOString();
     job.updatedAt = new Date().toISOString();
@@ -164,12 +166,12 @@ export async function retryWhatsAppJob(jobId) {
   return sanitizeJob(await processJob(jobId));
 }
 
-export async function retryFailedWhatsAppJobs() {
+export async function retryFailedWhatsAppJobs(accountKey = "default") {
   await withQueueLock(async () => {
     const queue = await readQueue();
     const now = new Date().toISOString();
     queue.forEach((job) => {
-      if (job.status === "failed") {
+      if (job.status === "failed" && (job.accountKey || "default") === accountKey) {
         job.status = "pending";
         job.nextRetryAt = now;
         job.updatedAt = now;
@@ -178,11 +180,12 @@ export async function retryFailedWhatsAppJobs() {
     await writeQueue(queue);
   });
   await processDueWhatsAppJobs();
-  return getWhatsAppQueueStatus();
+  return getWhatsAppQueueStatus(accountKey);
 }
 
-export async function getWhatsAppQueueStatus() {
-  const queue = await withQueueLock(readQueue);
+export async function getWhatsAppQueueStatus(accountKey = "default") {
+  const allJobs = await withQueueLock(readQueue);
+  const queue = allJobs.filter((job) => (job.accountKey || "default") === accountKey);
   const counts = queue.reduce(
     (result, job) => ({ ...result, [job.status]: (result[job.status] || 0) + 1 }),
     { pending: 0, sending: 0, failed: 0, sent: 0 },
@@ -197,6 +200,7 @@ function sanitizeJob(job) {
   return {
     id: job.id,
     type: job.type,
+    accountKey: job.accountKey || "default",
     status: job.status,
     attempts: job.attempts,
     createdAt: job.createdAt,

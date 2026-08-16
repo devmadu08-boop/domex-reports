@@ -8,6 +8,7 @@ import {
   startMeterMonitorScheduler,
 } from "./whatsapp/meterMonitorService.js";
 import whatsappRoutes from "./whatsapp/whatsappRoutes.js";
+import { startAccountBackupScheduler, startSavedAccountClients } from "./whatsapp/accountWhatsappService.js";
 import { getWhatsAppStatus, startDailyBackupScheduler, startWhatsAppClient } from "./whatsapp/whatsappService.js";
 import { getWhatsAppQueueStatus, startWhatsAppQueueWorker } from "./whatsapp/whatsappQueue.js";
 
@@ -77,9 +78,13 @@ app.listen(port, host, () => {
 startWhatsAppClient().catch((error) => {
   console.error("[whatsapp-startup]", error);
 });
+startSavedAccountClients().catch((error) => {
+  console.error("[whatsapp-account-startup]", error);
+});
 startMeterMonitorClient().catch((error) => {
   console.error("[meter-monitor-startup]", error);
 });
 startDailyBackupScheduler();
+startAccountBackupScheduler();
 startMeterMonitorScheduler();
 startWhatsAppQueueWorker();
