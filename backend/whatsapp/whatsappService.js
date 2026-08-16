@@ -163,7 +163,7 @@ export async function startWhatsAppClient(force = false) {
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
   const { version } = await fetchLatestBaileysVersion();
 
-  socket = makeWASocket({
+  const activeSocket = makeWASocket({
     auth: state,
     version,
     printQRInTerminal: false,
@@ -171,9 +171,10 @@ export async function startWhatsAppClient(force = false) {
     browser: ["Daily Report System", "Chrome", "1.0.0"],
     syncFullHistory: true,
   });
+  socket = activeSocket;
 
-  socket.ev.on("creds.update", saveCreds);
-  socket.ev.on("messages.upsert", ({ messages, type }) => {
+  activeSocket.ev.on("creds.update", saveCreds);
+  activeSocket.ev.on("messages.upsert", ({ messages, type }) => {
     for (const listener of primaryMessageListeners) {
       try {
         listener({ messages: messages || [], type });
@@ -182,7 +183,7 @@ export async function startWhatsAppClient(force = false) {
       }
     }
   });
-  socket.ev.on("messaging-history.set", ({ messages, chats, contacts }) => {
+  activeSocket.ev.on("messaging-history.set", ({ messages, chats, contacts }) => {
     for (const listener of primaryMessageListeners) {
       try {
         listener({ messages: messages || [], chats, contacts, type: "history" });
@@ -191,7 +192,7 @@ export async function startWhatsAppClient(force = false) {
       }
     }
   });
-  socket.ev.on("chats.upsert", (chats) => {
+  activeSocket.ev.on("chats.upsert", (chats) => {
     for (const listener of primaryMessageListeners) {
       try {
         listener({ messages: [], chats, type: "chats" });
@@ -200,7 +201,7 @@ export async function startWhatsAppClient(force = false) {
       }
     }
   });
-  socket.ev.on("contacts.upsert", (contacts) => {
+  activeSocket.ev.on("contacts.upsert", (contacts) => {
     for (const listener of primaryMessageListeners) {
       try {
         listener({ messages: [], contacts, type: "contacts" });
@@ -209,7 +210,7 @@ export async function startWhatsAppClient(force = false) {
       }
     }
   });
-  socket.ev.on("messages.reaction", (reactions) => {
+  activeSocket.ev.on("messages.reaction", (reactions) => {
     for (const listener of primaryMessageListeners) {
       try {
         listener({ messages: [], reactions: reactions || [], type: "reaction" });
@@ -223,12 +224,15 @@ export async function startWhatsAppClient(force = false) {
       });
     }
   });
-  socket.ev.on("connection.update", async (update) => {
+  activeSocket.ev.on("connection.update", async (update) => {
+    if (socket !== activeSocket) return;
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
+      const qrDataUrl = await QRCode.toDataURL(qr, { margin: 1, width: 280 });
+      if (socket !== activeSocket || connectionState === "connected") return;
       currentQr = qr;
-      currentQrDataUrl = await QRCode.toDataURL(qr, { margin: 1, width: 280 });
+      currentQrDataUrl = qrDataUrl;
       connectionState = "qr";
     }
 
@@ -236,7 +240,7 @@ export async function startWhatsAppClient(force = false) {
       currentQr = "";
       currentQrDataUrl = "";
       connectionState = "connected";
-      connectedNumber = normalizePhone(socket.user?.id);
+      connectedNumber = normalizePhone(activeSocket.user?.id);
     }
 
     if (connection === "close") {
@@ -247,7 +251,9 @@ export async function startWhatsAppClient(force = false) {
       socket = null;
 
       if (!loggedOut) {
-        setTimeout(() => startWhatsAppClient(true).catch(console.error), 2500);
+        setTimeout(() => {
+          if (!socket) startWhatsAppClient().catch(console.error);
+        }, 2500);
       }
     }
   });
@@ -288,29 +294,31 @@ export async function getQrCode() {
 }
 
 export async function reconnectWhatsApp() {
-  if (socket) {
+  const previousSocket = socket;
+  socket = null;
+  if (previousSocket) {
     try {
-      socket.end(undefined);
+      previousSocket.end(undefined);
     } catch {
       // Existing socket may already be closed.
     }
   }
-  socket = null;
   connectionState = "disconnected";
   await startWhatsAppClient(true);
   return getWhatsAppStatus();
 }
 
 export async function logoutWhatsApp() {
-  if (socket) {
+  const previousSocket = socket;
+  socket = null;
+  if (previousSocket) {
     try {
-      await socket.logout();
+      await previousSocket.logout();
     } catch {
       // Continue removing local auth even if remote logout fails.
     }
   }
 
-  socket = null;
   currentQr = "";
   currentQrDataUrl = "";
   connectionState = "disconnected";

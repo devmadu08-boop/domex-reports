@@ -38,6 +38,7 @@ function getRuntime(accountKey) {
       status: "disconnected",
       connectedNumber: "",
       reconnecting: false,
+      reconnectTimer: null,
       approvalSending: false,
     });
   }
@@ -107,6 +108,10 @@ async function startAccountClient(accountKey, force = false) {
   const runtime = getRuntime(accountKey);
   if (runtime.socket && !force) return runtime.socket;
   if (runtime.reconnecting) return runtime.socket;
+  if (runtime.reconnectTimer) {
+    clearTimeout(runtime.reconnectTimer);
+    runtime.reconnectTimer = null;
+  }
   runtime.reconnecting = true;
   await fs.mkdir(runtime.authDir, { recursive: true });
   try {
@@ -130,23 +135,39 @@ async function startAccountClient(accountKey, force = false) {
       }
     });
     socket.ev.on("connection.update", async ({ connection, lastDisconnect, qr }) => {
+      if (runtime.socket !== socket) return;
       if (qr) {
+        const qrDataUrl = await QRCode.toDataURL(qr, { margin: 1, width: 280 });
+        if (runtime.socket !== socket || runtime.status === "connected") return;
         runtime.qr = qr;
-        runtime.qrDataUrl = await QRCode.toDataURL(qr, { margin: 1, width: 280 });
+        runtime.qrDataUrl = qrDataUrl;
         runtime.status = "qr";
       }
       if (connection === "open") {
+        if (runtime.reconnectTimer) {
+          clearTimeout(runtime.reconnectTimer);
+          runtime.reconnectTimer = null;
+        }
         runtime.qr = "";
         runtime.qrDataUrl = "";
         runtime.status = "connected";
         runtime.connectedNumber = normalizePhone(socket.user?.id);
       }
       if (connection === "close") {
-        const loggedOut = lastDisconnect?.error?.output?.statusCode === DisconnectReason.loggedOut;
+        const statusCode = lastDisconnect?.error?.output?.statusCode
+          || lastDisconnect?.error?.data?.statusCode
+          || lastDisconnect?.error?.statusCode;
+        const loggedOut = statusCode === DisconnectReason.loggedOut;
         runtime.socket = null;
         runtime.status = "disconnected";
         runtime.connectedNumber = "";
-        if (!loggedOut) setTimeout(() => startAccountClient(runtime.key, true).catch(console.error), 2500);
+        console.log(`[whatsapp-account:${runtime.key}] disconnected (${statusCode || "unknown"})${loggedOut ? " - logged out" : " - reconnecting"}`);
+        if (!loggedOut) {
+          runtime.reconnectTimer = setTimeout(() => {
+            runtime.reconnectTimer = null;
+            if (!runtime.socket) startAccountClient(runtime.key).catch(console.error);
+          }, 2500);
+        }
       }
     });
     return socket;
@@ -222,8 +243,13 @@ export async function getAccountQr(accountKey) {
 export async function reconnectAccountWhatsApp(accountKey) {
   if (isPrimary(accountKey)) return primary.reconnectWhatsApp();
   const runtime = getRuntime(accountKey);
-  try { runtime.socket?.end(undefined); } catch { /* already closed */ }
+  if (runtime.reconnectTimer) {
+    clearTimeout(runtime.reconnectTimer);
+    runtime.reconnectTimer = null;
+  }
+  const previousSocket = runtime.socket;
   runtime.socket = null;
+  try { previousSocket?.end(undefined); } catch { /* already closed */ }
   runtime.status = "disconnected";
   await startAccountClient(runtime.key, true);
   return getAccountWhatsAppStatus(runtime.key);
@@ -232,8 +258,13 @@ export async function reconnectAccountWhatsApp(accountKey) {
 export async function logoutAccountWhatsApp(accountKey) {
   if (isPrimary(accountKey)) return primary.logoutWhatsApp();
   const runtime = getRuntime(accountKey);
-  try { await runtime.socket?.logout(); } catch { /* remove local auth regardless */ }
+  if (runtime.reconnectTimer) {
+    clearTimeout(runtime.reconnectTimer);
+    runtime.reconnectTimer = null;
+  }
+  const previousSocket = runtime.socket;
   runtime.socket = null;
+  try { await previousSocket?.logout(); } catch { /* remove local auth regardless */ }
   runtime.qr = "";
   runtime.qrDataUrl = "";
   runtime.status = "disconnected";
