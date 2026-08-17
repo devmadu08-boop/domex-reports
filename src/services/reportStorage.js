@@ -1,5 +1,12 @@
 import { DEFAULT_DELIVERED_RIDER_TEMPLATE } from "../utils/deliveredRiderWhatsAppTemplates.js";
-import { LEGACY_BRANCH_ACCESS, normalizeUserPermissions } from "../permissions.js";
+import {
+  LEGACY_BRANCH_ACCESS,
+  REGIONAL_MANAGER_ACCESS,
+  getAccessibleBranches,
+  normalizeAssignedBranches,
+  normalizeUserPermissions,
+  normalizeUserRole,
+} from "../permissions.js";
 
 const STORAGE_KEY = "daily-courier-report-system-v1";
 const COURIER_NAMES_KEY = "daily-courier-report-system-courier-names-v1";
@@ -13,7 +20,7 @@ const BACKUP_VERSION = 1;
 const MAX_UNDO_HISTORY = 5;
 const MAX_PERSISTED_HISTORY_CHARS = 1_200_000;
 const DEFAULT_COMPANY_NAME = "Domestic Express (pvt) ltd";
-const ADMIN_USER = { id: "system-admin", branchName: "madu", password: "2006", role: "admin", permissions: LEGACY_BRANCH_ACCESS, createdAt: "system" };
+const ADMIN_USER = { id: "system-admin", branchName: "madu", password: "2006", role: "superadmin", permissions: LEGACY_BRANCH_ACCESS, createdAt: "system" };
 const DEFAULT_WHATSAPP_CAPTION_TEMPLATES = {
   courier: "Branch Courier Performance Report - {date}\nSent automatically from Daily Report System",
   operation: "Operation Report - {date}\nSent automatically from Daily Report System",
@@ -227,7 +234,20 @@ export function getActiveBranch() {
 }
 
 export function getStoredSession() {
-  return readRawJson(SESSION_KEY, null);
+  const stored = readRawJson(SESSION_KEY, null);
+  if (!stored?.branchName) return null;
+  const homeBranchName = normalizeBranchName(stored.homeBranchName || stored.branchName);
+  const role = normalizeUserRole(stored.role, { systemAdmin: homeBranchName === ADMIN_USER.branchName });
+  const assignedBranches = normalizeAssignedBranches(stored.assignedBranches);
+  const allowedBranches = getAccessibleBranches({ ...stored, homeBranchName, role, assignedBranches });
+  const activeBranchName = normalizeBranchName(stored.branchName);
+  return {
+    ...stored,
+    branchName: allowedBranches.includes(activeBranchName) ? activeBranchName : (allowedBranches[0] || homeBranchName),
+    homeBranchName,
+    assignedBranches,
+    role,
+  };
 }
 
 export function saveStoredSession(session) {
@@ -259,13 +279,17 @@ export function saveUserAccount(user) {
   const authProvider = user.authProvider || existing?.authProvider || "password";
   const password = String(user.password || existing?.password || "").trim();
   if (authProvider !== "google" && !password) throw new Error("Password is required for a branch login.");
+  const role = normalizeUserRole(user.role || existing?.role);
+  const assignedBranches = normalizeAssignedBranches(user.assignedBranches ?? existing?.assignedBranches);
+  if (role === "regional_manager" && !assignedBranches.length) throw new Error("Assign at least one branch to a Regional Manager.");
   const nextUser = normalizeStoredUser({
     ...existing,
     ...user,
     id: userId || existing?.id || `branch-${branchName}`,
     branchName,
     password,
-    role: user.role === "admin" ? "admin" : "branch",
+    role,
+    assignedBranches,
     authProvider,
     status: user.status || existing?.status || "approved",
     permissions: normalizeUserPermissions(user.permissions, { legacyDefault: existing ? !Array.isArray(existing.permissions) : false }),
@@ -312,15 +336,25 @@ export function createSessionFromUser(user, authDetails = {}) {
   if (!user?.branchName) throw new Error("This account does not have an assigned branch.");
   if (user.status === "pending") throw new Error("This account is waiting for administrator approval.");
   if (user.status === "disabled") throw new Error("This account has been disabled by the administrator.");
+  const homeBranchName = normalizeBranchName(user.branchName);
+  const role = normalizeUserRole(user.role, { systemAdmin: homeBranchName === ADMIN_USER.branchName });
+  const assignedBranches = normalizeAssignedBranches(user.assignedBranches);
+  const requestedBranch = normalizeBranchName(authDetails.activeBranchName);
+  const allowedBranches = getAccessibleBranches({ homeBranchName, branchName: homeBranchName, role, assignedBranches });
+  const activeBranchName = requestedBranch && allowedBranches.includes(requestedBranch) ? requestedBranch : (allowedBranches[0] || homeBranchName);
   const session = {
-    branchName: normalizeBranchName(user.branchName),
-    role: user.role || "branch",
+    branchName: activeBranchName,
+    homeBranchName,
+    assignedBranches,
+    role,
     userId: user.id || "",
     email: user.email || authDetails.email || "",
     displayName: user.displayName || authDetails.displayName || "",
     photoURL: user.photoURL || authDetails.photoURL || "",
     authProvider: authDetails.authProvider || user.authProvider || "password",
-    permissions: normalizeUserPermissions(user.permissions),
+    permissions: role === "regional_manager" && (!Array.isArray(user.permissions) || user.permissions.length === 0)
+      ? [...REGIONAL_MANAGER_ACCESS]
+      : normalizeUserPermissions(user.permissions),
     loggedAt: new Date().toISOString(),
   };
   setActiveBranch(session.branchName);
@@ -330,16 +364,23 @@ export function createSessionFromUser(user, authDetails = {}) {
 
 function normalizeStoredUser(user) {
   const branchName = normalizeBranchName(user?.branchName);
-  const isAdmin = branchName === ADMIN_USER.branchName || user?.role === "admin" || user?.role === "superadmin";
+  const role = normalizeUserRole(user?.role, { systemAdmin: branchName === ADMIN_USER.branchName });
+  const hasFullAccess = role === "admin" || role === "superadmin";
+  const assignedBranches = normalizeAssignedBranches(user?.assignedBranches);
   return {
     ...user,
-    id: user?.id || (isAdmin ? "system-admin" : user?.uid ? `google-${user.uid}` : `branch-${branchName}`),
+    id: user?.id || (branchName === ADMIN_USER.branchName ? "system-admin" : user?.uid ? `google-${user.uid}` : `branch-${branchName}`),
     branchName,
     password: String(user?.password || ""),
-    role: isAdmin ? "admin" : "branch",
+    role,
+    assignedBranches: role === "regional_manager" ? assignedBranches : [],
     authProvider: user?.authProvider || "password",
     status: user?.status || "approved",
-    permissions: isAdmin ? [...LEGACY_BRANCH_ACCESS] : normalizeUserPermissions(user?.permissions),
+    permissions: hasFullAccess
+      ? [...LEGACY_BRANCH_ACCESS]
+      : (role === "regional_manager" && (!Array.isArray(user?.permissions) || user.permissions.length === 0)
+        ? [...REGIONAL_MANAGER_ACCESS]
+        : normalizeUserPermissions(user?.permissions, { legacyDefault: role !== "regional_manager" })),
     createdAt: user?.createdAt || new Date().toISOString(),
   };
 }

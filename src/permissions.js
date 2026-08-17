@@ -13,6 +13,16 @@ export const SYSTEM_ACCESS_OPTIONS = [
 ];
 
 export const LEGACY_BRANCH_ACCESS = SYSTEM_ACCESS_OPTIONS.map((option) => option.id);
+export const REGIONAL_MANAGER_ACCESS = SYSTEM_ACCESS_OPTIONS
+  .filter((option) => option.id !== "settings")
+  .map((option) => option.id);
+
+export const USER_ROLE_OPTIONS = [
+  { id: "branch", label: "Branch User" },
+  { id: "regional_manager", label: "Regional Manager" },
+  { id: "admin", label: "Admin" },
+  { id: "superadmin", label: "Super Admin" },
+];
 
 const TAB_ACCESS = {
   dashboard: ["dashboard"],
@@ -31,6 +41,36 @@ export function normalizeUserPermissions(value, { legacyDefault = true } = {}) {
   if (!Array.isArray(value)) return legacyDefault ? [...LEGACY_BRANCH_ACCESS] : [];
   const allowed = new Set(SYSTEM_ACCESS_OPTIONS.map((option) => option.id));
   return [...new Set(value.filter((permission) => allowed.has(permission)))];
+}
+
+export function normalizeUserRole(value, { systemAdmin = false } = {}) {
+  if (systemAdmin) return "superadmin";
+  const role = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (role === "superadmin" || role === "super_admin") return "superadmin";
+  if (role === "admin") return "admin";
+  if (role === "regional" || role === "regional_manager") return "regional_manager";
+  return "branch";
+}
+
+export function isSuperAdmin(value) {
+  return normalizeUserRole(typeof value === "string" ? value : value?.role) === "superadmin";
+}
+
+export function canManageUsers(value) {
+  const role = normalizeUserRole(typeof value === "string" ? value : value?.role);
+  return role === "admin" || role === "superadmin";
+}
+
+export function normalizeAssignedBranches(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((branch) => String(branch || "").trim().toLowerCase()).filter(Boolean))];
+}
+
+export function getAccessibleBranches(session) {
+  const homeBranch = String(session?.homeBranchName || session?.branchName || "").trim().toLowerCase();
+  if (normalizeUserRole(session?.role) !== "regional_manager") return homeBranch ? [homeBranch] : [];
+  const assigned = normalizeAssignedBranches(session?.assignedBranches);
+  return assigned.length ? assigned : (homeBranch ? [homeBranch] : []);
 }
 
 export function hasPermission(session, permission) {

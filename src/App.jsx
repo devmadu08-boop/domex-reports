@@ -79,6 +79,7 @@ import {
   saveCourierName,
   saveReportType,
   saveSettings,
+  saveStoredSession,
   saveUserAccount,
   deleteUserAccount,
   setActiveBranch,
@@ -105,7 +106,20 @@ import {
   uploadUsersToFirebase,
 } from "./services/cloudSync.js";
 import { ensureFirebaseAuthForSession, loginWithGoogleAccount, logoutFirebaseAccount } from "./services/authService.js";
-import { canAccessTab, getFirstAccessibleTab, hasPermission, normalizeUserPermissions, SYSTEM_ACCESS_OPTIONS } from "./permissions.js";
+import {
+  canAccessTab,
+  canManageUsers,
+  getAccessibleBranches,
+  getFirstAccessibleTab,
+  hasPermission,
+  isSuperAdmin,
+  normalizeAssignedBranches,
+  normalizeUserPermissions,
+  normalizeUserRole,
+  REGIONAL_MANAGER_ACCESS,
+  SYSTEM_ACCESS_OPTIONS,
+  USER_ROLE_OPTIONS,
+} from "./permissions.js";
 import {
   getBackendHealth,
   getSystemHealth,
@@ -236,9 +250,10 @@ export default function App() {
   const versionBootstrapRef = useRef({ branchName: "", promise: null });
 
   const visibleTabs = useMemo(
-    () => tabs.filter((tab) => (tab.adminOnly ? session?.role === "admin" : canAccessTab(session, tab.id))),
+    () => tabs.filter((tab) => (tab.adminOnly ? canManageUsers(session) : canAccessTab(session, tab.id))),
     [session],
   );
+  const accessibleBranches = useMemo(() => getAccessibleBranches(session), [session]);
 
   useEffect(() => {
     setWhatsAppAccountContext(session);
@@ -246,7 +261,7 @@ export default function App() {
 
   useEffect(() => {
     if (!session) return;
-    if (!canAccessTab(session, activeTab) && !(session.role === "admin" && tabs.some((tab) => tab.id === activeTab && tab.adminOnly))) {
+    if (!canAccessTab(session, activeTab) && !(canManageUsers(session) && tabs.some((tab) => tab.id === activeTab && tab.adminOnly))) {
       setActiveTab(getFirstAccessibleTab(session, tabs));
     }
   }, [session, activeTab]);
@@ -281,7 +296,7 @@ export default function App() {
   }, [session?.branchName]);
 
   useEffect(() => {
-    if (!session?.branchName || session.role === "admin" || !firebaseAuthReady) return undefined;
+    if (!session?.branchName || isSuperAdmin(session) || !firebaseAuthReady) return undefined;
     return subscribeToUsers((cloudUsers) => {
       if (!cloudUsers.length) return;
       const nextUsers = replaceUserAccounts(cloudUsers);
@@ -289,7 +304,7 @@ export default function App() {
       const account = nextUsers.find((user) =>
         (session.userId && user.id === session.userId)
         || (session.authProvider === "google" && user.authProvider === "google" && user.email === session.email)
-        || (session.authProvider !== "google" && user.authProvider !== "google" && user.branchName === session.branchName),
+        || (session.authProvider !== "google" && user.authProvider !== "google" && user.branchName === (session.homeBranchName || session.branchName)),
       );
       if (!account) return;
       if (account.status === "disabled") {
@@ -299,19 +314,27 @@ export default function App() {
       }
       const nextPermissions = normalizeUserPermissions(account.permissions);
       const permissionsChanged = JSON.stringify(nextPermissions) !== JSON.stringify(normalizeUserPermissions(session.permissions));
-      const branchChanged = account.branchName !== session.branchName;
-      if (!permissionsChanged && !branchChanged) return;
-      const refreshedSession = createSessionFromUser(account, { authProvider: account.authProvider, email: account.email });
+      const nextRole = normalizeUserRole(account.role);
+      const roleChanged = nextRole !== normalizeUserRole(session.role);
+      const nextAssignedBranches = normalizeAssignedBranches(account.assignedBranches);
+      const branchesChanged = JSON.stringify(nextAssignedBranches) !== JSON.stringify(normalizeAssignedBranches(session.assignedBranches));
+      const homeBranchChanged = account.branchName !== (session.homeBranchName || session.branchName);
+      if (!permissionsChanged && !roleChanged && !branchesChanged && !homeBranchChanged) return;
+      const refreshedSession = createSessionFromUser(account, {
+        authProvider: account.authProvider,
+        email: account.email,
+        activeBranchName: session.branchName,
+      });
       setFirebaseBootstrapped(false);
       bootstrappedCloudRef.current = false;
       setSession(refreshedSession);
       setActiveTab(getFirstAccessibleTab(refreshedSession, tabs));
       showNotice("Your account access was updated by the administrator.");
     }, () => {});
-  }, [session?.userId, session?.branchName, session?.authProvider, session?.email, session?.role, firebaseAuthReady]);
+  }, [session?.userId, session?.branchName, session?.homeBranchName, session?.assignedBranches, session?.authProvider, session?.email, session?.role, firebaseAuthReady]);
 
   useEffect(() => {
-    if (!session?.branchName || session.role !== "admin" || !firebaseAuthReady) return undefined;
+    if (!session?.branchName || !isSuperAdmin(session) || !firebaseAuthReady) return undefined;
     let cancelled = false;
     if (versionBootstrapRef.current.branchName !== session.branchName) {
       versionBootstrapRef.current = {
@@ -379,7 +402,7 @@ export default function App() {
   }, [session?.branchName, firebaseAuthReady]);
 
   useEffect(() => {
-    if (session?.role !== "admin" || !firebaseAuthReady) return;
+    if (!canManageUsers(session) || !firebaseAuthReady) return;
     downloadUsersFromFirebase()
       .then((cloudUsers) => {
         if (cloudUsers.length) setUsers(replaceUserAccounts(cloudUsers));
@@ -390,7 +413,7 @@ export default function App() {
   }, [session?.role, firebaseAuthReady]);
 
   useEffect(() => {
-    if (session?.role !== "admin" || !firebaseAuthReady) {
+    if (!canManageUsers(session) || !firebaseAuthReady) {
       setGoogleApprovals([]);
       return undefined;
     }
@@ -538,7 +561,7 @@ export default function App() {
   }, [notice]);
 
   useEffect(() => {
-    if (session?.role !== "admin") return undefined;
+    if (!isSuperAdmin(session)) return undefined;
 
     let cancelled = false;
     async function checkBackend() {
@@ -699,8 +722,9 @@ export default function App() {
       authUid: profile.uid,
       authProvider: "google",
       status: "approved",
-      role: "branch",
+      role: approval.role || "branch",
       branchName: approval.branchName,
+      assignedBranches: approval.assignedBranches || [],
       permissions: approval.permissions,
       ...profile,
     } : null);
@@ -732,6 +756,19 @@ export default function App() {
     setFirebaseBootstrapped(false);
     setFirebaseAuthReady(false);
     setBackendStatus("Checking backend...");
+  }
+
+  function handleWorkspaceBranchChange(event) {
+    const branchName = String(event.target.value || "").trim().toLowerCase();
+    if (!accessibleBranches.includes(branchName) || branchName === session.branchName) return;
+    const nextSession = { ...session, branchName };
+    setActiveBranch(branchName);
+    saveStoredSession(nextSession);
+    setFirebaseBootstrapped(false);
+    bootstrappedCloudRef.current = false;
+    lastCloudUpdateRef.current = "";
+    setSession(nextSession);
+    showNotice(`Now viewing ${branchName} branch reports.`);
   }
 
   function shouldApplyCloudSnapshot(snapshot) {
@@ -966,7 +1003,7 @@ export default function App() {
     setSettingsState(savedSettings);
     setStableTarget(savedSettings.operationTarget || "");
     setCourierNames(getCourierNames());
-    if (session?.role === "admin") setUsers(getUsers());
+    if (canManageUsers(session)) setUsers(getUsers());
     loadDate(selectedDate);
   }
 
@@ -1013,6 +1050,9 @@ export default function App() {
 
   async function handleSaveUser(user) {
     try {
+      if (normalizeUserRole(user.role) === "superadmin" && !isSuperAdmin(session)) {
+        throw new Error("Only the Super Admin can assign the Super Admin role.");
+      }
       const nextUsers = saveUserAccount(user);
       setUsers(nextUsers);
       await uploadUsersToFirebase();
@@ -1044,11 +1084,15 @@ export default function App() {
     }
   }
 
-  async function handleApproveGoogleUser(approval, branchName, permissions) {
+  async function handleApproveGoogleUser(approval, branchName, permissions, role = "branch", assignedBranches = []) {
     try {
+      const normalizedRole = normalizeUserRole(role);
+      if (normalizedRole === "superadmin" && !isSuperAdmin(session)) throw new Error("Only the Super Admin can assign the Super Admin role.");
       const approved = await saveGoogleApproval({
         ...approval,
         branchName,
+        role: normalizedRole,
+        assignedBranches: normalizeAssignedBranches(assignedBranches),
         permissions: normalizeUserPermissions(permissions, { legacyDefault: false }),
         status: "approved",
         approvedAt: new Date().toISOString(),
@@ -1064,7 +1108,8 @@ export default function App() {
         branchName,
         permissions: approved.permissions,
         status: "approved",
-        role: "branch",
+        role: normalizedRole,
+        assignedBranches: approved.assignedBranches,
       });
       setUsers(nextUsers);
       await uploadUsersToFirebase();
@@ -1246,6 +1291,15 @@ export default function App() {
           </div>
         </div>
 
+        {normalizeUserRole(session.role) === "regional_manager" && accessibleBranches.length > 0 ? (
+          <label className="regional-branch-switcher mt-5">
+            <span>Viewing branch</span>
+            <select value={session.branchName} onChange={handleWorkspaceBranchChange}>
+              {accessibleBranches.map((branch) => <option key={branch} value={branch}>{branch.toUpperCase()}</option>)}
+            </select>
+          </label>
+        ) : null}
+
         <nav className="sidebar-nav mt-7 grid gap-3">
           {visibleTabs.map((tab) => {
             const Icon = tab.icon;
@@ -1286,7 +1340,7 @@ export default function App() {
       </aside>
 
       <div className="main-dashboard-surface min-w-0">
-      {session.role === "admin" && (
+      {isSuperAdmin(session) && (
         <div className="mb-4 grid gap-3 md:grid-cols-2">
           <StatusPill icon={ShieldCheck} label="Firebase" value={firebaseStatus} ok={firebaseStatus.includes("connected")} />
           <StatusPill icon={Server} label="Backend" value={backendStatus} ok={backendStatus.includes("running")} />
@@ -1326,6 +1380,14 @@ export default function App() {
             <TopMetric icon={CalendarDays} label="Today" value={displayDate(todayIso())} tone="red" />
             <TopMetric icon={Target} label="Target" value={stableTarget || "Not set"} tone="green" />
           </div>
+          {normalizeUserRole(session.role) === "regional_manager" && accessibleBranches.length > 0 ? (
+            <label className="regional-branch-switcher xl:hidden">
+              <span>Viewing branch</span>
+              <select value={session.branchName} onChange={handleWorkspaceBranchChange}>
+                {accessibleBranches.map((branch) => <option key={branch} value={branch}>{branch.toUpperCase()}</option>)}
+              </select>
+            </label>
+          ) : null}
         </div>
       </header>
 
@@ -1379,7 +1441,7 @@ export default function App() {
             </div>
 
             <aside className="dashboard-side-column">
-              {session.role === "admin" && (
+              {isSuperAdmin(session) && (
                 <SystemHealthPanel
                   firebaseStatus={firebaseStatus}
                   backendStatus={backendStatus}
@@ -1500,7 +1562,7 @@ export default function App() {
           />
         )}
 
-        {effectiveActiveTab === "meterChats" && session.role === "admin" && <MeterChatsDashboard />}
+        {effectiveActiveTab === "meterChats" && canManageUsers(session) && <MeterChatsDashboard />}
 
         {effectiveActiveTab === "settings" && (
           <>
@@ -1517,7 +1579,7 @@ export default function App() {
               onThemeChange={handleThemeChange}
               whatsappAccountLabel={`${session.branchName}${session.email ? ` (${session.email})` : ""}`}
             >
-              {session.role === "admin" && (
+              {isSuperAdmin(session) && (
                 <SystemRecoveryPanel
                   versions={systemVersions}
                   undoCount={undoCount}
@@ -1533,10 +1595,11 @@ export default function App() {
           </>
         )}
 
-        {effectiveActiveTab === "users" && session.role === "admin" && (
+        {effectiveActiveTab === "users" && canManageUsers(session) && (
           <UserManagement
             users={users}
             googleApprovals={googleApprovals}
+            currentSession={session}
             onSaveUser={handleSaveUser}
             onDeleteUser={handleDeleteUser}
             onApproveGoogle={handleApproveGoogleUser}
@@ -1850,13 +1913,18 @@ function StatusPill({ icon: Icon, label, value, ok }) {
   );
 }
 
-function UserManagement({ users, googleApprovals, onSaveUser, onDeleteUser, onApproveGoogle, onRejectGoogle }) {
-  const emptyForm = { id: "", branchName: "", password: "", permissions: [], authProvider: "password", authUid: "", email: "", displayName: "", photoURL: "" };
+function UserManagement({ users, googleApprovals, currentSession, onSaveUser, onDeleteUser, onApproveGoogle, onRejectGoogle }) {
+  const emptyForm = { id: "", branchName: "", password: "", role: "branch", assignedBranches: [], permissions: [], authProvider: "password", authUid: "", email: "", displayName: "", photoURL: "" };
   const [form, setForm] = useState(emptyForm);
   const groupedPermissions = useMemo(
     () => SYSTEM_ACCESS_OPTIONS.reduce((groups, option) => ({ ...groups, [option.group]: [...(groups[option.group] || []), option] }), {}),
     [],
   );
+  const knownBranches = useMemo(
+    () => [...new Set(users.filter((user) => user.role === "branch").map((user) => user.branchName).filter(Boolean))].sort(),
+    [users],
+  );
+  const availableRoles = USER_ROLE_OPTIONS.filter((role) => role.id !== "superadmin" || isSuperAdmin(currentSession));
 
   function togglePermission(permission) {
     setForm((current) => ({
@@ -1873,11 +1941,33 @@ function UserManagement({ users, googleApprovals, onSaveUser, onDeleteUser, onAp
     setForm(emptyForm);
   }
 
+  function changeRole(role) {
+    setForm((current) => ({
+      ...current,
+      role,
+      assignedBranches: role === "regional_manager" ? current.assignedBranches : [],
+      permissions: role === "regional_manager" && current.permissions.length === 0 ? [...REGIONAL_MANAGER_ACCESS] : current.permissions,
+    }));
+  }
+
+  function toggleAssignedBranch(branch) {
+    const normalized = String(branch || "").trim().toLowerCase();
+    if (!normalized) return;
+    setForm((current) => ({
+      ...current,
+      assignedBranches: current.assignedBranches.includes(normalized)
+        ? current.assignedBranches.filter((item) => item !== normalized)
+        : [...current.assignedBranches, normalized],
+    }));
+  }
+
   function editUser(user) {
     setForm({
       id: user.id,
       branchName: user.branchName,
       password: "",
+      role: normalizeUserRole(user.role),
+      assignedBranches: normalizeAssignedBranches(user.assignedBranches),
       permissions: normalizeUserPermissions(user.permissions),
       authProvider: user.authProvider || "password",
       authUid: user.authUid || "",
@@ -1896,11 +1986,11 @@ function UserManagement({ users, googleApprovals, onSaveUser, onDeleteUser, onAp
         <div className="glass-panel user-approval-panel">
           <div className="user-management-heading">
             <span><ShieldCheck className="h-6 w-6" /></span>
-            <div><h2>Google Login Approvals</h2><p>Assign a branch and the exact sections each new Google account may use.</p></div>
+            <div><h2>Google Login Approvals</h2><p>Assign a role, home branch, managed branches, and section access.</p></div>
           </div>
           <div className="grid gap-3">
             {pendingApprovals.map((approval) => (
-              <GoogleApprovalCard key={approval.uid} approval={approval} onApprove={onApproveGoogle} onReject={onRejectGoogle} />
+              <GoogleApprovalCard key={approval.uid} approval={approval} currentSession={currentSession} knownBranches={knownBranches} onApprove={onApproveGoogle} onReject={onRejectGoogle} />
             ))}
           </div>
         </div>
@@ -1909,14 +1999,16 @@ function UserManagement({ users, googleApprovals, onSaveUser, onDeleteUser, onAp
       <div className="glass-panel user-editor-panel">
         <div className="user-management-heading">
           <span><UserPlus className="h-6 w-6" /></span>
-          <div><h2>{form.id ? "Edit Branch Access" : "Create Branch Account"}</h2><p>Every branch keeps its own reports, settings, riders, and Firebase snapshot.</p></div>
+          <div><h2>{form.id ? "Edit Account & Role" : "Create User Account"}</h2><p>Assign a role and control which branch workspaces and sections this login can use.</p></div>
         </div>
         <form onSubmit={handleSave} className="grid gap-4">
           <div className="grid gap-3 md:grid-cols-2">
-            <label className="grid gap-2"><span className="text-sm font-black text-[#071537]">Branch Name</span><input required value={form.branchName} onChange={(event) => setForm({ ...form, branchName: event.target.value })} className="login-input" placeholder="kahawatta" /></label>
+            <label className="grid gap-2"><span className="text-sm font-black text-[#071537]">Login / Home Branch</span><input required value={form.branchName} onChange={(event) => setForm({ ...form, branchName: event.target.value })} className="login-input" placeholder="kahawatta" /></label>
             {form.authProvider === "google" ? <div className="google-account-readonly"><strong>Google account</strong><span>{form.email}</span></div> : <label className="grid gap-2"><span className="text-sm font-black text-[#071537]">Password {form.id ? "(leave blank to keep current)" : ""}</span><input required={!form.id} type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} className="login-input" placeholder="Secure password" /></label>}
           </div>
-          <PermissionPicker groupedPermissions={groupedPermissions} selected={form.permissions} onToggle={togglePermission} onSelectAll={() => setForm({ ...form, permissions: SYSTEM_ACCESS_OPTIONS.map((option) => option.id) })} onClear={() => setForm({ ...form, permissions: [] })} />
+          <label className="grid gap-2"><span className="text-sm font-black text-[#071537]">User Role</span><select value={form.role} onChange={(event) => changeRole(event.target.value)} className="login-input">{availableRoles.map((role) => <option key={role.id} value={role.id}>{role.label}</option>)}</select></label>
+          {form.role === "regional_manager" ? <BranchAssignmentPicker branches={knownBranches} selected={form.assignedBranches} onToggle={toggleAssignedBranch} onChange={(assignedBranches) => setForm({ ...form, assignedBranches })} /> : null}
+          {!['admin', 'superadmin'].includes(form.role) ? <PermissionPicker groupedPermissions={groupedPermissions} selected={form.permissions} onToggle={togglePermission} onSelectAll={() => setForm({ ...form, permissions: SYSTEM_ACCESS_OPTIONS.map((option) => option.id) })} onClear={() => setForm({ ...form, permissions: [] })} /> : <div className="role-full-access-note"><ShieldCheck className="h-5 w-5" /><span>This role has full section access.</span></div>}
           <div className="flex flex-wrap justify-end gap-2">
             {form.id ? <button type="button" onClick={() => setForm(emptyForm)} className="petty-action petty-action-neutral">Cancel Edit</button> : null}
             <button type="submit" className="primary-action primary-action-green"><SaveUserIcon />{form.id ? "Update Access" : "Create User"}</button>
@@ -1929,6 +2021,8 @@ function UserManagement({ users, googleApprovals, onSaveUser, onDeleteUser, onAp
         <div className="grid gap-3">
           {users.map((user) => {
             const userPermissions = normalizeUserPermissions(user.permissions);
+            const roleLabel = USER_ROLE_OPTIONS.find((role) => role.id === normalizeUserRole(user.role))?.label || "Branch User";
+            const protectedAccount = normalizeUserRole(user.role) === "superadmin";
             return <article key={user.id || user.branchName} className="user-account-row">
               <div className="user-account-identity">
                 {user.photoURL ? <img src={user.photoURL} alt="" referrerPolicy="no-referrer" /> : <span><UserRound className="h-5 w-5" /></span>}
@@ -1936,13 +2030,14 @@ function UserManagement({ users, googleApprovals, onSaveUser, onDeleteUser, onAp
               </div>
               <div className="user-access-summary">
                 <span className="user-branch-pill">{user.branchName}</span>
-                <span>{user.role === "admin" ? "Full super admin access" : `${userPermissions.length} permission${userPermissions.length === 1 ? "" : "s"}`}</span>
-                {user.role !== "admin" ? <div>{userPermissions.map((permission) => <small key={permission}>{SYSTEM_ACCESS_OPTIONS.find((option) => option.id === permission)?.label || permission}</small>)}</div> : null}
+                <span>{roleLabel} · {['admin', 'superadmin'].includes(normalizeUserRole(user.role)) ? "Full section access" : `${userPermissions.length} permission${userPermissions.length === 1 ? "" : "s"}`}</span>
+                {normalizeUserRole(user.role) === "regional_manager" ? <div>{normalizeAssignedBranches(user.assignedBranches).map((branch) => <small key={branch}>Branch: {branch}</small>)}</div> : null}
+                {!['admin', 'superadmin'].includes(normalizeUserRole(user.role)) ? <div>{userPermissions.map((permission) => <small key={permission}>{SYSTEM_ACCESS_OPTIONS.find((option) => option.id === permission)?.label || permission}</small>)}</div> : null}
               </div>
               <div className="user-account-actions">
                 <span className={user.authProvider === "google" ? "google" : "password"}>{user.authProvider === "google" ? "Google" : "Password"}</span>
-                <button type="button" disabled={user.role === "admin"} onClick={() => editUser(user)} className="history-action text-blue-700 disabled:opacity-30" aria-label={`Edit ${user.branchName}`}><Pencil className="h-5 w-5" /></button>
-                <button type="button" disabled={user.role === "admin"} onClick={() => onDeleteUser(user.id)} className="history-action text-red-600 disabled:opacity-30" aria-label={`Delete ${user.branchName}`}><Trash2 className="h-5 w-5" /></button>
+                <button type="button" disabled={protectedAccount} onClick={() => editUser(user)} className="history-action text-blue-700 disabled:opacity-30" aria-label={`Edit ${user.branchName}`}><Pencil className="h-5 w-5" /></button>
+                <button type="button" disabled={protectedAccount} onClick={() => onDeleteUser(user.id)} className="history-action text-red-600 disabled:opacity-30" aria-label={`Delete ${user.branchName}`}><Trash2 className="h-5 w-5" /></button>
               </div>
             </article>;
           })}
@@ -1952,6 +2047,22 @@ function UserManagement({ users, googleApprovals, onSaveUser, onDeleteUser, onAp
   );
 }
 
+function BranchAssignmentPicker({ branches, selected, onToggle, onChange }) {
+  const [customBranch, setCustomBranch] = useState("");
+  function addCustomBranch() {
+    const normalized = String(customBranch || "").trim().toLowerCase();
+    if (!normalized) return;
+    onChange([...new Set([...selected, normalized])]);
+    setCustomBranch("");
+  }
+  const options = [...new Set([...branches, ...selected])].sort();
+  return <div className="branch-assignment-picker">
+    <div className="permission-picker-heading"><div><strong>Assigned Branches</strong><small>Regional Managers can switch between only these branch report workspaces.</small></div><span>{selected.length} selected</span></div>
+    <div className="branch-assignment-options">{options.map((branch) => <label key={branch}><input type="checkbox" checked={selected.includes(branch)} onChange={() => onToggle(branch)} /><span>{branch.toUpperCase()}</span></label>)}</div>
+    <div className="branch-assignment-add"><input value={customBranch} onChange={(event) => setCustomBranch(event.target.value)} className="login-input" placeholder="Add another branch" /><button type="button" onClick={addCustomBranch} className="petty-action petty-action-neutral">Add Branch</button></div>
+  </div>;
+}
+
 function PermissionPicker({ groupedPermissions, selected, onToggle, onSelectAll, onClear }) {
   return <div className="permission-picker">
     <div className="permission-picker-heading"><div><strong>Section Access</strong><small>Only selected sections appear after login.</small></div><div><button type="button" onClick={onSelectAll}>Select All</button><button type="button" onClick={onClear}>Clear</button></div></div>
@@ -1959,16 +2070,19 @@ function PermissionPicker({ groupedPermissions, selected, onToggle, onSelectAll,
   </div>;
 }
 
-function GoogleApprovalCard({ approval, onApprove, onReject }) {
+function GoogleApprovalCard({ approval, currentSession, knownBranches, onApprove, onReject }) {
   const [branchName, setBranchName] = useState("");
+  const [role, setRole] = useState("branch");
+  const [assignedBranches, setAssignedBranches] = useState([]);
   const [permissions, setPermissions] = useState([]);
   const grouped = useMemo(() => SYSTEM_ACCESS_OPTIONS.reduce((groups, option) => ({ ...groups, [option.group]: [...(groups[option.group] || []), option] }), {}), []);
   function toggle(permission) { setPermissions((current) => current.includes(permission) ? current.filter((item) => item !== permission) : [...current, permission]); }
   return <article className="google-approval-card">
     <div className="user-account-identity">{approval.photoURL ? <img src={approval.photoURL} alt="" referrerPolicy="no-referrer" /> : <span><UserRound className="h-5 w-5" /></span>}<div><strong>{approval.displayName}</strong><small>{approval.email}</small></div></div>
-    <label className="grid gap-2"><span className="text-sm font-black">Assign Branch</span><input value={branchName} onChange={(event) => setBranchName(event.target.value)} className="login-input" placeholder="Branch name" /></label>
+    <div className="grid gap-3 md:grid-cols-2"><label className="grid gap-2"><span className="text-sm font-black">Login / Home Branch</span><input value={branchName} onChange={(event) => setBranchName(event.target.value)} className="login-input" placeholder="Branch name" /></label><label className="grid gap-2"><span className="text-sm font-black">User Role</span><select value={role} onChange={(event) => setRole(event.target.value)} className="login-input">{USER_ROLE_OPTIONS.filter((option) => option.id !== "superadmin" || isSuperAdmin(currentSession)).map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label></div>
+    {role === "regional_manager" ? <BranchAssignmentPicker branches={knownBranches} selected={assignedBranches} onToggle={(branch) => setAssignedBranches((current) => current.includes(branch) ? current.filter((item) => item !== branch) : [...current, branch])} onChange={setAssignedBranches} /> : null}
     <PermissionPicker groupedPermissions={grouped} selected={permissions} onToggle={toggle} onSelectAll={() => setPermissions(SYSTEM_ACCESS_OPTIONS.map((option) => option.id))} onClear={() => setPermissions([])} />
-    <div className="flex flex-wrap justify-end gap-2"><button type="button" onClick={() => onReject(approval)} className="petty-action petty-action-red">Reject</button><button type="button" disabled={!branchName.trim()} onClick={() => onApprove(approval, branchName, permissions)} className="petty-action petty-action-green disabled:opacity-40"><ShieldCheck className="h-4 w-4" /> Approve & Assign</button></div>
+    <div className="flex flex-wrap justify-end gap-2"><button type="button" onClick={() => onReject(approval)} className="petty-action petty-action-red">Reject</button><button type="button" disabled={!branchName.trim() || (role === "regional_manager" && !assignedBranches.length)} onClick={() => onApprove(approval, branchName, permissions, role, assignedBranches)} className="petty-action petty-action-green disabled:opacity-40"><ShieldCheck className="h-4 w-4" /> Approve & Assign</button></div>
   </article>;
 }
 
