@@ -133,14 +133,14 @@ export async function exportElementsAsPortraitPdf(elements, reportName, date) {
   return { pageCount: pageElements.length };
 }
 
-export async function exportElementsAsLandscapePdf(elements, reportName, date) {
+export async function exportElementsAsLandscapePdf(elements, reportName, date, options = {}) {
   const pageElements = elements.filter(Boolean);
   if (!pageElements.length) throw new Error("Report area is not available for export.");
   const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
   for (let index = 0; index < pageElements.length; index += 1) {
     const canvas = await captureElement(pageElements[index]);
     if (index > 0) pdf.addPage("a4", "landscape");
-    addCanvasToPdfPage(pdf, canvas);
+    addCanvasToPdfPage(pdf, canvas, options);
   }
   pdf.save(`${safeFileName(reportName)}_${date}.pdf`);
   return { pageCount: pageElements.length };
@@ -158,9 +158,13 @@ export async function exportBothAsPdf(reports, date) {
   pdf.save(`Daily_Courier_Reports_${date}.pdf`);
 }
 
-function addCanvasToPdfPage(pdf, canvas) {
+function addCanvasToPdfPage(pdf, canvas, options = {}) {
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
+  if (options.fullBleed) {
+    pdf.addImage(canvas.toDataURL("image/png", 1), "PNG", 0, 0, pageWidth, pageHeight, undefined, "FAST");
+    return;
+  }
   const margin = 8;
   const maxWidth = pageWidth - margin * 2;
   const maxHeight = pageHeight - margin * 2;
