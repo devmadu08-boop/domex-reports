@@ -5,6 +5,7 @@ import { exportElementsAsLandscapePdf, exportElementsAsPng } from "../utils/expo
 import { applyPettyCashEmployeeMappings, amountToWords, calculatePettyCashFloat, emptyPettyCashEntry, formatPettyCashDate, getPettyCashPageLayout, getPettyCashPendingAgeDays, getPettyCashVoucherKey, mergePettyCashFloatEntries, paginatePettyCashEntries, parsePettyCashCsv } from "../utils/pettyCash.js";
 
 const ROWS_PER_PAGE = 20;
+const PETTY_REPORT_COLUMN_WIDTHS = [1.8169, 6.3227, 5.9593, 19.186, 5.814, 5.8866, 6.7587, 4.6512, 7.9215, 7.7762, 6.7587, 6.6134, 7.4128, 7.1221];
 const currency = (value) => Number(value || 0).toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function PettyCashManagement({ selectedDate, branchName = "Middeniya", companyName = "Domestic Express (pvt) ltd", vehicleEmployeeMappings = [], floatAmount = 0, onSaveFloatAmount, canManageFloat = true }) {
@@ -165,5 +166,36 @@ function PettyCashReportPage({ reportRef, companyName, branchName, reportDate, r
   const { rowHeight, fontSize } = getPettyCashPageLayout(rows.length);
   const reportStyle = { "--petty-row-height": `${rowHeight}px`, "--petty-dynamic-font": `${fontSize}px` };
   const reportCompanyName = String(companyName || "DOMESTIC EXPRESS ( PVT ) LTD").toUpperCase().replace(/\(\s*PVT\s*\)/, "( PVT )");
-  return <article ref={reportRef} style={reportStyle} className="petty-cash-a4-report"><header className="petty-report-heading"><h2>{reportCompanyName}</h2><h1>SUMMARY OF PETTY CASH EXPENCES</h1></header><div className="petty-report-meta"><p><strong>BRANCH</strong><span>{String(branchName || "-").toUpperCase()}</span></p><p><strong>DATE</strong><span>{formatPettyCashDate(reportDate)}</span></p><p className="petty-page-number">PAGE {pageIndex + 1} / {pageCount}</p></div><table className="petty-report-table"><thead><tr><th>No</th><th>Reference No</th><th>Payment Date</th><th>Payment Type</th><th>Payment For</th><th>Vehicle No</th><th>From KMs</th><th>To KMs</th><th>Total KMs</th><th>Employee Name</th><th>OFD Report No</th><th>Memo</th><th>Note</th><th>Value</th><th>Signature</th></tr></thead><tbody>{rows.map((entry, index) => <tr key={entry.id}><td>{String(startIndex + index + 1).padStart(2, "0")}</td><td className="petty-nowrap">{entry.referenceNo}</td><td className="petty-nowrap">{formatPettyCashDate(entry.paymentDate)}</td><td>{entry.paymentType}</td><td>{entry.paymentFor}</td><td className="petty-nowrap">{entry.vehicleNo}</td><td className="petty-nowrap">{entry.fromKms}</td><td className="petty-nowrap">{entry.toKms}</td><td className="petty-nowrap">{entry.totalKms}</td><td>{entry.employeeName}</td><td className="petty-nowrap">{entry.ofdReportNo}</td><td>{entry.memo}</td><td>{entry.note}</td><td className="petty-nowrap petty-report-value">{currency(entry.value)}</td><td /></tr>)}</tbody>{finalPage ? <tfoot><tr><th colSpan="13">FULL TOTAL</th><th>{currency(total)}</th><th /></tr></tfoot> : null}</table>{finalPage ? <footer className="petty-report-footer"><div className="petty-amount-words"><strong>AMOUNT IN WORDS</strong><span>{amountToWords(total).toUpperCase()}</span></div><div className="petty-signatures"><p><span>{preparedBy}</span><strong>PREPARED BY</strong></p><p><span>{authorizedBy}</span><strong>AUTHORIZED BY</strong></p></div></footer> : <p className="petty-continued">CONTINUED ON NEXT A4 PAGE...</p>}</article>;
+  return <article ref={reportRef} style={reportStyle} className="petty-cash-a4-report">
+    <header className="petty-report-heading"><h2>{reportCompanyName}</h2><h1>SUMMARY OF PETTY CASH EXPENCES</h1></header>
+    <div className="petty-report-meta">
+      <p><strong>BRANCH</strong><span>{String(branchName || "-").toUpperCase()}</span></p>
+      <p><strong>DATE</strong><span>{formatPettyCashDate(reportDate)}</span></p>
+    </div>
+    <table className="petty-report-table">
+      <colgroup>{PETTY_REPORT_COLUMN_WIDTHS.map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}</colgroup>
+      <thead><tr><th>No</th><th>Reference No</th><th>Payment Date</th><th>Payment Type</th><th>Vehicle No</th><th>From KMs</th><th>To KMs</th><th>Total KMs</th><th>Employee Name</th><th>OFD Report No</th><th>Memo</th><th>Note</th><th>Value</th><th>Signature</th></tr></thead>
+      <tbody>{rows.map((entry, index) => <tr key={entry.id}>
+        <td>{String(startIndex + index + 1).padStart(2, "0")}</td>
+        <td className="petty-nowrap petty-report-reference">{entry.referenceNo}</td>
+        <td className="petty-nowrap">{formatPettyCashDate(entry.paymentDate)}</td>
+        <td>{entry.paymentType || entry.paymentFor}</td>
+        <td className="petty-nowrap">{entry.vehicleNo}</td>
+        <td className="petty-nowrap petty-number-cell">{entry.fromKms}</td>
+        <td className="petty-nowrap petty-number-cell">{entry.toKms}</td>
+        <td className="petty-nowrap petty-number-cell">{entry.totalKms}</td>
+        <td>{entry.employeeName}</td>
+        <td className="petty-nowrap">{entry.ofdReportNo}</td>
+        <td>{entry.memo}</td>
+        <td>{entry.note}</td>
+        <td className="petty-nowrap petty-report-value">{currency(entry.value)}</td>
+        <td />
+      </tr>)}</tbody>
+      <tfoot><tr><th colSpan="12">{finalPage ? "FULL TOTAL" : "CONTINUED"}</th><th>{finalPage ? currency(total) : ""}</th><th /></tr></tfoot>
+    </table>
+    <footer className="petty-report-footer">
+      <div className="petty-amount-words"><strong>AMOUNT IN WORDS</strong><span>{finalPage ? amountToWords(total).toUpperCase() : ""}</span></div>
+      <div className="petty-signatures"><p><strong>PREPARED BY</strong><span>{finalPage ? preparedBy : ""}</span></p><p><strong>AUTHORIZED BY</strong><span>{finalPage ? authorizedBy : ""}</span></p></div>
+    </footer>
+  </article>;
 }
