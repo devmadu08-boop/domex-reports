@@ -5,7 +5,7 @@ import { exportElementsAsLandscapePdf, exportElementsAsPng } from "../utils/expo
 import { applyPettyCashEmployeeMappings, amountToWords, calculatePettyCashFloat, emptyPettyCashEntry, formatPettyCashDate, getPettyCashPageLayout, getPettyCashPendingAgeDays, getPettyCashVoucherKey, mergePettyCashFloatEntries, paginatePettyCashEntries, parsePettyCashCsv } from "../utils/pettyCash.js";
 
 const ROWS_PER_PAGE = 20;
-const PETTY_REPORT_COLUMN_WIDTHS = [1.8169, 6.3227, 5.9593, 19.186, 5.814, 5.8866, 6.7587, 4.6512, 7.9215, 7.7762, 6.7587, 6.6134, 7.4128, 7.1221];
+const PETTY_REPORT_COLUMN_WIDTHS = [2.6, 10.5, 6.7, 15, 5.5, 4.6, 4.6, 4.6, 9, 6.8, 8, 7, 6.3, 8.8];
 const currency = (value) => Number(value || 0).toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function PettyCashManagement({ selectedDate, branchName = "Middeniya", companyName = "Domestic Express (pvt) ltd", vehicleEmployeeMappings = [], floatAmount = 0, onSaveFloatAmount, canManageFloat = true }) {

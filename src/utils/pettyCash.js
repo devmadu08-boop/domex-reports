@@ -108,7 +108,7 @@ export function getPettyCashPageLayout(rowCount) {
   const count = Math.max(Number(rowCount) || 0, 1);
   return {
     rowHeight: Math.max(20, Math.min(104, Math.floor(420 / count))),
-    fontSize: count <= 4 ? 13 : count <= 8 ? 11 : count <= 12 ? 9.5 : count <= 16 ? 8.5 : 7.5,
+    fontSize: count <= 4 ? 14 : count <= 8 ? 12 : count <= 12 ? 10.5 : count <= 16 ? 9.5 : 8.5,
   };
 }
 

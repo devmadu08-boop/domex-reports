@@ -33,8 +33,8 @@ test("petty cash vehicle mapping replaces incorrect CSV employee names", () => {
 test("petty cash keeps up to twenty vouchers on one A4 page", () => {
   assert.equal(paginatePettyCashEntries(Array.from({ length: 20 }), 20).length, 1);
   assert.equal(paginatePettyCashEntries(Array.from({ length: 21 }), 20).length, 2);
-  assert.deepEqual(getPettyCashPageLayout(4), { rowHeight: 104, fontSize: 13 });
-  assert.deepEqual(getPettyCashPageLayout(20), { rowHeight: 21, fontSize: 7.5 });
+  assert.deepEqual(getPettyCashPageLayout(4), { rowHeight: 104, fontSize: 14 });
+  assert.deepEqual(getPettyCashPageLayout(20), { rowHeight: 21, fontSize: 8.5 });
 });
 
 test("petty cash float deducts only pending vouchers and recovers passed vouchers", () => {
