@@ -7,7 +7,9 @@ export function findTrackingColumn(items) {
   return items
     .filter((item) => item.y < header.y - 2 && item.x >= header.x - 3 && item.x < rightEdge - 3)
     .map((item) => normalizeTracking(item.text))
-    .filter((value) => /^[A-Z0-9-]{5,24}$/.test(value));
+    // Some valid DOMEX manual tracking numbers are short, for example W88.
+    // The column boundaries above keep unrelated values out of this list.
+    .filter((value) => /^[A-Z0-9][A-Z0-9-]{2,31}$/.test(value));
 }
 
 export function findRiderName(items) {
