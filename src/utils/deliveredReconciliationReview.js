@@ -1,7 +1,8 @@
 import { normalizeTrackingNo } from "./deliveredReconciliation.js";
 
-export const DELIVERY_EXCEPTION_REASONS = ["Missroute", "Return"];
-export const EXTRA_RESCHEDULE_IGNORE_REASONS = ["Credit Card", "Temu Parcel"];
+export const DELIVERY_EXCEPTION_REASONS = ["Missroute", "Return", "Daraz", "Ignore"];
+export const EXTRA_RESCHEDULE_IGNORE_REASONS = ["Credit Card", "Temu Parcel", "Ignore"];
+
 
 export function normalizeReconciliationReview(reconciliation) {
   if (!reconciliation) return null;
@@ -73,12 +74,15 @@ export function getReconciliationReviewStatus(reconciliation) {
   const unreviewedExtraRescheduled = normalized.extraRescheduledParcels.filter(
     (item) => !EXTRA_RESCHEDULE_IGNORE_REASONS.includes(item.reason),
   );
+  const unreviewedExtraDelivered = (normalized.extraDelivered || []).filter(t => !(normalized.ignoredExtraDelivered || []).includes(t));
+  const unreviewedDeliveredAndRescheduled = (normalized.deliveredAndRescheduled || []).filter(t => !(normalized.ignoredDeliveredAndRescheduled || []).includes(t));
+
   const missrouteCount = normalized.missingParcels.filter((item) => item.reason === "Missroute").length;
   const returnCount = normalized.missingParcels.filter((item) => item.reason === "Return").length;
   const blockingDifferenceCount =
-    (normalized.extraDelivered?.length || 0) +
+    unreviewedExtraDelivered.length +
     unreviewedExtraRescheduled.length +
-    (normalized.deliveredAndRescheduled?.length || 0);
+    unreviewedDeliveredAndRescheduled.length;
 
   return {
     ready: unconfirmedRescheduled.length === 0 && unclassifiedMissing.length === 0 && blockingDifferenceCount === 0,
@@ -89,6 +93,8 @@ export function getReconciliationReviewStatus(reconciliation) {
     unclassifiedMissing,
     unreviewedExtraRescheduled,
     ignoredExtraRescheduled,
+    unreviewedExtraDelivered,
+    unreviewedDeliveredAndRescheduled,
     missrouteCount,
     returnCount,
     blockingDifferenceCount,

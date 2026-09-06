@@ -19,6 +19,8 @@ export default function DeliveredReconciliationPanel({
   onConfirmAllRescheduled,
   onMissingReasonChange,
   onExtraRescheduledReasonChange,
+  onIgnoreDifference,
+  onUnignoreDifference,
   onSendReminder,
 }) {
   const unresolvedMissing = reconciliation?.missingParcels?.filter((item) => item.status !== "found") || [];
@@ -208,8 +210,20 @@ export default function DeliveredReconciliationPanel({
             </div>
           )}
 
-          <DifferenceList title="Delivered but not Out for Delivery" values={reconciliation.extraDelivered} />
-          <DifferenceList title="Appears in both Delivered and Rescheduled" values={reconciliation.deliveredAndRescheduled} />
+          <DifferenceList 
+            title="Delivered but not Out for Delivery" 
+            values={reconciliation.extraDelivered} 
+            ignoredValues={reconciliation.ignoredExtraDelivered}
+            onIgnore={(trackingNo) => onIgnoreDifference("extraDelivered", trackingNo)}
+            onUnignore={(trackingNo) => onUnignoreDifference("extraDelivered", trackingNo)}
+          />
+          <DifferenceList 
+            title="Appears in both Delivered and Rescheduled" 
+            values={reconciliation.deliveredAndRescheduled} 
+            ignoredValues={reconciliation.ignoredDeliveredAndRescheduled}
+            onIgnore={(trackingNo) => onIgnoreDifference("deliveredAndRescheduled", trackingNo)}
+            onUnignore={(trackingNo) => onUnignoreDifference("deliveredAndRescheduled", trackingNo)}
+          />
 
           {unresolvedMissing.length > 0 && (
             <button
@@ -286,13 +300,36 @@ function TrackingSection({ title, tone = "red", action, children }) {
   );
 }
 
-function DifferenceList({ title, values }) {
+function DifferenceList({ title, values, ignoredValues = [], onIgnore, onUnignore }) {
   if (!values?.length) return null;
+  const unignored = values.filter((v) => !ignoredValues.includes(v));
+  const ignored = values.filter((v) => ignoredValues.includes(v));
+  if (!unignored.length && !ignored.length) return null;
+
   return (
     <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
-      <p className="text-sm font-black text-amber-900">{title} ({values.length})</p>
-      <div className="mt-2 flex flex-wrap gap-2">
-        {values.map((value) => <span key={value} className="rounded-lg bg-white px-2 py-1 text-xs font-black text-amber-800">{value}</span>)}
+      <p className="text-sm font-black text-amber-900">{title} ({unignored.length}{ignored.length > 0 ? ` pending, ${ignored.length} ignored` : ""})</p>
+      <div className="mt-2 flex flex-col gap-2">
+        {unignored.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {unignored.map((value) => (
+              <span key={value} className="flex items-center gap-2 rounded-lg bg-white px-2 py-1 text-xs font-black text-amber-800 shadow-sm">
+                {value}
+                <button type="button" onClick={() => onIgnore?.(value)} className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-900 hover:bg-amber-200">Ignore</button>
+              </span>
+            ))}
+          </div>
+        )}
+        {ignored.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {ignored.map((value) => (
+              <span key={value} className="flex items-center gap-2 rounded-lg bg-emerald-50 px-2 py-1 text-xs font-black text-emerald-800 line-through opacity-70">
+                {value}
+                <button type="button" onClick={() => onUnignore?.(value)} className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-900 hover:bg-emerald-200 no-underline">Restore</button>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

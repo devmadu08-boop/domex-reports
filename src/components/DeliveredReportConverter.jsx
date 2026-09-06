@@ -604,6 +604,27 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
     );
   }
 
+  function handleIgnoreDifference(type, trackingNo) {
+    const password = prompt("Enter password to ignore this parcel:");
+    if (password !== "2006") {
+      alert("Incorrect password.");
+      return;
+    }
+    if (!reconciliation) return;
+    const key = type === 'extraDelivered' ? 'ignoredExtraDelivered' : 'ignoredDeliveredAndRescheduled';
+    const currentIgnored = reconciliation[key] || [];
+    const updated = { ...reconciliation, [key]: [...currentIgnored, trackingNo] };
+    saveReconciliationReview(updated, `${trackingNo} ignored.`);
+  }
+
+  function handleUnignoreDifference(type, trackingNo) {
+    if (!reconciliation) return;
+    const key = type === 'extraDelivered' ? 'ignoredExtraDelivered' : 'ignoredDeliveredAndRescheduled';
+    const currentIgnored = reconciliation[key] || [];
+    const updated = { ...reconciliation, [key]: currentIgnored.filter(t => t !== trackingNo) };
+    saveReconciliationReview(updated, `${trackingNo} restored.`);
+  }
+
   function saveReconciliationReview(nextReconciliation, message) {
     const reviewed = withBalancedStatus(normalizeReconciliationReview({ ...nextReconciliation, updatedAt: new Date().toISOString() }));
     setReconciliation(reviewed);
@@ -802,6 +823,8 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           onConfirmAllRescheduled={confirmAllRescheduled}
           onMissingReasonChange={updateMissingReason}
           onExtraRescheduledReasonChange={updateExtraRescheduledReason}
+          onIgnoreDifference={handleIgnoreDifference}
+          onUnignoreDifference={handleUnignoreDifference}
           onSendReminder={() => sendMissingReminder()}
         />
 
