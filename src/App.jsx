@@ -1325,18 +1325,6 @@ export default function App() {
           <LogOut className="h-5 w-5" />
           Logout
         </button>
-
-        <div className="rounded-[26px] border border-[#cdbcf5] bg-[#b497f1] p-4 shadow-[inset_7px_7px_15px_rgba(101,72,178,0.24),inset_-7px_-7px_15px_rgba(224,209,255,0.5),9px_10px_20px_rgba(92,68,166,0.22)]">
-          <div className="flex items-center gap-3">
-            <span className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-lg shadow-violet-400/40">
-              <Send className="h-6 w-6" />
-            </span>
-            <span>
-              <span className="block text-sm font-black text-white">Fast. Accurate.</span>
-              <span className="block text-xs font-semibold text-white/82">Daily Courier Reporting</span>
-            </span>
-          </div>
-        </div>
       </aside>
 
       <div className="main-dashboard-surface min-w-0">
