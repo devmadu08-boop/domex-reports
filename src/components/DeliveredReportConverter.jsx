@@ -62,12 +62,23 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
     return [...new Set([...getAllDeliveredRiderNames(), ...savedRiderNames, riderName].filter(Boolean))].sort((a, b) => a.localeCompare(b));
   }, [savedRiderNames, riderName]);
 
-  const specialValue = entries.reduce((sum, entry) => (isSpecialTrackingNo(entry.trackingNo) ? sum + parseMoney(entry.value) : sum), 0);
-  const totalValue = entries.reduce((sum, entry) => {
+  const ignoredTrackingSet = useMemo(() => {
+    return new Set([
+      ...(reconciliation?.ignoredExtraDelivered || []),
+      ...(reconciliation?.ignoredDeliveredAndRescheduled || [])
+    ].map(t => normalizeTrackingNo(t)));
+  }, [reconciliation]);
+
+  const validEntries = useMemo(() => {
+    return entries.filter(e => !ignoredTrackingSet.has(normalizeTrackingNo(e.trackingNo)));
+  }, [entries, ignoredTrackingSet]);
+
+  const specialValue = validEntries.reduce((sum, entry) => (isSpecialTrackingNo(entry.trackingNo) ? sum + parseMoney(entry.value) : sum), 0);
+  const totalValue = validEntries.reduce((sum, entry) => {
     if (!includeSpecialTracking && isSpecialTrackingNo(entry.trackingNo)) return sum;
     return sum + parseMoney(entry.value);
   }, 0);
-  const reportPages = useMemo(() => paginateDeliveredEntries(entries), [entries]);
+  const reportPages = useMemo(() => paginateDeliveredEntries(validEntries), [validEntries]);
   const pageCount = reportPages.length || 1;
   const hasMultiplePdfPages = pageCount > 1;
   const reviewStatus = useMemo(() => getReconciliationReviewStatus(reconciliation), [reconciliation]);
@@ -492,7 +503,11 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
     const riderKey = normalizeRiderName(riderName);
     const existing = currentRows.find((row) => normalizeRiderName(row.courierName) === riderKey);
     const onRouteCount = reconciliation?.outForDeliveryCount || 0;
-    const deliveryCount = reconciliation?.deliveredCount || 0;
+    
+    const ignoredCount = ignoredTrackingSet.size;
+    const rawDeliveryCount = reconciliation?.deliveredCount || 0;
+    const deliveryCount = Math.max(0, rawDeliveryCount - ignoredCount);
+    
     const resendCount = reviewStatus.effectiveRescheduledCount;
     const deliveryPercent = onRouteCount > 0 ? ((deliveryCount / onRouteCount) * 100).toFixed(2) : "0.00";
     const nextRow = {
@@ -840,7 +855,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <ReadOnlyCount label="On Route Count" value={reconciliation.outForDeliveryCount} helper="Out for Delivery" />
-              <ReadOnlyCount label="Delivery Count" value={reconciliation.deliveredCount} helper="Delivered Report" />
+              <ReadOnlyCount label="Delivery Count" value={Math.max(0, (reconciliation.deliveredCount || 0) - ignoredTrackingSet.size)} helper="Delivered Report" />
               <ReadOnlyCount label="Resend Count" value={reviewStatus.effectiveRescheduledCount} helper="OFD Rescheduled only" />
               <label className="grid gap-2 rounded-2xl border border-amber-200 bg-white p-3">
                 <span className="text-xs font-black uppercase text-amber-700">Pickup Count</span>
