@@ -82,6 +82,7 @@ export function hasPermission(session, permission) {
 
 export function canAccessTab(session, tabId) {
   if (session?.role === "admin" || session?.role === "superadmin") return true;
+  if (tabId === "receipt") return true; // Always allow access to the receipt tool
   const required = TAB_ACCESS[tabId] || [];
   return required.some((permission) => hasPermission(session, permission));
 }
