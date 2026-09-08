@@ -53,6 +53,7 @@ import SystemHealthPanel from "./components/SystemHealthPanel.jsx";
 import SystemRecoveryPanel from "./components/SystemRecoveryPanel.jsx";
 import TodayOperationsDashboard from "./components/TodayOperationsDashboard.jsx";
 import ThemeSwitcher from "./components/ThemeSwitcher.jsx";
+import ReceiptGenerator from "./components/ReceiptGenerator.jsx";
 import { normalizeThemeId } from "./themeConfig.js";
 import {
   clearReportByDate,
@@ -140,6 +141,7 @@ const tabs = [
   { id: "allReports", label: "All Reports", mobileLabel: "All", icon: FileSpreadsheet },
   { id: "deliveredConverter", label: "Delivered Report", mobileLabel: "Delivered", icon: FileText },
   { id: "reschedule", label: "Reschedule Report", mobileLabel: "Reschedule", icon: CalendarClock },
+  { id: "receipt", label: "Receipt", mobileLabel: "Receipt", icon: FileText },
   { id: "pettyCash", label: "Petty Cash Management", mobileLabel: "Petty Cash", icon: WalletCards },
   { id: "audit", label: "Audit Report", mobileLabel: "Audit", icon: ClipboardCheck },
   { id: "meterChats", label: "Meter Chats", mobileLabel: "Chats", icon: MessagesSquare, adminOnly: true },
@@ -1530,6 +1532,8 @@ export default function App() {
         {effectiveActiveTab === "reschedule" && (
           <RescheduleReport selectedDate={selectedDate} branchName={settings.branchName || "Middeniya"} />
         )}
+
+        {effectiveActiveTab === "receipt" && <ReceiptGenerator session={session} />}
 
         {effectiveActiveTab === "pettyCash" && (
           <PettyCashManagement
