@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Download, Copy, Check, Share2, Award, TrendingDown, User } from "lucide-react";
+import { Download, Copy, Check, Share2 } from "lucide-react";
 import html2canvas from "html2canvas";
 
 export default function DispatchShareCard({
@@ -15,7 +15,7 @@ export default function DispatchShareCard({
 
   const { rows = [], summary = {} } = metrics || {};
 
-  // Formatted username to display under title
+  // Logged-in user name
   const rawName = session?.branchName || session?.homeBranchName || session?.userId || "Regional Manager";
   const userName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
   const userRole = session?.role === "superadmin" ? "Super Admin" : "Regional Manager";
@@ -24,11 +24,11 @@ export default function DispatchShareCard({
     if (!cardRef.current) return;
     setExporting(true);
     try {
-      // 1. Wait for any images inside the card to load completely
+      // 1. Ensure images are completely loaded with natural dimensions
       const images = Array.from(cardRef.current.querySelectorAll("img"));
       await Promise.all(
         images.map((img) => {
-          if (img.complete) return Promise.resolve();
+          if (img.complete && img.naturalHeight !== 0) return Promise.resolve();
           return new Promise((resolve) => {
             img.onload = resolve;
             img.onerror = resolve;
@@ -36,69 +36,36 @@ export default function DispatchShareCard({
         })
       );
 
-      // 2. Export with html2canvas - stripping all Tailwind v4 stylesheets from clonedDoc
-      // to completely eliminate the "oklch" unsupported color function error!
+      // 2. Capture using html2canvas with pure inline styles
+      // Removing external stylesheets prevents Tailwind v4 oklch crash
+      // while inline styles ensure the output looks 100% identical to preview!
       const canvas = await html2canvas(cardRef.current, {
         scale: 2,
         backgroundColor: "#ffffff",
         useCORS: true,
         logging: false,
         onclone: (clonedDoc) => {
-          // A. Remove all external stylesheets (these contain Tailwind v4 oklch rules)
+          // Remove external stylesheets containing Tailwind v4 oklch colors
           const extStyles = clonedDoc.querySelectorAll('link[rel="stylesheet"], style');
           extStyles.forEach((s) => s.remove());
 
-          // B. Add a pure, clean fallback stylesheet without any modern oklch
+          // Clean standard CSS reset
           const cleanStyle = clonedDoc.createElement("style");
-          cleanStyle.id = "dispatch-clean-card-style";
           cleanStyle.textContent = `
-            * {
-              box-sizing: border-box !important;
-              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
-              -webkit-font-smoothing: antialiased;
-            }
-            body, html {
-              background-color: #ffffff !important;
-              color: #071537 !important;
+            * { box-sizing: border-box !important; }
+            html, body {
               margin: 0 !important;
               padding: 0 !important;
+              background-color: #ffffff !important;
+              color: #071537 !important;
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+              -webkit-font-smoothing: antialiased;
             }
           `;
           clonedDoc.head.appendChild(cleanStyle);
 
-          // C. Explicitly guarantee document and body have solid hex background
           clonedDoc.documentElement.style.backgroundColor = "#ffffff";
-          clonedDoc.documentElement.style.color = "#071537";
           clonedDoc.body.style.backgroundColor = "#ffffff";
-          clonedDoc.body.style.color = "#071537";
-
-          // D. Fallback canvas converter for any inline oklch string
-          const helperCanvas = document.createElement("canvas");
-          const ctx = helperCanvas.getContext("2d");
-          function oklchToRgb(str) {
-            if (!str || typeof str !== "string" || !str.includes("oklch")) return str;
-            try {
-              ctx.fillStyle = "#ffffff";
-              ctx.fillStyle = str;
-              return ctx.fillStyle;
-            } catch {
-              return "#ffffff";
-            }
-          }
-
-          const allElements = clonedDoc.querySelectorAll("*");
-          const colorProps = ["color", "backgroundColor", "borderColor"];
-          allElements.forEach((el) => {
-            try {
-              const comp = window.getComputedStyle(el);
-              colorProps.forEach((prop) => {
-                const val = comp[prop];
-                if (val && typeof val === "string" && val.includes("oklch")) {
-                  el.style[prop] = oklchToRgb(val);
-                }
-              });
-            } catch {}
-          });
         }
       });
 
@@ -121,9 +88,9 @@ export default function DispatchShareCard({
     let text = `📦 *DOMEX REGIONAL DISPATCH UPDATE*\n`;
     text += `👤 Regional Manager: *${userName}*\n`;
     text += `📅 Date: *${date}*\n`;
-    text += `🎯 Total Target: *${summary.totalTarget}*\n`;
-    text += `🚚 Total Dispatched: *${summary.totalDispatch}*\n`;
-    text += `📊 Achievement: *${summary.overallPercentage}%*\n\n`;
+    text += `🎯 Total Target: *${summary.totalTarget || 0}*\n`;
+    text += `🚚 Total Dispatched: *${summary.totalDispatch || 0}*\n`;
+    text += `📊 Achievement: *${summary.overallPercentage || 0}%*\n\n`;
     text += `*BRANCH PERFORMANCE BREAKDOWN:*\n`;
 
     rows.forEach((r, idx) => {
@@ -151,7 +118,7 @@ export default function DispatchShareCard({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-2 sm:p-4 backdrop-blur-sm overflow-y-auto">
       <div className="flex max-h-[96vh] w-full max-w-2xl flex-col rounded-3xl border border-white/80 bg-slate-100 p-3.5 sm:p-5 shadow-2xl">
-        {/* Header modal bar */}
+        {/* Modal Header */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-200">
           <div className="flex items-center gap-2">
             <Share2 className="h-5 w-5 text-violet-700" />
@@ -171,54 +138,87 @@ export default function DispatchShareCard({
         {/* Mobile Swipe Hint */}
         <div className="mt-2 block sm:hidden text-center">
           <span className="inline-block rounded-lg bg-violet-100 px-2.5 py-0.5 text-[10px] font-bold text-violet-800">
-            Swipe sideways to view full card on mobile &rarr;
+            Swipe sideways to view full card &rarr;
           </span>
         </div>
 
-        {/* The Card to be Captured with safe hex colors and mobile scroll */}
+        {/* The Card Viewport */}
         <div className="mt-2 sm:mt-4 flex-1 overflow-x-auto overflow-y-auto pr-1">
+          {/* 
+            Self-contained Card with 100% Inline Styles:
+            Guarantees identical rendering in preview AND exported PNG!
+          */}
           <div
             ref={cardRef}
-            className="rounded-3xl p-4 sm:p-6 shadow-md mx-auto"
             style={{
-              width: "100%",
-              minWidth: "500px",
-              maxWidth: "600px",
+              width: "560px",
+              minWidth: "560px",
+              margin: "0 auto",
               backgroundColor: "#ffffff",
               color: "#071537",
-              border: "1px solid #e2e8f0"
+              border: "1px solid #e2e8f0",
+              borderRadius: "24px",
+              padding: "24px",
+              boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05)",
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+              boxSizing: "border-box"
             }}
           >
-            {/* Header with Logo, Title, and Highlighted Logged-in User */}
+            {/* Header: Logo, Title, and Highlighted User */}
             <div
-              className="flex items-start justify-between pb-4"
-              style={{ borderBottom: "2px solid #f1f5f9" }}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                justifyContent: "space-between",
+                borderBottom: "2px solid #f1f5f9",
+                paddingBottom: "16px",
+                boxSizing: "border-box"
+              }}
             >
-              <div className="flex items-start gap-3">
+              <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
                 <img
                   src="/report-assets/domex-logo-new.jpg"
                   alt="DOMEX"
-                  className="h-12 w-auto object-contain"
+                  style={{
+                    height: "48px",
+                    width: "auto",
+                    maxWidth: "120px",
+                    objectFit: "contain",
+                    display: "block"
+                  }}
                   onError={(e) => {
                     e.target.src = "/report-assets/domex-logo.png";
                   }}
                 />
                 <div>
                   <h2
-                    className="text-lg sm:text-xl font-black uppercase tracking-tight"
-                    style={{ color: "#071537", margin: 0, lineHeight: "1.2" }}
+                    style={{
+                      fontSize: "18px",
+                      fontWeight: "900",
+                      textTransform: "uppercase",
+                      letterSpacing: "-0.02em",
+                      color: "#071537",
+                      margin: "0 0 2px 0",
+                      lineHeight: "1.2"
+                    }}
                   >
                     Regional Dispatch Performance
                   </h2>
                   <p
-                    className="text-[11px] font-black uppercase tracking-widest"
-                    style={{ color: "#6d28d9", margin: "2px 0 0 0" }}
+                    style={{
+                      fontSize: "11px",
+                      fontWeight: "800",
+                      textTransform: "uppercase",
+                      letterSpacing: "1px",
+                      color: "#6d28d9",
+                      margin: "0 0 6px 0"
+                    }}
                   >
                     Daily Courier Branch Analytics
                   </p>
 
                   {/* Highlighted Logged-in User Badge */}
-                  <div style={{ marginTop: "6px" }}>
+                  <div>
                     <span
                       style={{
                         display: "inline-flex",
@@ -229,12 +229,11 @@ export default function DispatchShareCard({
                         padding: "3px 10px",
                         borderRadius: "8px",
                         fontSize: "11px",
-                        fontWeight: "900",
+                        fontWeight: "800",
                         border: "1px solid #d8b4fe"
                       }}
                     >
-                      <User style={{ width: "12px", height: "12px", display: "inline" }} />
-                      Prepared by:{" "}
+                      👤 Prepared by:{" "}
                       <span style={{ textDecoration: "underline", color: "#581c87" }}>
                         {userName} ({userRole})
                       </span>
@@ -243,44 +242,113 @@ export default function DispatchShareCard({
                 </div>
               </div>
 
-              <div className="text-right">
-                <p className="text-[11px] font-black uppercase" style={{ color: "#94a3b8", margin: 0 }}>
+              <div style={{ textAlign: "right", minWidth: "90px" }}>
+                <p
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: "900",
+                    textTransform: "uppercase",
+                    color: "#94a3b8",
+                    margin: 0
+                  }}
+                >
                   Report Date
                 </p>
-                <p className="text-sm sm:text-base font-black" style={{ color: "#1e293b", margin: 0 }}>
+                <p
+                  style={{
+                    fontSize: "15px",
+                    fontWeight: "900",
+                    color: "#1e293b",
+                    margin: "2px 0 0 0"
+                  }}
+                >
                   {date}
                 </p>
               </div>
             </div>
 
-            {/* Quick KPI Row */}
-            <div className="mt-4 grid grid-cols-3 gap-2 sm:gap-3">
+            {/* Quick KPI Row - 3 Boxes */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, 1fr)",
+                gap: "10px",
+                marginTop: "16px",
+                boxSizing: "border-box"
+              }}
+            >
+              {/* Total Target */}
               <div
-                className="rounded-2xl p-2.5 sm:p-3 text-center"
-                style={{ backgroundColor: "#f8fafc", border: "1px solid #e2e8f0" }}
+                style={{
+                  backgroundColor: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: "16px",
+                  padding: "12px",
+                  textAlign: "center",
+                  boxSizing: "border-box"
+                }}
               >
-                <p className="text-[10px] sm:text-[11px] font-black uppercase" style={{ color: "#64748b", margin: 0 }}>
+                <p
+                  style={{
+                    fontSize: "10px",
+                    fontWeight: "900",
+                    textTransform: "uppercase",
+                    color: "#64748b",
+                    margin: 0
+                  }}
+                >
                   Total Target
                 </p>
-                <p className="mt-1 text-xl sm:text-2xl font-black" style={{ color: "#071537", margin: 0 }}>
+                <p
+                  style={{
+                    fontSize: "24px",
+                    fontWeight: "900",
+                    color: "#071537",
+                    margin: "4px 0 0 0",
+                    lineHeight: 1
+                  }}
+                >
                   {summary.totalTarget || 0}
                 </p>
               </div>
 
+              {/* Actual Dispatched */}
               <div
-                className="rounded-2xl p-2.5 sm:p-3 text-center"
-                style={{ backgroundColor: "#eff6ff", border: "1px solid #bfdbfe" }}
+                style={{
+                  backgroundColor: "#eff6ff",
+                  border: "1px solid #bfdbfe",
+                  borderRadius: "16px",
+                  padding: "12px",
+                  textAlign: "center",
+                  boxSizing: "border-box"
+                }}
               >
-                <p className="text-[10px] sm:text-[11px] font-black uppercase" style={{ color: "#1e40af", margin: 0 }}>
+                <p
+                  style={{
+                    fontSize: "10px",
+                    fontWeight: "900",
+                    textTransform: "uppercase",
+                    color: "#1e40af",
+                    margin: 0
+                  }}
+                >
                   Dispatched
                 </p>
-                <p className="mt-1 text-xl sm:text-2xl font-black" style={{ color: "#1e3a8a", margin: 0 }}>
+                <p
+                  style={{
+                    fontSize: "24px",
+                    fontWeight: "900",
+                    color: "#1e3a8a",
+                    margin: "4px 0 0 0",
+                    lineHeight: 1
+                  }}
+                >
                   {summary.totalDispatch || 0}
                 </p>
               </div>
 
+              {/* Achievement Rate */}
               <div
-                className="rounded-2xl p-2.5 sm:p-3 text-center"
                 style={{
                   backgroundColor:
                     summary.overallPercentage >= 100
@@ -300,90 +368,154 @@ export default function DispatchShareCard({
                       : summary.overallPercentage >= 70
                       ? "#fde68a"
                       : "#fecdd3"
-                  }`
+                  }`,
+                  borderRadius: "16px",
+                  padding: "12px",
+                  textAlign: "center",
+                  boxSizing: "border-box"
                 }}
               >
-                <p className="text-[10px] sm:text-[11px] font-black uppercase" style={{ margin: 0 }}>
+                <p style={{ fontSize: "10px", fontWeight: "900", textTransform: "uppercase", margin: 0 }}>
                   Achievement
                 </p>
-                <p className="mt-1 text-xl sm:text-2xl font-black" style={{ margin: 0 }}>
+                <p
+                  style={{
+                    fontSize: "24px",
+                    fontWeight: "900",
+                    margin: "4px 0 0 0",
+                    lineHeight: 1
+                  }}
+                >
                   {summary.overallPercentage || 0}%
                 </p>
               </div>
             </div>
 
             {/* Highlights */}
-            <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold">
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "8px",
+                marginTop: "12px",
+                fontSize: "12px",
+                fontWeight: "700"
+              }}
+            >
               {summary.topBranch && (
                 <span
-                  className="inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1"
-                  style={{ backgroundColor: "#d1fae5", color: "#065f46" }}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    backgroundColor: "#d1fae5",
+                    color: "#065f46",
+                    padding: "4px 10px",
+                    borderRadius: "12px"
+                  }}
                 >
-                  <Award className="h-3.5 w-3.5" style={{ color: "#059669" }} />
-                  Top: <strong>{summary.topBranch.branch}</strong> ({summary.topBranch.percentage}%)
+                  🏆 Top: <strong>{summary.topBranch.branch}</strong> ({summary.topBranch.percentage}%)
                 </span>
               )}
               {summary.lowestBranch && (
                 <span
-                  className="inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1"
-                  style={{ backgroundColor: "#ffe4e6", color: "#9f1239" }}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    backgroundColor: "#ffe4e6",
+                    color: "#9f1239",
+                    padding: "4px 10px",
+                    borderRadius: "12px"
+                  }}
                 >
-                  <TrendingDown className="h-3.5 w-3.5" style={{ color: "#e11d48" }} />
-                  Needs Attention: <strong>{summary.lowestBranch.branch}</strong> (
+                  ⚠️ Needs Attention: <strong>{summary.lowestBranch.branch}</strong> (
                   {summary.lowestBranch.percentage}%)
                 </span>
               )}
             </div>
 
-            {/* Branch Performance List */}
+            {/* Branch Performance Table */}
             <div
-              className="mt-3.5 overflow-hidden rounded-2xl"
-              style={{ border: "1px solid #f1f5f9" }}
+              style={{
+                marginTop: "14px",
+                border: "1px solid #f1f5f9",
+                borderRadius: "16px",
+                overflow: "hidden",
+                boxSizing: "border-box"
+              }}
             >
-              <table className="w-full text-left text-xs">
-                <thead
-                  className="font-black uppercase"
-                  style={{ backgroundColor: "#f8fafc", color: "#64748b" }}
-                >
-                  <tr>
-                    <th className="px-3 py-2">Rank</th>
-                    <th className="px-3 py-2">Branch</th>
-                    <th className="px-3 py-2 text-right">Target</th>
-                    <th className="px-3 py-2 text-right">Actual</th>
-                    <th className="px-3 py-2 text-center" style={{ width: "110px" }}>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: "12px",
+                  textAlign: "left"
+                }}
+              >
+                <thead>
+                  <tr
+                    style={{
+                      backgroundColor: "#f8fafc",
+                      color: "#64748b",
+                      fontWeight: "900",
+                      textTransform: "uppercase",
+                      fontSize: "11px"
+                    }}
+                  >
+                    <th style={{ padding: "8px 12px" }}>Rank</th>
+                    <th style={{ padding: "8px 12px" }}>Branch</th>
+                    <th style={{ padding: "8px 12px", textAlign: "right" }}>Target</th>
+                    <th style={{ padding: "8px 12px", textAlign: "right" }}>Actual</th>
+                    <th style={{ padding: "8px 12px", textAlign: "center", width: "110px" }}>
                       Progress
                     </th>
-                    <th className="px-3 py-2 text-right">Achv %</th>
+                    <th style={{ padding: "8px 12px", textAlign: "right" }}>Achv %</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 font-bold">
+                <tbody>
                   {rows.map((r, idx) => (
                     <tr
                       key={r.branch}
                       style={{
-                        backgroundColor: idx % 2 === 0 ? "#ffffff" : "#f8fafc"
+                        backgroundColor: idx % 2 === 0 ? "#ffffff" : "#f8fafc",
+                        borderTop: "1px solid #f1f5f9",
+                        fontWeight: "700"
                       }}
                     >
-                      <td className="px-3 py-2 font-black" style={{ color: "#94a3b8" }}>
+                      <td style={{ padding: "8px 12px", color: "#94a3b8", fontWeight: "900" }}>
                         #{idx + 1}
                       </td>
-                      <td className="px-3 py-2 font-black" style={{ color: "#071537" }}>
+                      <td style={{ padding: "8px 12px", color: "#071537", fontWeight: "900" }}>
                         {r.branch}
                       </td>
-                      <td className="px-3 py-2 text-right" style={{ color: "#64748b" }}>
+                      <td style={{ padding: "8px 12px", textAlign: "right", color: "#64748b" }}>
                         {r.target}
                       </td>
-                      <td className="px-3 py-2 text-right font-black" style={{ color: "#1e3a8a" }}>
+                      <td
+                        style={{
+                          padding: "8px 12px",
+                          textAlign: "right",
+                          color: "#1e3a8a",
+                          fontWeight: "900"
+                        }}
+                      >
                         {r.dispatch}
                       </td>
-                      <td className="px-3 py-2">
+                      <td style={{ padding: "8px 12px" }}>
                         <div
-                          className="h-2 w-full overflow-hidden rounded-full"
-                          style={{ backgroundColor: "#e2e8f0" }}
+                          style={{
+                            height: "8px",
+                            width: "100%",
+                            backgroundColor: "#e2e8f0",
+                            borderRadius: "9999px",
+                            overflow: "hidden"
+                          }}
                         >
                           <div
-                            className="h-full rounded-full"
                             style={{
+                              height: "100%",
+                              borderRadius: "9999px",
                               width: `${Math.min(100, r.percentage)}%`,
                               backgroundColor:
                                 r.percentage >= 100
@@ -395,10 +527,16 @@ export default function DispatchShareCard({
                           />
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-right">
+                      <td style={{ padding: "8px 12px", textAlign: "right" }}>
                         <span
-                          className="inline-block min-w-[48px] rounded-lg px-1.5 py-0.5 text-center font-black"
                           style={{
+                            display: "inline-block",
+                            minWidth: "48px",
+                            padding: "2px 6px",
+                            borderRadius: "8px",
+                            textAlign: "center",
+                            fontWeight: "900",
+                            fontSize: "11px",
                             backgroundColor:
                               r.percentage >= 100
                                 ? "#d1fae5"
@@ -422,9 +560,19 @@ export default function DispatchShareCard({
               </table>
             </div>
 
+            {/* Footer */}
             <div
-              className="mt-3.5 flex items-center justify-between pt-2.5 text-[10px] font-bold"
-              style={{ borderTop: "1px solid #f1f5f9", color: "#94a3b8" }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                borderTop: "1px solid #f1f5f9",
+                paddingTop: "10px",
+                marginTop: "14px",
+                fontSize: "10px",
+                fontWeight: "700",
+                color: "#94a3b8"
+              }}
             >
               <span>Domestic Express (PVT) Ltd • Regional Management</span>
               <span>Confidential • Internal Only</span>
@@ -432,7 +580,7 @@ export default function DispatchShareCard({
           </div>
         </div>
 
-        {/* Action Controls - responsive on mobile */}
+        {/* Action Buttons */}
         <div className="mt-3.5 grid grid-cols-1 sm:flex sm:items-center sm:justify-between gap-2.5 border-t border-slate-200 pt-3">
           <button
             type="button"
