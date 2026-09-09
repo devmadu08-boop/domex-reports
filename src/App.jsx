@@ -30,6 +30,7 @@ import {
   Sparkles,
   Target,
   Trash2,
+  TrendingUp,
   Truck,
   UserRound,
   UserPlus,
@@ -54,6 +55,7 @@ import SystemRecoveryPanel from "./components/SystemRecoveryPanel.jsx";
 import TodayOperationsDashboard from "./components/TodayOperationsDashboard.jsx";
 import ThemeSwitcher from "./components/ThemeSwitcher.jsx";
 import ReceiptGenerator from "./components/ReceiptGenerator.jsx";
+import AutoDispatchManager from "./components/dispatch/AutoDispatchManager.jsx";
 import { normalizeThemeId } from "./themeConfig.js";
 import {
   clearReportByDate,
@@ -144,6 +146,7 @@ const tabs = [
   { id: "receipt", label: "Receipt", mobileLabel: "Receipt", icon: FileText },
   { id: "pettyCash", label: "Petty Cash Management", mobileLabel: "Petty Cash", icon: WalletCards },
   { id: "audit", label: "Audit Report", mobileLabel: "Audit", icon: ClipboardCheck },
+  { id: "autoDispatch", label: "Auto-Dispatch", mobileLabel: "Dispatch", icon: TrendingUp },
   { id: "meterChats", label: "Meter Chats", mobileLabel: "Chats", icon: MessagesSquare, adminOnly: true },
   { id: "settings", label: "Settings", mobileLabel: "Settings", icon: Settings },
   { id: "users", label: "User Management", mobileLabel: "Users", icon: ShieldCheck, adminOnly: true },
@@ -1387,7 +1390,7 @@ export default function App() {
           <p className="text-xs font-semibold text-[#6f6597]">Mobile app mode</p>
         </div>
 
-        {!["deliveredConverter", "settings", "dashboard", "meterChats"].includes(effectiveActiveTab) && effectiveActiveTab !== "noAccess" && (
+        {!["deliveredConverter", "settings", "dashboard", "meterChats", "autoDispatch"].includes(effectiveActiveTab) && effectiveActiveTab !== "noAccess" && (
           <DateSelector
             selectedDate={selectedDate}
             onDateChange={setSelectedDate}
@@ -1534,6 +1537,13 @@ export default function App() {
         )}
 
         {effectiveActiveTab === "receipt" && <ReceiptGenerator session={session} />}
+
+        {effectiveActiveTab === "autoDispatch" && (
+          <AutoDispatchManager
+            session={session}
+            onBackToDashboard={() => setActiveTab("dashboard")}
+          />
+        )}
 
         {effectiveActiveTab === "pettyCash" && (
           <PettyCashManagement

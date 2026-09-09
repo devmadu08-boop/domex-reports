@@ -10,10 +10,13 @@ export const SYSTEM_ACCESS_OPTIONS = [
   { id: "pettyCash.report", label: "Petty Cash CSV / Report Export", group: "Petty Cash" },
   { id: "pettyCash.float", label: "Petty Cash Float Management", group: "Petty Cash" },
   { id: "audit", label: "Audit Report", group: "Reports" },
+  { id: "autoDispatch", label: "Auto-Dispatch & Branch Analytics", group: "Regional" },
   { id: "settings", label: "Settings", group: "Account" },
 ];
 
-export const LEGACY_BRANCH_ACCESS = SYSTEM_ACCESS_OPTIONS.map((option) => option.id);
+export const LEGACY_BRANCH_ACCESS = SYSTEM_ACCESS_OPTIONS
+  .filter((option) => option.id !== "autoDispatch")
+  .map((option) => option.id);
 export const REGIONAL_MANAGER_ACCESS = SYSTEM_ACCESS_OPTIONS
   .filter((option) => option.id !== "settings")
   .map((option) => option.id);
@@ -34,6 +37,7 @@ const TAB_ACCESS = {
   deliveredConverter: ["deliveredConverter"],
   reschedule: ["reschedule"],
   receipt: ["receipt"],
+  autoDispatch: ["autoDispatch"],
   pettyCash: ["pettyCash.report", "pettyCash.float"],
   audit: ["audit"],
   settings: ["settings"],
@@ -80,7 +84,17 @@ export function hasPermission(session, permission) {
   return normalizeUserPermissions(session?.permissions).includes(permission);
 }
 
+export function isSpecialDispatchUser(session) {
+  const role = normalizeUserRole(session?.role);
+  if (role === "regional_manager" || role === "admin" || role === "superadmin") return true;
+  if (session?.canAccessDispatch === true || session?.can_access_dispatch === true) return true;
+  return normalizeUserPermissions(session?.permissions, { legacyDefault: false }).includes("autoDispatch");
+}
+
 export function canAccessTab(session, tabId) {
+  if (tabId === "autoDispatch") {
+    return isSpecialDispatchUser(session);
+  }
   if (session?.role === "admin" || session?.role === "superadmin") return true;
   if (tabId === "receipt") return true; // Always allow access to the receipt tool
   const required = TAB_ACCESS[tabId] || [];

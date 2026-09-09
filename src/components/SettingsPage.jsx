@@ -12,6 +12,9 @@ import {
   Save,
   Settings,
   SlidersHorizontal,
+  Sparkles,
+  KeyRound,
+  RefreshCw,
   Trash2,
   Upload,
   UserPlus,
@@ -20,6 +23,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { downloadBackupFile, getAllDeliveredRiderNames, restoreBackupFile } from "../services/reportStorage.js";
 import { getDomexAutomationStatus, saveDomexAutomationConfig } from "../services/domexAutomationApi.js";
+import { testGeminiApiKey } from "../services/geminiDispatchService.js";
 import WhatsAppSettings from "./WhatsAppSettings.jsx";
 import RiderMeterMonitorSettings from "./RiderMeterMonitorSettings.jsx";
 import ThemeSwitcher from "./ThemeSwitcher.jsx";
@@ -83,6 +87,17 @@ export default function SettingsPage({
   function handleThemeChange(themeId) {
     updateSetting("uiTheme", themeId);
     onThemeChange?.(themeId);
+  }
+
+  const [testingGemini, setTestingGemini] = useState(false);
+  const [geminiTestStatus, setGeminiTestStatus] = useState(null);
+
+  async function handleTestGeminiKey() {
+    setTestingGemini(true);
+    setGeminiTestStatus(null);
+    const res = await testGeminiApiKey(draftSettings.geminiApiKey);
+    setGeminiTestStatus(res);
+    setTestingGemini(false);
   }
 
   async function handleSaveDomexConfig() {
@@ -369,6 +384,73 @@ export default function SettingsPage({
               Save DOMEX Login
             </button>
             {domexStatus && <p className="rounded-2xl bg-white/60 px-4 py-3 text-sm font-black text-blue-950">{domexStatus}</p>}
+          </div>
+
+          <div className="mt-6 border-t border-white/60 pt-6">
+            <div className="mb-4 flex items-center gap-3">
+              <span className="grid h-11 w-11 place-items-center rounded-2xl bg-violet-100 text-violet-700 shadow-inner">
+                <Sparkles className="h-6 w-6" />
+              </span>
+              <div>
+                <h3 className="text-lg font-black text-[#071537]">Google Gemini AI Parser Configuration</h3>
+                <p className="text-sm font-semibold text-blue-950/65">
+                  Used by the Regional Manager Auto-Dispatch feature to extract branch dispatch figures from unstructured WhatsApp/SMS updates.
+                </p>
+              </div>
+            </div>
+
+            <div className="max-w-xl">
+              <Field
+                label="Google Gemini API Key"
+                type="password"
+                value={draftSettings.geminiApiKey || ""}
+                onChange={(value) => updateSetting("geminiApiKey", value)}
+                placeholder="AIzaSy..."
+              />
+              <p className="mt-1.5 text-xs font-semibold text-blue-950/60">
+                Get a free API key at{" "}
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-bold text-violet-600 underline"
+                >
+                  Google AI Studio
+                </a>
+                . The system automatically cascades through models (2.5 &rarr; 2.0 &rarr; 1.5) and falls back to offline Smart Regex if unreachable.
+              </p>
+            </div>
+
+            {geminiTestStatus && (
+              <div
+                className={`mt-3 max-w-xl rounded-2xl p-3 text-xs font-bold ${
+                  geminiTestStatus.ok ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700"
+                }`}
+              >
+                {geminiTestStatus.message}
+              </div>
+            )}
+
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleSaveSettings}
+                className="primary-action primary-action-green"
+              >
+                <Save className="h-5 w-5" />
+                Save AI Settings
+              </button>
+
+              <button
+                type="button"
+                onClick={handleTestGeminiKey}
+                disabled={testingGemini || !draftSettings.geminiApiKey?.trim()}
+                className="inline-flex min-h-11 items-center gap-2 rounded-2xl border border-violet-200 bg-white px-4 py-2 text-xs font-black text-violet-800 shadow-sm transition hover:bg-violet-50 disabled:opacity-50"
+              >
+                <RefreshCw className={`h-4 w-4 ${testingGemini ? "animate-spin" : ""}`} />
+                {testingGemini ? "Testing Connection..." : "Test Gemini Key"}
+              </button>
+            </div>
           </div>
         </div>}
 

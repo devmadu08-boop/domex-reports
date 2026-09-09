@@ -719,6 +719,7 @@ export function getSettings() {
     pettyCashVehicleEmployees: [],
     pettyCashFloatAmount: 0,
     rescheduleApprovalReaction: "✅",
+    geminiApiKey: "",
     ...savedSettings,
     whatsappCaptionTemplates: {
       ...DEFAULT_WHATSAPP_CAPTION_TEMPLATES,
