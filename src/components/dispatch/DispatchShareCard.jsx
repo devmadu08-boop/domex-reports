@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { Download, Copy, Check, Share2 } from "lucide-react";
 import html2canvas from "html2canvas";
 
@@ -10,8 +10,11 @@ export default function DispatchShareCard({
   onClose
 }) {
   const cardRef = useRef(null);
+  const containerRef = useRef(null);
   const [exporting, setExporting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [scale, setScale] = useState(1);
+  const [cardHeight, setCardHeight] = useState(0);
 
   const { rows = [], summary = {} } = metrics || {};
 
@@ -19,6 +22,36 @@ export default function DispatchShareCard({
   const rawName = session?.branchName || session?.homeBranchName || session?.userId || "Regional Manager";
   const userName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
   const userRole = session?.role === "superadmin" ? "Super Admin" : "Regional Manager";
+
+  // Measure card's unscaled height
+  useEffect(() => {
+    if (!cardRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      if (entries[0]) {
+        setCardHeight(entries[0].contentRect.height);
+      }
+    });
+    observer.observe(cardRef.current);
+    return () => observer.disconnect();
+  }, [rows]);
+
+  // Measure container width and calculate scale
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      if (entries[0]) {
+        const available = entries[0].contentRect.width;
+        // 560 is our fixed card width. If less space is available, scale it down.
+        if (available > 0 && available < 560) {
+          setScale(available / 560);
+        } else {
+          setScale(1);
+        }
+      }
+    });
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
 
   async function handleExportPng() {
     if (!cardRef.current) return;
@@ -37,19 +70,15 @@ export default function DispatchShareCard({
       );
 
       // 2. Capture using html2canvas with pure inline styles
-      // Removing external stylesheets prevents Tailwind v4 oklch crash
-      // while inline styles ensure the output looks 100% identical to preview!
       const canvas = await html2canvas(cardRef.current, {
         scale: 2,
         backgroundColor: "#ffffff",
         useCORS: true,
         logging: false,
         onclone: (clonedDoc) => {
-          // Remove external stylesheets containing Tailwind v4 oklch colors
           const extStyles = clonedDoc.querySelectorAll('link[rel="stylesheet"], style');
           extStyles.forEach((s) => s.remove());
 
-          // Clean standard CSS reset
           const cleanStyle = clonedDoc.createElement("style");
           cleanStyle.textContent = `
             * { box-sizing: border-box !important; }
@@ -155,29 +184,34 @@ export default function DispatchShareCard({
         </div>
 
         {/* The Card Viewport */}
-        <div className="flex-1 overflow-y-auto bg-slate-50 px-4 py-4">
-          {/*
-            The card is fixed at 560px width.
-            On mobile, we use CSS transform scale so it fits without horizontal scroll.
-          */}
+        <div 
+          ref={containerRef}
+          className="flex-1 overflow-y-auto overflow-x-hidden bg-slate-50 px-3 py-4 sm:px-4"
+        >
           <div className="flex justify-center">
-            {/* Outer scaler — shrinks card on small screens */}
+            {/* 
+              Dynamic layout wrapper: shrinks its footprint to perfectly 
+              match the scaled card so there is no extra whitespace or scrollbar.
+            */}
             <div
-              className="w-full overflow-hidden flex justify-center"
-              style={{ minHeight: "200px" }}
+              style={{
+                width: scale < 1 ? `${560 * scale}px` : "560px",
+                height: scale < 1 && cardHeight > 0 ? `${cardHeight * scale}px` : "auto",
+                position: "relative"
+              }}
             >
+              {/* The Scaler container */}
               <div
                 style={{
-                  transformOrigin: "top center",
+                  transform: `scale(${scale})`,
+                  transformOrigin: "top left",
+                  position: scale < 1 ? "absolute" : "relative",
+                  top: 0,
+                  left: 0
                 }}
-                className="
-                  scale-[0.58] xs:scale-[0.65] sm:scale-100
-                  origin-top
-                  -mb-[42%] xs:-mb-[36%] sm:mb-0
-                "
               >
-                {/*
-                  Self-contained Card with 100% Inline Styles:
+                {/* 
+                  Self-contained Card with 100% Fixed Inline Styles:
                   Guarantees identical rendering in preview AND exported PNG!
                 */}
                 <div
