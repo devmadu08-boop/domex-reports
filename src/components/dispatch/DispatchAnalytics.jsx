@@ -47,50 +47,50 @@ export default function DispatchAnalytics({
   }
 
   return (
-    <div className="grid gap-4 md:gap-5">
-      {/* KPI Cards Row */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-3 sm:gap-4 md:gap-5">
+      {/* KPI Cards Row - 2 columns on mobile like a native app */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
         {/* Total Target */}
-        <div className="glass-panel p-4">
+        <div className="glass-panel p-3 sm:p-4">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-black uppercase text-blue-950/60">Total Target</span>
-            <span className="grid h-8 w-8 place-items-center rounded-xl bg-slate-100 text-slate-700">
-              <Target className="h-4 w-4" />
+            <span className="text-[10px] sm:text-xs font-black uppercase text-blue-950/60">Total Target</span>
+            <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-xl bg-slate-100 text-slate-700">
+              <Target className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             </span>
           </div>
-          <p className="mt-2 text-3xl font-black text-[#071537]">{summary.totalTarget || 0}</p>
-          <p className="mt-1 text-xs font-semibold text-blue-950/55">
-            Combined target of {summary.branchCount || 0} branches
+          <p className="mt-1.5 text-2xl sm:text-3xl font-black text-[#071537]">{summary.totalTarget || 0}</p>
+          <p className="mt-0.5 text-[10px] sm:text-xs font-semibold text-blue-950/55">
+            {summary.branchCount || 0} branches
           </p>
         </div>
 
         {/* Total Actual Dispatch */}
-        <div className="glass-panel p-4">
+        <div className="glass-panel p-3 sm:p-4">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-black uppercase text-blue-950/60">Actual Dispatched</span>
-            <span className="grid h-8 w-8 place-items-center rounded-xl bg-blue-100 text-blue-700">
-              <Truck className="h-4 w-4" />
+            <span className="text-[10px] sm:text-xs font-black uppercase text-blue-950/60">Actual Dispatched</span>
+            <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-xl bg-blue-100 text-blue-700">
+              <Truck className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             </span>
           </div>
-          <p className="mt-2 text-3xl font-black text-blue-900">{summary.totalDispatch || 0}</p>
-          <p className="mt-1 text-xs font-semibold text-blue-950/55">Total parcels handed over</p>
+          <p className="mt-1.5 text-2xl sm:text-3xl font-black text-blue-900">{summary.totalDispatch || 0}</p>
+          <p className="mt-0.5 text-[10px] sm:text-xs font-semibold text-blue-950/55">Total parcels handed over</p>
         </div>
 
         {/* Overall Achievement % */}
-        <div className="glass-panel p-4">
+        <div className="glass-panel p-3 sm:p-4">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-black uppercase text-blue-950/60">Achievement Rate</span>
-            <span className={`grid h-8 w-8 place-items-center rounded-xl ${
+            <span className="text-[10px] sm:text-xs font-black uppercase text-blue-950/60">Achievement</span>
+            <span className={`grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-xl ${
               summary.overallPercentage >= 100
                 ? "bg-emerald-100 text-emerald-700"
                 : summary.overallPercentage >= 70
                 ? "bg-amber-100 text-amber-700"
                 : "bg-rose-100 text-rose-700"
             }`}>
-              <TrendingUp className="h-4 w-4" />
+              <TrendingUp className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             </span>
           </div>
-          <p className={`mt-2 text-3xl font-black ${
+          <p className={`mt-1.5 text-2xl sm:text-3xl font-black ${
             summary.overallPercentage >= 100
               ? "text-emerald-700"
               : summary.overallPercentage >= 70
@@ -114,14 +114,14 @@ export default function DispatchAnalytics({
         </div>
 
         {/* Highlights: Top & Lowest */}
-        <div className="glass-panel p-4 flex flex-col justify-between">
+        <div className="glass-panel p-3 sm:p-4 flex flex-col justify-between">
           <div>
-            <span className="text-xs font-black uppercase text-blue-950/60">Performance Highlights</span>
-            <div className="mt-2 space-y-1.5 text-xs font-bold">
+            <span className="text-[10px] sm:text-xs font-black uppercase text-blue-950/60">Highlights</span>
+            <div className="mt-1.5 space-y-1 text-[11px] sm:text-xs font-bold">
               {summary.topBranch ? (
-                <div className="flex items-center justify-between rounded-lg bg-emerald-50 px-2 py-1 text-emerald-800">
+                <div className="flex items-center justify-between rounded-lg bg-emerald-50 px-2 py-0.5 text-emerald-800">
                   <span className="flex items-center gap-1">
-                    <Award className="h-3.5 w-3.5 text-emerald-600" />
+                    <Award className="h-3 w-3 text-emerald-600" />
                     {summary.topBranch.branch}
                   </span>
                   <span className="font-black">{summary.topBranch.percentage}%</span>
@@ -131,9 +131,9 @@ export default function DispatchAnalytics({
               )}
 
               {summary.lowestBranch && (
-                <div className="flex items-center justify-between rounded-lg bg-rose-50 px-2 py-1 text-rose-800">
+                <div className="flex items-center justify-between rounded-lg bg-rose-50 px-2 py-0.5 text-rose-800">
                   <span className="flex items-center gap-1">
-                    <AlertCircle className="h-3.5 w-3.5 text-rose-600" />
+                    <AlertCircle className="h-3 w-3 text-rose-600" />
                     {summary.lowestBranch.branch}
                   </span>
                   <span className="font-black">{summary.lowestBranch.percentage}%</span>
@@ -145,24 +145,27 @@ export default function DispatchAnalytics({
       </div>
 
       {/* Main Interactive Table Panel */}
-      <div className="glass-panel p-4 md:p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-white/60">
-          <div className="flex items-center gap-3">
+      <div className="glass-panel p-3.5 sm:p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-white/60">
+          <div>
             <h3 className="text-base font-black text-[#071537]">
-              Branch Performance Table ({filteredRows.length} Branches)
+              Branch Performance Table
             </h3>
+            <p className="text-xs font-bold text-slate-500">
+              {filteredRows.length} active branches in this report
+            </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid grid-cols-1 sm:flex sm:items-center gap-2 w-full sm:w-auto">
             {/* Search filter */}
-            <div className="relative">
+            <div className="relative w-full sm:w-44">
               <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
                 placeholder="Search branch..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="h-10 w-44 rounded-xl border border-white/80 bg-white/80 pl-8 pr-3 text-xs font-bold text-[#071537] outline-none focus:bg-white focus:ring-2 focus:ring-violet-300"
+                className="h-10 w-full rounded-xl border border-white/80 bg-white/80 pl-8 pr-3 text-xs font-bold text-[#071537] outline-none focus:bg-white focus:ring-2 focus:ring-violet-300"
               />
             </div>
 
@@ -170,7 +173,7 @@ export default function DispatchAnalytics({
               type="button"
               onClick={onOpenShareCard}
               disabled={!rows.length}
-              className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-violet-200 bg-white px-3 text-xs font-black text-violet-800 shadow-sm transition hover:bg-violet-50 disabled:opacity-40"
+              className="inline-flex h-10 w-full sm:w-auto items-center justify-center gap-1.5 rounded-xl border border-violet-200 bg-white px-3 text-xs font-black text-violet-800 shadow-sm transition hover:bg-violet-50 disabled:opacity-40"
             >
               <Share2 className="h-4 w-4" />
               Share Card / Export
@@ -180,7 +183,7 @@ export default function DispatchAnalytics({
               type="button"
               onClick={onSaveReport}
               disabled={saving || !rows.length}
-              className="primary-action primary-action-green min-h-10 px-4 text-xs shadow-sm transition disabled:opacity-40"
+              className="primary-action primary-action-green min-h-10 w-full sm:w-auto px-4 text-xs shadow-sm transition disabled:opacity-40"
             >
               <Save className="h-4 w-4" />
               {saving ? "Saving..." : "Save Daily Report"}

@@ -136,59 +136,65 @@ export default function AutoDispatchManager({ session, onBackToDashboard }) {
     <SpecialUserGuard session={session} onBack={onBackToDashboard}>
       <div className="grid gap-4 md:gap-5">
         {/* Header Banner with DOMEX Branding */}
-        <div className="glass-panel p-4 md:p-5">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
+        <div className="glass-panel p-3.5 sm:p-5">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
+            <div className="flex items-start gap-3">
               <img
                 src="/report-assets/domex-logo-new.jpg"
                 alt="DOMEX Logo"
-                className="h-12 w-auto object-contain rounded-xl shadow-sm"
+                className="h-11 sm:h-12 w-auto object-contain rounded-xl shadow-sm"
                 onError={(e) => {
                   e.target.src = "/report-assets/domex-logo.png";
                 }}
               />
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="rounded-full bg-violet-100 px-2.5 py-0.5 text-[11px] font-black uppercase text-violet-800">
+                  <span className="rounded-full bg-violet-100 px-2.5 py-0.5 text-[10px] sm:text-[11px] font-black uppercase text-violet-800">
                     Restricted Module
                   </span>
                   <span className="text-xs font-bold text-slate-400">•</span>
-                  <span className="text-xs font-bold text-slate-600">Regional Manager Access</span>
+                  <span className="text-xs font-bold text-slate-600">Regional Manager</span>
                 </div>
-                <h1 className="text-xl font-black text-[#071537] md:text-2xl">
-                  Auto-Dispatch Processor &amp; Branch Analytics
+                <h1 className="text-lg sm:text-2xl font-black text-[#071537] leading-tight">
+                  Auto-Dispatch &amp; Branch Analytics
                 </h1>
+                {/* Highlighted Logged-in User */}
+                <div className="mt-1">
+                  <span className="inline-flex items-center gap-1.5 rounded-lg bg-violet-100/80 px-2.5 py-0.5 text-xs font-black text-violet-900 border border-violet-200">
+                    👤 Logged in as: <strong className="underline">{session?.branchName || session?.homeBranchName || "Regional Manager"}</strong>
+                  </span>
+                </div>
               </div>
             </div>
 
-            {/* Quick Actions */}
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-1.5 rounded-2xl border border-white/80 bg-white/70 px-3 py-1.5 shadow-sm">
-                <Calendar className="h-4 w-4 text-violet-700" />
+            {/* Quick Actions - Mobile Friendly Toolbar */}
+            <div className="grid grid-cols-3 sm:flex sm:items-center gap-2 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-200">
+              <div className="flex items-center justify-center gap-1 rounded-2xl border border-white/80 bg-white/80 px-2 py-2 shadow-sm text-center">
+                <Calendar className="h-3.5 w-3.5 text-violet-700 shrink-0" />
                 <input
                   type="date"
                   value={date}
                   onChange={(e) => setDate(e.target.value)}
-                  className="bg-transparent text-xs font-black text-[#071537] outline-none"
+                  className="bg-transparent text-xs font-black text-[#071537] outline-none max-w-[105px]"
                 />
               </div>
 
               <button
                 type="button"
                 onClick={() => setShowTargetModal(true)}
-                className="inline-flex h-11 items-center gap-1.5 rounded-2xl border border-white/80 bg-white/70 px-3.5 text-xs font-black text-[#071537] shadow-sm transition hover:bg-white"
+                className="inline-flex items-center justify-center gap-1 rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2 text-xs font-black text-[#071537] shadow-sm transition hover:bg-white text-center"
               >
-                <Target className="h-4 w-4 text-violet-700" />
-                Configure Targets ({targets.length})
+                <Target className="h-3.5 w-3.5 text-violet-700" />
+                <span>Targets ({targets.length})</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setShowHistoryModal(true)}
-                className="inline-flex h-11 items-center gap-1.5 rounded-2xl border border-white/80 bg-white/70 px-3.5 text-xs font-black text-[#071537] shadow-sm transition hover:bg-white"
+                className="inline-flex items-center justify-center gap-1 rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2 text-xs font-black text-[#071537] shadow-sm transition hover:bg-white text-center"
               >
-                <History className="h-4 w-4 text-blue-700" />
-                History
+                <History className="h-3.5 w-3.5 text-blue-700" />
+                <span>History</span>
               </button>
             </div>
           </div>
@@ -231,6 +237,7 @@ export default function AutoDispatchManager({ session, onBackToDashboard }) {
             date={date}
             metrics={metrics}
             branchCount={targets.length}
+            session={session}
             onClose={() => setShowShareModal(false)}
           />
         )}
