@@ -197,8 +197,8 @@ export default function DispatchAnalytics({
           </div>
         )}
 
-        {/* Performance Table */}
-        <div className="mt-4 overflow-x-auto rounded-2xl border border-white/80 bg-white/70 shadow-sm">
+        {/* Performance Table (Desktop) */}
+        <div className="mt-4 hidden md:block overflow-x-auto rounded-2xl border border-white/80 bg-white/70 shadow-sm">
           <table className="w-full min-w-[620px] text-left text-sm">
             <thead className="bg-slate-100/80 text-xs font-black uppercase text-slate-600">
               <tr>
@@ -304,6 +304,102 @@ export default function DispatchAnalytics({
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Performance List (Mobile Native App Style) */}
+        <div className="mt-4 grid md:hidden gap-3">
+          {filteredRows.length === 0 ? (
+            <div className="rounded-2xl border border-white/80 bg-white/70 p-6 text-center text-xs text-slate-400 shadow-sm">
+              No dispatch records matching. Paste unstructured text above and click Process.
+            </div>
+          ) : (
+            filteredRows.map((row, idx) => (
+              <div key={row.branch} className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm hover:shadow-md transition-shadow">
+                 <div className="flex justify-between items-start mb-2">
+                    <div className="flex items-center gap-2">
+                       <span className="text-xs font-black text-slate-400">#{idx + 1}</span>
+                       <span className="font-black text-[#071537] text-base leading-none">{row.branch}</span>
+                    </div>
+                    <span
+                        className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-black ${
+                          row.status === "excellent"
+                            ? "bg-emerald-100 text-emerald-800"
+                            : row.status === "good"
+                            ? "bg-amber-100 text-amber-800"
+                            : "bg-rose-100 text-rose-800"
+                        }`}
+                      >
+                        {row.statusLabel}
+                      </span>
+                 </div>
+                 
+                 <div className="flex justify-between items-center mb-3 mt-4">
+                    <div>
+                       <p className="text-slate-400 font-black uppercase text-[10px]">Target</p>
+                       <p className="font-black text-slate-600 text-sm">{row.target}</p>
+                    </div>
+                    <div className="text-right">
+                       <p className="text-blue-900/50 font-black uppercase text-[10px]">Actual Dispatched</p>
+                       {editingBranch === row.branch ? (
+                         <input
+                           type="number"
+                           min="0"
+                           value={editValue}
+                           onChange={(e) => setEditValue(e.target.value)}
+                           className="h-8 w-20 mt-1 rounded border border-violet-300 bg-slate-50 px-2 text-right text-sm font-black text-blue-900 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200"
+                         />
+                       ) : (
+                         <p className="font-black text-blue-900 text-xl leading-none mt-1">{row.dispatch}</p>
+                       )}
+                    </div>
+                 </div>
+
+                 <div className="flex items-center gap-3 mb-3 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                    <div className="flex-1 h-2.5 w-full overflow-hidden rounded-full bg-slate-200">
+                        <div
+                          className={`h-full rounded-full transition-all duration-300 ${
+                            row.percentage >= 100
+                              ? "bg-emerald-500"
+                              : row.percentage >= 70
+                              ? "bg-amber-400"
+                              : "bg-rose-500"
+                          }`}
+                          style={{ width: `${Math.min(100, row.percentage)}%` }}
+                        />
+                    </div>
+                    <span className="font-black text-slate-800 text-xs w-12 text-right">{row.percentage}%</span>
+                 </div>
+                 
+                 <div className="flex justify-end pt-2 border-t border-slate-100">
+                      {editingBranch === row.branch ? (
+                        <div className="inline-flex gap-2 w-full sm:w-auto">
+                          <button
+                            type="button"
+                            onClick={() => setEditingBranch(null)}
+                            className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-lg bg-slate-100 text-slate-600 font-bold text-xs"
+                          >
+                            <X className="h-4 w-4" /> Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => saveEdit(row.branch)}
+                            className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-lg bg-emerald-100 text-emerald-800 font-black text-xs"
+                          >
+                            <Check className="h-4 w-4" /> Save
+                          </button>
+                        </div>
+                      ) : (
+                        <button 
+                          onClick={() => startEdit(row)} 
+                          className="flex items-center gap-1.5 text-xs font-black text-slate-400 hover:text-slate-800 transition-colors"
+                        >
+                           <Edit3 className="h-3.5 w-3.5" /> Edit Actual
+                        </button>
+                      )}
+                 </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>
