@@ -61,6 +61,14 @@ export default function DispatchShareCard({
               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
               -webkit-font-smoothing: antialiased;
             }
+            table {
+              border-collapse: collapse !important;
+              table-layout: fixed !important;
+              width: 100% !important;
+            }
+            th, td {
+              vertical-align: middle !important;
+            }
           `;
           clonedDoc.head.appendChild(cleanStyle);
 
@@ -218,38 +226,35 @@ export default function DispatchShareCard({
                   </p>
 
                   {/* Highlighted Logged-in User Badge */}
-                  <div>
-                    <span
+                  <div style={{ marginTop: "6px" }}>
+                    <div
                       style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "5px",
-                        backgroundColor: "#f3e8ff",
+                        display: "inline-block",
+                        backgroundColor: "#f5f3ff",
                         color: "#6b21a8",
-                        padding: "3px 10px",
+                        padding: "4px 12px",
                         borderRadius: "8px",
                         fontSize: "11px",
                         fontWeight: "800",
-                        border: "1px solid #d8b4fe"
+                        border: "1px solid #ddd6fe",
+                        lineHeight: "16px"
                       }}
                     >
-                      👤 Prepared by:{" "}
-                      <span style={{ textDecoration: "underline", color: "#581c87" }}>
-                        {userName} ({userRole})
-                      </span>
-                    </span>
+                      👤 Prepared by: <strong style={{ color: "#4c1d95" }}>{userName}</strong> ({userRole})
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div style={{ textAlign: "right", minWidth: "90px" }}>
+              <div style={{ textAlign: "right", minWidth: "100px" }}>
                 <p
                   style={{
-                    fontSize: "11px",
+                    fontSize: "10px",
                     fontWeight: "900",
                     textTransform: "uppercase",
                     color: "#94a3b8",
-                    margin: 0
+                    margin: 0,
+                    letterSpacing: "0.5px"
                   }}
                 >
                   Report Date
@@ -259,7 +264,8 @@ export default function DispatchShareCard({
                     fontSize: "15px",
                     fontWeight: "900",
                     color: "#1e293b",
-                    margin: "2px 0 0 0"
+                    margin: "3px 0 0 0",
+                    lineHeight: "1.2"
                   }}
                 >
                   {date}
@@ -448,11 +454,20 @@ export default function DispatchShareCard({
               <table
                 style={{
                   width: "100%",
+                  tableLayout: "fixed",
                   borderCollapse: "collapse",
                   fontSize: "12px",
-                  textAlign: "left"
+                  lineHeight: "1.3"
                 }}
               >
+                <colgroup>
+                  <col style={{ width: "50px" }} />
+                  <col style={{ width: "135px" }} />
+                  <col style={{ width: "65px" }} />
+                  <col style={{ width: "70px" }} />
+                  <col style={{ width: "120px" }} />
+                  <col style={{ width: "72px" }} />
+                </colgroup>
                 <thead>
                   <tr
                     style={{
@@ -463,14 +478,12 @@ export default function DispatchShareCard({
                       fontSize: "11px"
                     }}
                   >
-                    <th style={{ padding: "8px 12px" }}>Rank</th>
-                    <th style={{ padding: "8px 12px" }}>Branch</th>
-                    <th style={{ padding: "8px 12px", textAlign: "right" }}>Target</th>
-                    <th style={{ padding: "8px 12px", textAlign: "right" }}>Actual</th>
-                    <th style={{ padding: "8px 12px", textAlign: "center", width: "110px" }}>
-                      Progress
-                    </th>
-                    <th style={{ padding: "8px 12px", textAlign: "right" }}>Achv %</th>
+                    <th style={{ padding: "10px 8px", textAlign: "center", verticalAlign: "middle" }}>Rank</th>
+                    <th style={{ padding: "10px 8px", textAlign: "left", verticalAlign: "middle" }}>Branch</th>
+                    <th style={{ padding: "10px 8px", textAlign: "right", verticalAlign: "middle" }}>Target</th>
+                    <th style={{ padding: "10px 8px", textAlign: "right", verticalAlign: "middle" }}>Actual</th>
+                    <th style={{ padding: "10px 8px", textAlign: "center", verticalAlign: "middle" }}>Progress</th>
+                    <th style={{ padding: "10px 8px", textAlign: "right", verticalAlign: "middle" }}>Achv %</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -483,33 +496,46 @@ export default function DispatchShareCard({
                         fontWeight: "700"
                       }}
                     >
-                      <td style={{ padding: "8px 12px", color: "#94a3b8", fontWeight: "900" }}>
+                      <td style={{ padding: "10px 8px", color: "#94a3b8", fontWeight: "900", textAlign: "center", verticalAlign: "middle" }}>
                         #{idx + 1}
                       </td>
-                      <td style={{ padding: "8px 12px", color: "#071537", fontWeight: "900" }}>
+                      <td
+                        style={{
+                          padding: "10px 8px",
+                          color: "#071537",
+                          fontWeight: "900",
+                          textAlign: "left",
+                          verticalAlign: "middle",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap"
+                        }}
+                      >
                         {r.branch}
                       </td>
-                      <td style={{ padding: "8px 12px", textAlign: "right", color: "#64748b" }}>
+                      <td style={{ padding: "10px 8px", textAlign: "right", color: "#64748b", verticalAlign: "middle" }}>
                         {r.target}
                       </td>
                       <td
                         style={{
-                          padding: "8px 12px",
+                          padding: "10px 8px",
                           textAlign: "right",
                           color: "#1e3a8a",
-                          fontWeight: "900"
+                          fontWeight: "900",
+                          verticalAlign: "middle"
                         }}
                       >
                         {r.dispatch}
                       </td>
-                      <td style={{ padding: "8px 12px" }}>
+                      <td style={{ padding: "10px 8px", textAlign: "center", verticalAlign: "middle" }}>
                         <div
                           style={{
                             height: "8px",
                             width: "100%",
                             backgroundColor: "#e2e8f0",
                             borderRadius: "9999px",
-                            overflow: "hidden"
+                            overflow: "hidden",
+                            margin: "0 auto"
                           }}
                         >
                           <div
@@ -527,16 +553,17 @@ export default function DispatchShareCard({
                           />
                         </div>
                       </td>
-                      <td style={{ padding: "8px 12px", textAlign: "right" }}>
+                      <td style={{ padding: "10px 8px", textAlign: "right", verticalAlign: "middle" }}>
                         <span
                           style={{
                             display: "inline-block",
-                            minWidth: "48px",
+                            minWidth: "50px",
                             padding: "2px 6px",
-                            borderRadius: "8px",
+                            borderRadius: "6px",
                             textAlign: "center",
                             fontWeight: "900",
                             fontSize: "11px",
+                            lineHeight: "15px",
                             backgroundColor:
                               r.percentage >= 100
                                 ? "#d1fae5"
