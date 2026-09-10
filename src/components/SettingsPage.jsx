@@ -25,6 +25,7 @@ import { downloadBackupFile, getAllDeliveredRiderNames, restoreBackupFile } from
 import { getDomexAutomationStatus, saveDomexAutomationConfig } from "../services/domexAutomationApi.js";
 import { testGeminiApiKey } from "../services/geminiDispatchService.js";
 import WhatsAppSettings from "./WhatsAppSettings.jsx";
+import RegionalWhatsAppSettings from "./RegionalWhatsAppSettings.jsx";
 import RiderMeterMonitorSettings from "./RiderMeterMonitorSettings.jsx";
 import ThemeSwitcher from "./ThemeSwitcher.jsx";
 
@@ -49,6 +50,7 @@ export default function SettingsPage({
   cloudStatus,
   onThemeChange,
   whatsappAccountLabel,
+  session,
   children,
 }) {
   const [draftSettings, setDraftSettings] = useState(settings);
@@ -200,15 +202,17 @@ export default function SettingsPage({
           </div>
         </div>
         <nav className="settings-category-nav" aria-label="Settings categories">
-          {[
-            { id: "general", label: "General", helper: "Branch & appearance", icon: SlidersHorizontal },
-            { id: "whatsapp", label: "Report WhatsApp", helper: "Groups & templates", icon: MessageCircle },
-            { id: "meter", label: "Meter Monitor", helper: "Photos & reminders", icon: Camera },
-            { id: "people", label: "People", helper: "Couriers & riders", icon: Users },
-            { id: "pettyCash", label: "Petty Cash", helper: "Vehicle employees", icon: ReceiptText },
-            { id: "automation", label: "Automation", helper: "DOMEX login", icon: Bot },
-            { id: "data", label: "Data & Backup", helper: "Sync & recovery", icon: DatabaseBackup },
-          ].map((item) => {
+          <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-hide lg:flex-col lg:overflow-visible lg:pb-0">
+            {[
+              { id: "general", label: "General", helper: "Theme & API keys", icon: SlidersHorizontal },
+              { id: "whatsapp", label: "WhatsApp Bot", helper: "Reports & automation", icon: MessageCircle },
+              ...(session?.role?.toLowerCase() === "regional manager" ? [{ id: "regionalDispatch", label: "Regional Automations", helper: "Dispatch setup", icon: Sparkles }] : []),
+              { id: "meter", label: "Meter Monitor", helper: "Photos & reminders", icon: Camera },
+              { id: "people", label: "People", helper: "Couriers & riders", icon: Users },
+              { id: "pettyCash", label: "Petty Cash", helper: "Vehicle employees", icon: ReceiptText },
+              { id: "automation", label: "Automation", helper: "DOMEX login", icon: Bot },
+              { id: "data", label: "Data & Backup", helper: "Sync & recovery", icon: DatabaseBackup },
+            ].map((item) => {
             const Icon = item.icon;
             const selected = activeSection === item.id;
             return (
@@ -226,7 +230,8 @@ export default function SettingsPage({
                 </span>
               </button>
             );
-          })}
+            })}
+          </div>
         </nav>
       </div>
 
@@ -317,6 +322,7 @@ export default function SettingsPage({
       </div>}
 
       <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        {activeSection === "regionalDispatch" && <RegionalWhatsAppSettings accountKey={session?.userId || "regional"} session={session} />}
         {activeSection === "whatsapp" && <WhatsAppSettings settings={settings} onSaveSettings={onSaveSettings} accountLabel={whatsappAccountLabel} />}
         {activeSection === "meter" && <RiderMeterMonitorSettings />}
 

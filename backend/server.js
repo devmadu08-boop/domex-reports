@@ -11,6 +11,8 @@ import whatsappRoutes from "./whatsapp/whatsappRoutes.js";
 import { startAccountBackupScheduler, startSavedAccountClients } from "./whatsapp/accountWhatsappService.js";
 import { getWhatsAppStatus, startDailyBackupScheduler, startWhatsAppClient } from "./whatsapp/whatsappService.js";
 import { getWhatsAppQueueStatus, startWhatsAppQueueWorker } from "./whatsapp/whatsappQueue.js";
+import { startRegionalDispatchAutomation } from "./domex/regionalDispatchAutomationService.js";
+import regionalDispatchRoutes from "./domex/regionalDispatchRoutes.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -70,6 +72,7 @@ app.get("/api/system-health", async (_request, response) => {
 app.use("/api/whatsapp", whatsappRoutes);
 app.use("/api/meter-monitor", meterMonitorRoutes);
 app.use("/api/domex", domexAutomationRoutes);
+app.use("/api/regional-dispatch", regionalDispatchRoutes);
 
 app.listen(port, host, () => {
   console.log(`Daily Report backend running at http://${host}:${port}`);
@@ -88,3 +91,4 @@ startDailyBackupScheduler();
 startAccountBackupScheduler();
 startMeterMonitorScheduler();
 startWhatsAppQueueWorker();
+startRegionalDispatchAutomation();

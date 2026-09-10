@@ -12,6 +12,13 @@ import * as primary from "./whatsappService.js";
 import { renderRescheduleReportImages } from "../reports/rescheduleReportRenderer.js";
 
 export const PRIMARY_WHATSAPP_ACCOUNT = "default";
+export const accountMessageListeners = new Set();
+
+export function subscribeToAccountMessages(listener) {
+  accountMessageListeners.add(listener);
+  return () => accountMessageListeners.delete(listener);
+}
+
 const accountsDir = path.resolve("backend", "data", "whatsapp-accounts");
 const runtimes = new Map();
 
@@ -23,7 +30,7 @@ export function normalizeWhatsAppAccountKey(value) {
   return normalized === PRIMARY_WHATSAPP_ACCOUNT ? `account-${normalized}` : normalized;
 }
 
-function getRuntime(accountKey) {
+export function getRuntime(accountKey) {
   const key = normalizeWhatsAppAccountKey(accountKey);
   if (!runtimes.has(key)) {
     const rootDir = path.join(accountsDir, key);
@@ -43,6 +50,13 @@ function getRuntime(accountKey) {
     });
   }
   return runtimes.get(key);
+}
+
+export async function ensureConnected(runtime) {
+  if (!runtime.socket || runtime.status !== "connected") {
+    throw new Error("WhatsApp is not connected for this login. Scan its QR from Settings.");
+  }
+  return runtime.socket;
 }
 
 function normalizeGroupJids(groupJids) {
@@ -97,12 +111,7 @@ function normalizeRecipientJid(phoneNumber) {
   return `${digits.length === 10 && digits.startsWith("0") ? `94${digits.slice(1)}` : digits}@s.whatsapp.net`;
 }
 
-async function ensureConnected(runtime) {
-  if (!runtime.socket || runtime.status !== "connected") {
-    throw new Error("WhatsApp is not connected for this login. Scan its QR from Settings.");
-  }
-  return runtime.socket;
-}
+
 
 async function startAccountClient(accountKey, force = false) {
   const runtime = getRuntime(accountKey);
@@ -127,6 +136,15 @@ async function startAccountClient(accountKey, force = false) {
     });
     runtime.socket = socket;
     socket.ev.on("creds.update", saveCreds);
+    socket.ev.on("messages.upsert", ({ messages, type }) => {
+      for (const listener of accountMessageListeners) {
+        try {
+          listener(runtime.key, { messages: messages || [], type });
+        } catch (error) {
+          console.error(`[whatsapp-account-message-listener:${runtime.key}]`, error.message || error);
+        }
+      }
+    });
     socket.ev.on("messages.reaction", (reactions) => {
       for (const update of reactions || []) {
         handleAccountApprovalReaction(runtime.key, update).catch((error) => {
