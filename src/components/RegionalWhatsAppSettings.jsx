@@ -42,7 +42,7 @@ export default function RegionalWhatsAppSettings({ accountKey, session }) {
       }
       if (data.status === "connected") {
         const g = await fetchWhatsAppGroups(accountKey);
-        setGroups(g || []);
+        setGroups(g?.groups || []);
       }
     } catch (error) {
       console.error(error);
