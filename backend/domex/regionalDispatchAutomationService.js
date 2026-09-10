@@ -382,8 +382,47 @@ async function renderDispatchImage(date, rows, summary, userName, userRole) {
     args: ["--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage"],
   });
 
-  const page = await browser.newPage({ viewport: { width: 600, height: 1200 } });
+  const page = await browser.newPage({ 
+    viewport: { width: 600, height: 1600 },
+    deviceScaleFactor: 2.5 
+  });
   
+  // 1. Load DOMEX logo from disk as base64
+  let domexLogoBase64 = "";
+  const possibleLogoPaths = [
+    path.resolve("public", "report-assets", "domex-logo-new.jpg"),
+    path.resolve("dist", "report-assets", "domex-logo-new.jpg"),
+    path.resolve("public", "report-assets", "domex-logo.png"),
+    path.resolve("dist", "report-assets", "domex-logo.png")
+  ];
+  for (const p of possibleLogoPaths) {
+    try {
+      const buf = await fs.readFile(p);
+      const mime = p.endsWith(".png") ? "image/png" : "image/jpeg";
+      domexLogoBase64 = `data:${mime};base64,${buf.toString("base64")}`;
+      break;
+    } catch (e) {}
+  }
+
+  // 2. Clean formatted user name and role
+  let cleanUser = String(userName || "Regional Manager").trim();
+  if (cleanUser.includes("@")) {
+    cleanUser = cleanUser.split("@")[0];
+  }
+  cleanUser = cleanUser.charAt(0).toUpperCase() + cleanUser.slice(1);
+
+  let cleanRole = String(userRole || "Regional Manager").trim();
+  if (cleanRole.toLowerCase() === "regional_manager" || cleanRole.toLowerCase() === "regional manager") {
+    cleanRole = "Regional Manager";
+  } else if (cleanRole.toLowerCase() === "superadmin") {
+    cleanRole = "Super Admin";
+  }
+
+  // 3. Clean SVG icons (so Linux headless chromium never shows missing glyph boxes)
+  const userIconSvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b21a8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -1px; margin-right: 4px; display: inline-block;"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
+  const trophySvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#065f46" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 3px; display: inline-block;"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>`;
+  const alertSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9f1239" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 3px; display: inline-block;"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
+
   const rowsHtml = rows.map((r, idx) => {
     const perc = r.percentage;
     const bg = idx % 2 === 0 ? "#ffffff" : "#f8fafc";
@@ -413,23 +452,43 @@ async function renderDispatchImage(date, rows, summary, userName, userRole) {
     <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 16px; box-sizing: border-box;">
       <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px; padding: 12px; text-align: center; box-sizing: border-box;">
         <p style="font-size: 10px; font-weight: 900; text-transform: uppercase; color: #64748b; margin: 0;">Total Target</p>
-        <p style="font-size: 24px; font-weight: 900; color: #071537; margin: 4px 0 0 0; line-height: 1;">${summary.totalTarget}</p>
+        <p style="font-size: 24px; font-weight: 900; color: #071537; margin: 4px 0 0 0; line-height: 1;">${summary.totalTarget || 0}</p>
       </div>
       <div style="background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 16px; padding: 12px; text-align: center; box-sizing: border-box;">
         <p style="font-size: 10px; font-weight: 900; text-transform: uppercase; color: #1e40af; margin: 0;">Dispatched</p>
-        <p style="font-size: 24px; font-weight: 900; color: #1e3a8a; margin: 4px 0 0 0; line-height: 1;">${summary.totalDispatch}</p>
+        <p style="font-size: 24px; font-weight: 900; color: #1e3a8a; margin: 4px 0 0 0; line-height: 1;">${summary.totalDispatch || 0}</p>
       </div>
       <div style="background-color: ${summary.overallPercentage >= 100 ? "#ecfdf5" : summary.overallPercentage >= 70 ? "#fffbeb" : "#fff1f2"}; color: ${summary.overallPercentage >= 100 ? "#065f46" : summary.overallPercentage >= 70 ? "#92400e" : "#9f1239"}; border: 1px solid ${summary.overallPercentage >= 100 ? "#a7f3d0" : summary.overallPercentage >= 70 ? "#fde68a" : "#fecdd3"}; border-radius: 16px; padding: 12px; text-align: center; box-sizing: border-box;">
         <p style="font-size: 10px; font-weight: 900; text-transform: uppercase; margin: 0;">Achievement</p>
-        <p style="font-size: 24px; font-weight: 900; margin: 4px 0 0 0; line-height: 1;">${summary.overallPercentage}%</p>
+        <p style="font-size: 24px; font-weight: 900; margin: 4px 0 0 0; line-height: 1;">${summary.overallPercentage || 0}%</p>
       </div>
     </div>
   `;
+
+  const highlightsHtml = `
+    <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; font-size: 12px; font-weight: 700;">
+      ${summary.topBranch ? `
+        <span style="display: inline-flex; align-items: center; gap: 4px; background-color: #d1fae5; color: #065f46; padding: 4px 10px; border-radius: 12px; white-space: nowrap;">
+          ${trophySvg} Top: <strong>${summary.topBranch.branch}</strong> (${summary.topBranch.percentage}%)
+        </span>
+      ` : ''}
+      ${summary.lowestBranch ? `
+        <span style="display: inline-flex; align-items: center; gap: 4px; background-color: #ffe4e6; color: #9f1239; padding: 4px 10px; border-radius: 12px; white-space: nowrap;">
+          ${alertSvg} Needs Attention: <strong>${summary.lowestBranch.branch}</strong> (${summary.lowestBranch.percentage}%)
+        </span>
+      ` : ''}
+    </div>
+  `;
+
+  const logoHtml = domexLogoBase64
+    ? `<img src="${domexLogoBase64}" alt="DOMEX" style="height: 48px; width: auto; max-width: 120px; object-fit: contain; display: block; flex-shrink: 0;" />`
+    : `<div style="height: 48px; width: 64px; background: #991b1b; color: #ffffff; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 13px; letter-spacing: 1px;">DOMEX</div>`;
 
   const html = `
     <!DOCTYPE html>
     <html>
       <head>
+        <meta charset="utf-8" />
         <style>
           * { box-sizing: border-box !important; letter-spacing: normal !important; }
           html, body {
@@ -437,8 +496,9 @@ async function renderDispatchImage(date, rows, summary, userName, userRole) {
             padding: 0 !important;
             background-color: #ffffff !important;
             color: #071537 !important;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
             -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
             display: inline-block;
           }
           table {
@@ -453,14 +513,13 @@ async function renderDispatchImage(date, rows, summary, userName, userRole) {
           
           <div style="display: flex; align-items: flex-start; justify-content: space-between; border-bottom: 2px solid #f1f5f9; padding-bottom: 16px; box-sizing: border-box;">
             <div style="display: flex; align-items: flex-start; gap: 12px; flex: 1; min-width: 0;">
-              <!-- Empty logo placeholder for backend -->
-              <div style="height: 48px; width: 48px; background: #f8fafc; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 11px; color: #94a3b8;">DOMEX</div>
+              ${logoHtml}
               <div style="flex: 1; min-width: 0;">
                 <h2 style="font-size: 18px; font-weight: 900; text-transform: uppercase; color: #071537; margin: 0 0 2px 0; line-height: 1.2; white-space: nowrap;">Regional Dispatch Performance</h2>
                 <p style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: #6d28d9; margin: 0 0 6px 0;">Daily Courier Branch Analytics</p>
                 <div style="margin-top: 6px;">
                   <div style="display: inline-block; background-color: #f5f3ff; color: #6b21a8; padding: 4px 12px; border-radius: 8px; font-size: 11px; font-weight: 800; border: 1px solid #ddd6fe; line-height: 18px; white-space: nowrap;">
-                    👤 Prepared by: <strong style="color: #4c1d95;">${userName}</strong> (${userRole})
+                    ${userIconSvg} Prepared by: <strong style="color: #4c1d95;">${cleanUser}</strong> (${cleanRole})
                   </div>
                 </div>
               </div>
@@ -472,6 +531,7 @@ async function renderDispatchImage(date, rows, summary, userName, userRole) {
           </div>
 
           ${summaryHtml}
+          ${highlightsHtml}
 
           <div style="margin-top: 14px; border: 1px solid #f1f5f9; border-radius: 16px; overflow: hidden; box-sizing: border-box;">
             <table style="width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; line-height: 1.3;">
@@ -512,7 +572,7 @@ async function renderDispatchImage(date, rows, summary, userName, userRole) {
   await page.setContent(html, { waitUntil: "networkidle" });
   const element = await page.$("#capture-card");
   
-  const buffer = await element.screenshot({ type: "png", omitBackground: true });
+  const buffer = await element.screenshot({ type: "png", omitBackground: false });
   await browser.close();
   
   return `data:image/png;base64,${buffer.toString("base64")}`;
