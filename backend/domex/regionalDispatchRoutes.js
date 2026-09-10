@@ -6,7 +6,9 @@ import {
   getRegionalLiveStatus,
   getRegionalDispatchReports,
   saveRegionalDispatchReport,
-  deleteRegionalDispatchReport
+  deleteRegionalDispatchReport,
+  getRecentSentMessages,
+  deleteSentMessage
 } from "./regionalDispatchAutomationService.js";
 import { normalizeWhatsAppAccountKey } from "../whatsapp/accountWhatsappService.js";
 
@@ -96,6 +98,32 @@ router.delete("/reports/:id", async (request, response) => {
     response.json({ ok: true, ...result });
   } catch (error) {
     console.error("[regional-dispatch] Delete report error:", error.message || error);
+    response.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+router.get("/sent-messages", async (request, response) => {
+  try {
+    const key = accountKey(request);
+    const messages = await getRecentSentMessages(key);
+    response.json({ ok: true, messages });
+  } catch (error) {
+    console.error("[regional-dispatch] Get sent messages error:", error.message || error);
+    response.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+router.post("/delete-message", async (request, response) => {
+  try {
+    const key = accountKey(request);
+    const { messageId } = request.body || {};
+    if (!messageId) {
+      return response.status(400).json({ ok: false, error: "Missing messageId" });
+    }
+    const result = await deleteSentMessage(key, messageId);
+    response.json({ ok: true, ...result });
+  } catch (error) {
+    console.error("[regional-dispatch] Delete message error:", error.message || error);
     response.status(500).json({ ok: false, error: error.message });
   }
 });

@@ -550,7 +550,7 @@ export async function sendReportToRecipient({ phoneNumber, imageDataUrl, imageDa
   }
 
   const imageBuffers = getReportImageBuffers({ imageDataUrl, imageDataUrls });
-  await sendReportImages(recipientJid, imageBuffers, caption);
+  const res = await sendReportImages(recipientJid, imageBuffers, caption);
 
   return {
     ok: true,
@@ -558,6 +558,8 @@ export async function sendReportToRecipient({ phoneNumber, imageDataUrl, imageDa
     sentCount: 1,
     mediaCount: imageBuffers.length,
     sentAt: new Date().toISOString(),
+    primaryKey: res?.primaryKey,
+    messageKeys: res?.messageKeys || (res?.primaryKey ? [res.primaryKey] : [])
   };
 }
 
@@ -572,13 +574,47 @@ export async function sendTextToRecipient({ phoneNumber, message }) {
   const text = String(message || "").trim();
   if (!text) throw new Error("Reminder message is required.");
 
-  await socket.sendMessage(recipientJid, { text });
+  const sent = await socket.sendMessage(recipientJid, { text });
   return {
     ok: true,
     recipientJid,
     sentCount: 1,
     sentAt: new Date().toISOString(),
+    messageKey: sent?.key,
+    messageKeys: sent?.key ? [sent.key] : []
   };
+}
+
+export function getSocket() {
+  return socket;
+}
+
+export async function deleteMessage({ phoneNumber, messageKeys, messageKey }) {
+  if (!socket || connectionState !== "connected") {
+    throw new Error("WhatsApp is not connected.");
+  }
+  const recipientJid = normalizeRecipientJid(phoneNumber);
+  if (!recipientJid) throw new Error("Recipient JID / phone number is required.");
+
+  const keysToDelete = Array.isArray(messageKeys) ? messageKeys : (messageKey ? [messageKey] : []);
+  if (!keysToDelete.length) throw new Error("No message keys provided to delete.");
+
+  for (const k of keysToDelete) {
+    if (!k || !k.id) continue;
+    const key = {
+      remoteJid: k.remoteJid || recipientJid,
+      id: k.id,
+      fromMe: k.fromMe !== false,
+      participant: k.participant
+    };
+    try {
+      await socket.sendMessage(recipientJid, { delete: key });
+    } catch (err) {
+      console.warn(`[whatsapp] Failed to delete message ${k.id} for everyone:`, err.message || err);
+    }
+  }
+
+  return { ok: true, deletedCount: keysToDelete.length };
 }
 
 export async function saveBackupConfig({ phoneNumber, snapshot, approvalReaction }) {

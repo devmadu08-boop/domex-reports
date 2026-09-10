@@ -1,11 +1,18 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { subscribeToAccountMessages, sendAccountRecipientText, sendAccountRecipientReport, getAccountWhatsAppStatus } from "../whatsapp/accountWhatsappService.js";
+import { 
+  subscribeToAccountMessages, 
+  sendAccountRecipientText, 
+  sendAccountRecipientReport, 
+  getAccountWhatsAppStatus,
+  deleteAccountMessage
+} from "../whatsapp/accountWhatsappService.js";
 import { chromium } from "playwright-core";
 
 const dataDir = path.resolve("backend", "data", "regional-dispatch");
 const configFile = path.join(dataDir, "config.json");
 const reportsFile = path.join(dataDir, "reports.json");
+const sentMessagesFile = path.join(dataDir, "sent-messages.json");
 const messagesDir = path.join(dataDir, "messages");
 
 // Helper to ensure directory exists
@@ -22,12 +29,25 @@ export async function getRegionalDispatchReports(accountKey) {
     const candidates = [
       clean,
       clean.startsWith("user-") ? clean.replace(/^user-/, "") : `user-${clean}`,
+      "global",
       "default"
     ];
+    
+    // Merge reports from all candidates by report id/date
+    const reportMap = new Map();
     for (const k of candidates) {
-      if (Array.isArray(all[k])) return all[k];
+      if (Array.isArray(all[k])) {
+        for (const r of all[k]) {
+          const key = r.id || r.date;
+          if (key && !reportMap.has(key)) {
+            reportMap.set(key, r);
+          }
+        }
+      }
     }
-    return [];
+    const merged = Array.from(reportMap.values());
+    merged.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+    return merged;
   } catch (error) {
     return [];
   }
@@ -42,19 +62,6 @@ export async function saveRegionalDispatchReport(accountKey, report) {
   } catch (error) {}
 
   const clean = String(accountKey || "default").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-  let list = [];
-  const candidates = [
-    clean,
-    clean.startsWith("user-") ? clean.replace(/^user-/, "") : `user-${clean}`,
-    "default"
-  ];
-  for (const k of candidates) {
-    if (Array.isArray(all[k])) {
-      list = [...all[k]];
-      break;
-    }
-  }
-
   const reportId = report.id || `dispatch-report-${report.date || getTodayString()}`;
   const reportRecord = {
     ...report,
@@ -63,18 +70,22 @@ export async function saveRegionalDispatchReport(accountKey, report) {
     updated_at: new Date().toISOString()
   };
 
-  const existingIdx = list.findIndex(r => r.id === reportId || r.date === reportRecord.date);
-  if (existingIdx >= 0) {
-    list[existingIdx] = { ...list[existingIdx], ...reportRecord };
-  } else {
-    list.unshift(reportRecord);
-  }
+  const keysToUpdate = new Set([
+    clean,
+    clean.startsWith("user-") ? clean.replace(/^user-/, "") : `user-${clean}`,
+    "global",
+    "default"
+  ]);
 
-  all[clean] = list;
-  if (clean.startsWith("user-")) {
-    all[clean.replace(/^user-/, "")] = list;
-  } else {
-    all[`user-${clean}`] = list;
+  for (const k of keysToUpdate) {
+    let list = Array.isArray(all[k]) ? [...all[k]] : [];
+    const existingIdx = list.findIndex(r => r.id === reportId || r.date === reportRecord.date);
+    if (existingIdx >= 0) {
+      list[existingIdx] = { ...list[existingIdx], ...reportRecord };
+    } else {
+      list.unshift(reportRecord);
+    }
+    all[k] = list;
   }
 
   await fs.writeFile(reportsFile, JSON.stringify(all, null, 2));
@@ -90,30 +101,108 @@ export async function deleteRegionalDispatchReport(accountKey, dateOrId) {
   } catch (error) {}
 
   const clean = String(accountKey || "default").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-  let list = [];
-  const candidates = [
+  const keysToUpdate = new Set([
     clean,
     clean.startsWith("user-") ? clean.replace(/^user-/, "") : `user-${clean}`,
+    "global",
     "default"
-  ];
-  for (const k of candidates) {
+  ]);
+
+  for (const k of keysToUpdate) {
     if (Array.isArray(all[k])) {
-      list = [...all[k]];
-      break;
+      all[k] = all[k].filter(r => r.id !== dateOrId && r.date !== dateOrId);
     }
   }
 
-  const filtered = list.filter(r => r.id !== dateOrId && r.date !== dateOrId);
-  all[clean] = filtered;
-  if (clean.startsWith("user-")) {
-    all[clean.replace(/^user-/, "")] = filtered;
-  } else {
-    all[`user-${clean}`] = filtered;
+  await fs.writeFile(reportsFile, JSON.stringify(all, null, 2));
+  return { ok: true };
+}
+
+export async function getRecentSentMessages(accountKey) {
+  await ensureDir(dataDir);
+  try {
+    const raw = await fs.readFile(sentMessagesFile, "utf8");
+    const all = JSON.parse(raw) || [];
+    return Array.isArray(all) ? all.slice(0, 50) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+export async function recordSentMessage(accountKey, entry) {
+  await ensureDir(dataDir);
+  try {
+    let all = [];
+    try {
+      const raw = await fs.readFile(sentMessagesFile, "utf8");
+      all = JSON.parse(raw) || [];
+    } catch (e) {}
+
+    const record = {
+      id: entry.id || `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      type: entry.type || "text",
+      title: entry.title || "Sent Message",
+      groupId: entry.groupId || "",
+      accountKey: accountKey || "default",
+      messageKey: entry.messageKey || null,
+      messageKeys: Array.isArray(entry.messageKeys) ? entry.messageKeys : (entry.messageKey ? [entry.messageKey] : []),
+      sentAt: entry.sentAt || new Date().toISOString(),
+      status: "sent",
+      preview: entry.preview || ""
+    };
+
+    all.unshift(record);
+    if (all.length > 100) all = all.slice(0, 100);
+
+    await fs.writeFile(sentMessagesFile, JSON.stringify(all, null, 2));
+    return record;
+  } catch (err) {
+    console.error("[regional-dispatch] Failed to record sent message:", err);
+  }
+}
+
+export async function deleteSentMessage(accountKey, messageId) {
+  await ensureDir(dataDir);
+  let all = [];
+  try {
+    const raw = await fs.readFile(sentMessagesFile, "utf8");
+    all = JSON.parse(raw) || [];
+  } catch (e) {
+    throw new Error("No sent messages found");
   }
 
-  await fs.writeFile(reportsFile, JSON.stringify(all, null, 2));
-  return { ok: true, remaining: filtered.length };
+  const idx = all.findIndex(m => m.id === messageId);
+  if (idx === -1) {
+    throw new Error("Message not found or already deleted");
+  }
+
+  const target = all[idx];
+  const activeKey = accountKey || target.accountKey || "default";
+
+  const keysToDelete = Array.isArray(target.messageKeys) && target.messageKeys.length > 0
+    ? target.messageKeys
+    : (target.messageKey ? [target.messageKey] : []);
+
+  if (keysToDelete.length === 0) {
+    throw new Error("No message key found for revoking this message");
+  }
+
+  const res = await deleteAccountMessage(activeKey, {
+    phoneNumber: target.groupId,
+    messageKeys: keysToDelete,
+    messageKey: target.messageKey
+  });
+
+  all[idx] = {
+    ...target,
+    status: "deleted",
+    deletedAt: new Date().toISOString()
+  };
+
+  await fs.writeFile(sentMessagesFile, JSON.stringify(all, null, 2));
+  return { ok: true, result: res };
 }
+
 
 async function readAllConfigs() {
   await ensureDir(dataDir);
@@ -584,6 +673,7 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null,
   const configs = await readAllConfigs();
   const keys = manualAccountKey ? [manualAccountKey] : Object.keys(configs);
   let totalSent = 0;
+  const seenGroupIds = new Set();
 
   for (const requestedKey of keys) {
     const config = await getRegionalConfig(requestedKey);
@@ -593,6 +683,11 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null,
     }
     if (!config.groupId) {
       if (manualAccountKey) throw new Error("No WhatsApp Group selected. Please select a group and save settings.");
+      continue;
+    }
+
+    if (!manualAccountKey && seenGroupIds.has(config.groupId)) {
+      console.log(`[regional-dispatch] Group ${config.groupId} already processed in this automation cycle. Skipping duplicate key ${requestedKey}.`);
       continue;
     }
 
@@ -677,10 +772,30 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null,
     const submitted = targets.filter(t => submittedMap[t.branch || t.branch_name] != null).map(t => t.branch || t.branch_name);
 
     if (mode === "reminder") {
-      const reminderMsg = `🚨 *DOMEX Dispatch Count Reminder*\n\nකරුණාකර පහත ශාඛාවන් රාත්‍රී 11.30 ට පෙර ඔබගේ Dispatch Counts ලබා දෙන්න:\n\n*ලබා දී නොමැති ශාඛාවන්:*\n${unsubmitted.length > 0 ? unsubmitted.map(b => `❌ ${b} (Target: ${targetMap[b] || 0})`).join("\n") : "✅ සියලුම ශාඛාවන් ලබා දී ඇත"}\n\n*ලබා දී ඇති ශාඛාවන්:*\n${submitted.length > 0 ? submitted.map(b => `✅ ${b}: ${submittedMap[b]}`).join("\n") : "කිසිවක් නැත"}`;
-      await sendAccountRecipientText(activeKey, { phoneNumber: config.groupId, message: reminderMsg });
+      if (unsubmitted.length === 0) {
+        console.log(`[regional-dispatch] All branches already submitted (${submitted.length}). Skipping reminder for ${config.groupId}`);
+        if (manualAccountKey) {
+          return { ok: true, sent: 0, message: "All branches have already submitted their dispatch counts. No reminder needed." };
+        }
+        continue;
+      }
+
+      const reminderMsg = `🚨 *DOMEX Dispatch Count Reminder*\n\nකරුණාකර පහත ශාඛාවන් රාත්‍රී 11.30 ට පෙර ඔබගේ Dispatch Counts ලබා දෙන්න:\n\n*ලබා දී නොමැති ශාඛාවන්:*\n${unsubmitted.map(b => `❌ ${b} (Target: ${targetMap[b] || 0})`).join("\n")}\n\n*ලබා දී ඇති ශාඛාවන්:*\n${submitted.length > 0 ? submitted.map(b => `✅ ${b}: ${submittedMap[b]}`).join("\n") : "කිසිවක් නැත"}`;
+      const sendRes = await sendAccountRecipientText(activeKey, { phoneNumber: config.groupId, message: reminderMsg });
       console.log(`[regional-dispatch] Sent reminder to ${config.groupId} via ${activeKey}`);
       totalSent++;
+      seenGroupIds.add(config.groupId);
+
+      // Record sent message
+      await recordSentMessage(activeKey, {
+        type: "reminder",
+        title: `Reminder (${unsubmitted.length} pending)`,
+        groupId: config.groupId,
+        messageKey: sendRes?.messageKey,
+        messageKeys: sendRes?.messageKeys,
+        sentAt: new Date().toISOString(),
+        preview: reminderMsg.slice(0, 140) + "..."
+      });
     } 
     else if (mode === "report") {
       const dateStr = getTodayString();
@@ -720,17 +835,30 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null,
         caption += `✅ *සියලුම ශාඛාවන් Dispatch Counts ලබා දී ඇත!*`;
       }
 
+      let sendRes = null;
       if (base64Img) {
-        await sendAccountRecipientReport(activeKey, { 
+        sendRes = await sendAccountRecipientReport(activeKey, { 
           phoneNumber: config.groupId, 
           imageDataUrl: base64Img,
           caption: caption 
         });
       } else {
-        await sendAccountRecipientText(activeKey, { phoneNumber: config.groupId, message: caption });
+        sendRes = await sendAccountRecipientText(activeKey, { phoneNumber: config.groupId, message: caption });
       }
       console.log(`[regional-dispatch] Sent report to ${config.groupId} via ${activeKey}`);
       totalSent++;
+      seenGroupIds.add(config.groupId);
+
+      // Record sent message
+      await recordSentMessage(activeKey, {
+        type: "report",
+        title: `Dispatch Report - ${dateStr} (${overallPercentage}%)`,
+        groupId: config.groupId,
+        messageKey: sendRes?.primaryKey || sendRes?.messageKey,
+        messageKeys: sendRes?.messageKeys,
+        sentAt: new Date().toISOString(),
+        preview: `Dispatched: ${totalDispatch}/${totalTarget} (${overallPercentage}%)`
+      });
 
       // Automatically persist saved report to persistent backend storage
       try {
@@ -769,8 +897,12 @@ export function startRegionalDispatchAutomation() {
     // 11:00 PM Reminder (Trigger between 23:00 and 23:05 Sri Lanka Time)
     if (hours === 23 && minutes >= 0 && minutes < 5 && lastReminderTriggerDate !== dateStr) {
       lastReminderTriggerDate = dateStr;
-      console.log(`[regional-dispatch] ⏰ Triggering automatic 11:00 PM Reminder for ${dateStr}`);
-      runRegionalAutomation("reminder").catch(e => console.error("[regional-dispatch] Reminder error", e));
+      if (lastReportTriggerDate === dateStr) {
+        console.log(`[regional-dispatch] ⏰ Skipping 11:00 PM Reminder for ${dateStr} because final report has already been sent.`);
+      } else {
+        console.log(`[regional-dispatch] ⏰ Triggering automatic 11:00 PM Reminder for ${dateStr}`);
+        runRegionalAutomation("reminder").catch(e => console.error("[regional-dispatch] Reminder error", e));
+      }
     }
 
     // 11:30 PM Report (Trigger between 23:30 and 23:35 Sri Lanka Time)
@@ -785,6 +917,7 @@ export function startRegionalDispatchAutomation() {
       checkAllAccountsEarlyCompletion().catch(() => {});
     }
   }, 10000).unref();
+
   
   console.log("[regional-dispatch] Automation scheduler active (Asia/Colombo 11:00 PM reminder & 11:30 PM report & 100% early completion auto-trigger)");
 }
