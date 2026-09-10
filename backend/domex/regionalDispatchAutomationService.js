@@ -230,6 +230,7 @@ subscribeToAccountMessages(async (accountKey, { messages, type }) => {
     if (text && text.trim()) {
       console.log(`[regional-dispatch] Captured message for ${accountKey}: "${text.trim().slice(0, 70)}"`);
       await saveMessage(accountKey, text.trim());
+      checkAllAccountsEarlyCompletion().catch(() => {});
     }
   }
 });
@@ -518,7 +519,7 @@ async function renderDispatchImage(date, rows, summary, userName, userRole) {
 }
 
 // 3. Cron Schedules
-async function runRegionalAutomation(mode = "reminder", manualAccountKey = null) {
+async function runRegionalAutomation(mode = "reminder", manualAccountKey = null, customTargets = null) {
   await ensureDir(dataDir);
   const configs = await readAllConfigs();
   const keys = manualAccountKey ? [manualAccountKey] : Object.keys(configs);
@@ -570,6 +571,7 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null)
       await saveRegionalConfig(activeKey, config);
     }
 
+    const rawText = await getTodayMessages(activeKey);
     const branchNames = targets.map(t => t.branch || t.branch_name).filter(Boolean);
 
     // Parse using OpenRouter
@@ -717,9 +719,14 @@ export function startRegionalDispatchAutomation() {
       console.log(`[regional-dispatch] ⏰ Triggering automatic 11:30 PM Report for ${dateStr}`);
       runRegionalAutomation("report").catch(e => console.error("[regional-dispatch] Report error", e));
     }
+
+    // Auto-Send & Save Early if 100% of branches have submitted before 11:30 PM
+    if (hours >= 12 && lastReportTriggerDate !== dateStr) {
+      checkAllAccountsEarlyCompletion().catch(() => {});
+    }
   }, 10000).unref();
   
-  console.log("[regional-dispatch] Automation scheduler active (Asia/Colombo 11:00 PM reminder & 11:30 PM report)");
+  console.log("[regional-dispatch] Automation scheduler active (Asia/Colombo 11:00 PM reminder & 11:30 PM report & 100% early completion auto-trigger)");
 }
 
 export async function manualTrigger(accountKey, mode, customTargets = null) {
@@ -810,4 +817,44 @@ export async function getRegionalLiveStatus(accountKey, customTargets = null) {
     unsubmitted,
     lastUpdated: new Date().toISOString(),
   };
+}
+
+let isEarlyChecking = false;
+
+export async function checkAllAccountsEarlyCompletion() {
+  if (isEarlyChecking) return;
+  const dateStr = getTodayString();
+  if (lastReportTriggerDate === dateStr) return;
+
+  const colomboNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Colombo" }));
+  const hours = colomboNow.getHours();
+  if (hours < 12) return;
+
+  isEarlyChecking = true;
+  try {
+    const configs = await readAllConfigs();
+    for (const key of Object.keys(configs)) {
+      if (lastReportTriggerDate === dateStr) break;
+      const cfg = configs[key];
+      if (cfg?.enabled && cfg?.groupId && Array.isArray(cfg?.targets) && cfg.targets.length > 0) {
+        const live = await getRegionalLiveStatus(key);
+        if (
+          live &&
+          live.enabled &&
+          live.totalBranches > 0 &&
+          live.unsubmittedCount === 0 &&
+          live.submittedCount >= live.totalBranches
+        ) {
+          console.log(`[regional-dispatch] 🎯 100% Branches Submitted (${live.submittedCount}/${live.totalBranches})! Auto-sending and saving report early for ${key} without waiting for 11:30 PM...`);
+          lastReportTriggerDate = dateStr;
+          await runRegionalAutomation("report", key);
+          break;
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[regional-dispatch] Early completion check error:", err);
+  } finally {
+    isEarlyChecking = false;
+  }
 }
