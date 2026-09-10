@@ -62,7 +62,7 @@ export default function SettingsPage({
   const [restoreStatus, setRestoreStatus] = useState("");
   const [domexConfig, setDomexConfig] = useState({ username: "", password: "", branchName: "Middeniya" });
   const [domexStatus, setDomexStatus] = useState("");
-  const [activeSection, setActiveSection] = useState("general");
+  const [activeSection, setActiveSection] = useState(session?.role === "regional_manager" ? "regionalDispatch" : "general");
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -202,17 +202,19 @@ export default function SettingsPage({
           </div>
         </div>
         <nav className="settings-category-nav" aria-label="Settings categories">
-          <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-hide lg:flex-col lg:overflow-visible lg:pb-0">
-            {[
-              { id: "general", label: "General", helper: "Theme & API keys", icon: SlidersHorizontal },
-              { id: "whatsapp", label: "WhatsApp Bot", helper: "Reports & automation", icon: MessageCircle },
-              ...(session?.role?.toLowerCase() === "regional manager" ? [{ id: "regionalDispatch", label: "Regional Automations", helper: "Dispatch setup", icon: Sparkles }] : []),
-              { id: "meter", label: "Meter Monitor", helper: "Photos & reminders", icon: Camera },
-              { id: "people", label: "People", helper: "Couriers & riders", icon: Users },
-              { id: "pettyCash", label: "Petty Cash", helper: "Vehicle employees", icon: ReceiptText },
-              { id: "automation", label: "Automation", helper: "DOMEX login", icon: Bot },
-              { id: "data", label: "Data & Backup", helper: "Sync & recovery", icon: DatabaseBackup },
-            ].map((item) => {
+            {(session?.role === 'regional_manager' ? 
+              [ { id: 'regionalDispatch', label: 'Regional Setup', helper: 'Dispatch automation', icon: Sparkles } ] 
+            : 
+              [
+                { id: 'general', label: 'General', helper: 'Branch & appearance', icon: SlidersHorizontal },
+                { id: 'whatsapp', label: 'Report WhatsApp', helper: 'Groups & templates', icon: MessageCircle },
+                { id: 'meter', label: 'Meter Monitor', helper: 'Photos & reminders', icon: Camera },
+                { id: 'people', label: 'People', helper: 'Couriers & riders', icon: Users },
+                { id: 'pettyCash', label: 'Petty Cash', helper: 'Vehicle employees', icon: ReceiptText },
+                { id: 'automation', label: 'Automation', helper: 'DOMEX login', icon: Bot },
+                { id: 'data', label: 'Data & Backup', helper: 'Sync & recovery', icon: DatabaseBackup }
+              ]
+            ).map((item) => {
             const Icon = item.icon;
             const selected = activeSection === item.id;
             return (
@@ -231,7 +233,6 @@ export default function SettingsPage({
               </button>
             );
             })}
-          </div>
         </nav>
       </div>
 
