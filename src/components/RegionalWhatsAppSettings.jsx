@@ -1,6 +1,7 @@
 import { Bot, LogOut, MessageCircle, RefreshCw, Save, Send } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getWhatsAppQr, getWhatsAppStatus, logoutWhatsApp, reconnectWhatsApp, fetchWhatsAppGroups } from "../services/whatsappApi.js";
+import { getDispatchTargets } from "../services/dispatchStorage.js";
 
 export default function RegionalWhatsAppSettings({ accountKey, session }) {
   const [status, setStatus] = useState("disconnected");
@@ -25,7 +26,17 @@ export default function RegionalWhatsAppSettings({ accountKey, session }) {
       });
       if (res.ok) {
         const data = await res.json();
-        setConfig(prev => ({ ...prev, ...data }));
+        let targets = data.targets;
+        if (!Array.isArray(targets) || targets.length === 0) {
+          const stored = getDispatchTargets();
+          if (Array.isArray(stored) && stored.length > 0) {
+            targets = stored.map(t => ({
+              branch: t.branch_name,
+              target: Number(t.target) || 0
+            }));
+          }
+        }
+        setConfig(prev => ({ ...prev, ...data, targets: targets || prev.targets || [] }));
       }
     } catch (e) { console.error("Error loading config", e); }
   }
@@ -93,8 +104,19 @@ export default function RegionalWhatsAppSettings({ accountKey, session }) {
   async function handleSave() {
     setIsSaving(true);
     try {
+      let targetsToSave = config.targets;
+      if (!Array.isArray(targetsToSave) || targetsToSave.length === 0) {
+        const stored = getDispatchTargets();
+        if (Array.isArray(stored) && stored.length > 0) {
+          targetsToSave = stored.map(t => ({
+            branch: t.branch_name,
+            target: Number(t.target) || 0
+          }));
+        }
+      }
       const payload = {
         ...config,
+        targets: targetsToSave || [],
         userName: session?.userName || session?.email || "Regional Manager",
         userRole: session?.role || "Regional Manager"
       };
@@ -117,13 +139,23 @@ export default function RegionalWhatsAppSettings({ accountKey, session }) {
   async function handleTest(mode) {
     setTestMode(mode);
     try {
+      let targetsToPass = config.targets;
+      if (!Array.isArray(targetsToPass) || targetsToPass.length === 0) {
+        const stored = getDispatchTargets();
+        if (Array.isArray(stored) && stored.length > 0) {
+          targetsToPass = stored.map(t => ({
+            branch: t.branch_name,
+            target: Number(t.target) || 0
+          }));
+        }
+      }
       const res = await fetch("/api/regional-dispatch/trigger", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "x-whatsapp-account": accountKey
         },
-        body: JSON.stringify({ mode })
+        body: JSON.stringify({ mode, targets: targetsToPass || [] })
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.ok) {

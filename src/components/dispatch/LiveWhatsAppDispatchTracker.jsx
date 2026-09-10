@@ -42,7 +42,13 @@ export default function LiveWhatsAppDispatchTracker({
           "Content-Type": "application/json",
           "x-whatsapp-account": accountKey
         },
-        body: JSON.stringify({ mode: "reminder" })
+        body: JSON.stringify({
+          mode: "reminder",
+          targets: targets.map(t => ({
+            branch: t.branch_name,
+            target: Number(t.target) || 0
+          }))
+        })
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.ok) {
@@ -68,7 +74,13 @@ export default function LiveWhatsAppDispatchTracker({
           "Content-Type": "application/json",
           "x-whatsapp-account": accountKey
         },
-        body: JSON.stringify({ mode: "report" })
+        body: JSON.stringify({
+          mode: "report",
+          targets: targets.map(t => ({
+            branch: t.branch_name,
+            target: Number(t.target) || 0
+          }))
+        })
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.ok) {

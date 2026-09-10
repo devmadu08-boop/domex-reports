@@ -1,5 +1,59 @@
-function normalizeName(str) {
-  return String(str || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+function normalizeBranchStem(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .replace(/th/g, "t")
+    .replace(/[aeiou]+$/g, "");
+}
+
+function levenshteinDistance(a, b) {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const matrix = [];
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) matrix[i][j] = matrix[i - 1][j - 1];
+      else matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j] + 1);
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+function findBranchInLine(line, targetBranches) {
+  const cleanLine = String(line || "").toLowerCase().replace(/[^a-z0-9]/g, " ");
+  const lineWords = cleanLine.split(/\s+/).filter(Boolean);
+  const stemWords = lineWords.map(normalizeBranchStem);
+
+  for (const t of targetBranches) {
+    const orig = t.branch || t.branch_name || t;
+    const cleanT = String(orig).toLowerCase().replace(/[^a-z0-9]/g, "");
+    const stemT = normalizeBranchStem(orig);
+
+    if (cleanLine.includes(cleanT)) return orig;
+
+    if (stemT.length >= 4) {
+      for (let i = 0; i < stemWords.length; i++) {
+        const sw = stemWords[i];
+        if (sw.length >= 4 && (sw.includes(stemT) || stemT.includes(sw))) {
+          return orig;
+        }
+      }
+    }
+
+    if (cleanT.length >= 5) {
+      for (const w of lineWords) {
+        if (w.length >= 4 && Math.abs(w.length - cleanT.length) <= 2) {
+          if (levenshteinDistance(w, cleanT) <= (cleanT.length >= 7 ? 2 : 1)) {
+            return orig;
+          }
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 export function parseDispatchWithRegex(rawText, configuredTargets = []) {
@@ -13,25 +67,9 @@ export function parseDispatchWithRegex(rawText, configuredTargets = []) {
     .filter(Boolean);
 
   const resultMap = new Map();
-  const targetBranches = configuredTargets.map((t) => ({
-    original: t.branch_name,
-    normalized: normalizeName(t.branch_name),
-    target: t.target || 0
-  }));
 
   for (const line of lines) {
-    let matchedBranch = null;
-
-    for (const target of targetBranches) {
-      if (!target.normalized) continue;
-      const cleanLine = normalizeName(line);
-      
-      if (cleanLine.includes(target.normalized)) {
-        matchedBranch = target.original;
-        break;
-      }
-    }
-
+    const matchedBranch = findBranchInLine(line, configuredTargets);
     const numbers = line.match(/\b\d{1,5}\b/g);
     if (matchedBranch && numbers && numbers.length > 0) {
       const dispatchCount = parseInt(numbers[numbers.length - 1], 10);
@@ -46,11 +84,10 @@ export function parseDispatchWithRegex(rawText, configuredTargets = []) {
       const candidateName = genericMatch[1].trim();
       const count = parseInt(genericMatch[2], 10);
       if (candidateName && !isNaN(count)) {
-        const matched = targetBranches.find(
-          (t) => t.normalized.includes(normalizeName(candidateName)) || normalizeName(candidateName).includes(t.normalized)
-        );
-        const finalBranch = matched ? matched.original : candidateName;
-        resultMap.set(finalBranch, count);
+        const fuzzyBranch = findBranchInLine(candidateName, configuredTargets);
+        if (fuzzyBranch) {
+          resultMap.set(fuzzyBranch, count);
+        }
       }
     }
   }

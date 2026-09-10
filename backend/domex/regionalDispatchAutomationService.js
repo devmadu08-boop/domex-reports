@@ -141,6 +141,64 @@ const FREE_OPENROUTER_MODELS = [
   "google/gemini-2.0-flash-thinking-exp:free"
 ];
 
+function normalizeBranchStem(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .replace(/th/g, "t")
+    .replace(/[aeiou]+$/g, "");
+}
+
+function levenshteinDistance(a, b) {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const matrix = [];
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) matrix[i][j] = matrix[i - 1][j - 1];
+      else matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j] + 1);
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+function findBranchInLine(line, targetBranches) {
+  const cleanLine = String(line || "").toLowerCase().replace(/[^a-z0-9]/g, " ");
+  const lineWords = cleanLine.split(/\s+/).filter(Boolean);
+  const stemWords = lineWords.map(normalizeBranchStem);
+
+  for (const t of targetBranches) {
+    const orig = t.branch || t.branch_name || t;
+    const cleanT = String(orig).toLowerCase().replace(/[^a-z0-9]/g, "");
+    const stemT = normalizeBranchStem(orig);
+
+    if (cleanLine.includes(cleanT)) return orig;
+
+    if (stemT.length >= 4) {
+      for (let i = 0; i < stemWords.length; i++) {
+        const sw = stemWords[i];
+        if (sw.length >= 4 && (sw.includes(stemT) || stemT.includes(sw))) {
+          return orig;
+        }
+      }
+    }
+
+    if (cleanT.length >= 5) {
+      for (const w of lineWords) {
+        if (w.length >= 4 && Math.abs(w.length - cleanT.length) <= 2) {
+          if (levenshteinDistance(w, cleanT) <= (cleanT.length >= 7 ? 2 : 1)) {
+            return orig;
+          }
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
 async function parseWithOpenRouter(apiKey, text, branchNames) {
   if (!text || !text.trim()) return [];
   const cleanKey = String(apiKey || "").trim();
@@ -148,6 +206,8 @@ async function parseWithOpenRouter(apiKey, text, branchNames) {
 
   const prompt = `Extract dispatch counts from the following text.
 Branches available: ${branchNames.join(", ")}
+
+IMPORTANT: Branch names in messages may have minor spelling variations (for example: "Kahawatta" for "Kahawatte", "Ratnapura" for "Rathnapura", "Eheliyagoda" for "Ehaliyagoda"). Map each branch to the exact branch name from the available branches list.
 
 Text:
 ${text}
@@ -394,8 +454,19 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null)
       continue;
     }
 
-    const rawText = await getTodayMessages(activeKey);
-    const targets = Array.isArray(config.targets) ? config.targets : [];
+    let targets = (Array.isArray(customTargets) && customTargets.length > 0)
+      ? customTargets
+      : (Array.isArray(config.targets) && config.targets.length > 0 ? config.targets : []);
+
+    // Persist targets to config.targets if provided
+    if (Array.isArray(customTargets) && customTargets.length > 0) {
+      config.targets = customTargets.map(t => ({
+        branch: t.branch || t.branch_name,
+        target: Number(t.target) || 0
+      }));
+      await saveRegionalConfig(activeKey, config);
+    }
+
     const branchNames = targets.map(t => t.branch || t.branch_name).filter(Boolean);
 
     // Parse using OpenRouter
@@ -409,27 +480,23 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null)
       if (item.branch && item.dispatch != null) {
         const val = Number(item.dispatch);
         if (!isNaN(val)) {
-          submittedMap[item.branch] = (submittedMap[item.branch] || 0) + val;
+          // Find canonical target branch via fuzzy matcher
+          const canonical = findBranchInLine(item.branch, targets) || item.branch;
+          submittedMap[canonical] = (submittedMap[canonical] || 0) + val;
         }
       }
     }
 
-    // Local Regex Fallback for any branches not picked up by AI
+    // Local Regex Fallback with Fuzzy Matching for all lines
     if (rawText.trim()) {
-      for (const b of branchNames) {
-        if (submittedMap[b] == null) {
-          const cleanB = b.toLowerCase().replace(/[^a-z0-9]/g, "");
-          for (const line of rawText.split("\n")) {
-            const cleanL = line.toLowerCase().replace(/[^a-z0-9]/g, "");
-            if (cleanL.includes(cleanB)) {
-              const numbers = line.match(/\b\d{1,5}\b/g);
-              if (numbers && numbers.length > 0) {
-                const val = parseInt(numbers[numbers.length - 1], 10);
-                if (!isNaN(val)) {
-                  submittedMap[b] = val;
-                  break;
-                }
-              }
+      for (const line of rawText.split("\n")) {
+        const fuzzyBranch = findBranchInLine(line, targets);
+        if (fuzzyBranch && submittedMap[fuzzyBranch] == null) {
+          const numbers = line.match(/\b\d{1,5}\b/g);
+          if (numbers && numbers.length > 0) {
+            const val = parseInt(numbers[numbers.length - 1], 10);
+            if (!isNaN(val)) {
+              submittedMap[fuzzyBranch] = val;
             }
           }
         }
@@ -534,8 +601,8 @@ export function startRegionalDispatchAutomation() {
   console.log("[regional-dispatch] Automation scheduler active (Asia/Colombo 11:00 PM reminder & 11:30 PM report)");
 }
 
-export async function manualTrigger(accountKey, mode) {
-  await runRegionalAutomation(mode, accountKey);
+export async function manualTrigger(accountKey, mode, customTargets = null) {
+  return await runRegionalAutomation(mode, accountKey, customTargets);
 }
 
 export async function getRegionalLiveStatus(accountKey, customTargets = null) {
@@ -545,22 +612,25 @@ export async function getRegionalLiveStatus(accountKey, customTargets = null) {
     ? customTargets
     : (Array.isArray(config.targets) ? config.targets : []);
 
-  const branchNames = targets.map((t) => t.branch || t.branch_name).filter(Boolean);
+  // Save targets to config if provided and not yet saved
+  if (Array.isArray(customTargets) && customTargets.length > 0 && (!config.targets || config.targets.length === 0)) {
+    config.targets = customTargets.map(t => ({
+      branch: t.branch || t.branch_name,
+      target: Number(t.target) || 0
+    }));
+    await saveRegionalConfig(accountKey, config);
+  }
 
   const submittedMap = {};
   if (rawText && rawText.trim()) {
-    for (const bName of branchNames) {
-      const cleanBranch = bName.toLowerCase().replace(/[^a-z0-9]/g, "");
-      const lines = rawText.split("\n");
-      for (const line of lines) {
-        const cleanLine = line.toLowerCase().replace(/[^a-z0-9]/g, "");
-        if (cleanLine.includes(cleanBranch)) {
-          const numbers = line.match(/\b\d{1,5}\b/g);
-          if (numbers && numbers.length > 0) {
-            const val = parseInt(numbers[numbers.length - 1], 10);
-            if (!isNaN(val)) {
-              submittedMap[bName] = val;
-            }
+    for (const line of rawText.split("\n")) {
+      const fuzzyBranch = findBranchInLine(line, targets);
+      if (fuzzyBranch && submittedMap[fuzzyBranch] == null) {
+        const numbers = line.match(/\b\d{1,5}\b/g);
+        if (numbers && numbers.length > 0) {
+          const val = parseInt(numbers[numbers.length - 1], 10);
+          if (!isNaN(val)) {
+            submittedMap[fuzzyBranch] = val;
           }
         }
       }
