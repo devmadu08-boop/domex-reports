@@ -242,6 +242,7 @@ export default function App() {
   const [versionBusy, setVersionBusy] = useState(false);
   const [undoCount, setUndoCount] = useState(() => getUndoHistory().length);
   const [redoCount, setRedoCount] = useState(() => getRedoHistory().length);
+  const [isHeaderVisible, setIsHeaderVisible] = useState(true);
 
   const courierReportRef = useRef(null);
   const operationReportRef = useRef(null);
@@ -253,6 +254,24 @@ export default function App() {
   const backupSyncTimerRef = useRef(null);
   const syncClientIdRef = useRef(getSyncClientId());
   const versionBootstrapRef = useRef({ branchName: "", promise: null });
+  const lastScrollY = useRef(0);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      
+      if (currentScrollY > lastScrollY.current && currentScrollY > 60) {
+        setIsHeaderVisible(false); // scrolling down
+      } else if (currentScrollY < lastScrollY.current) {
+        setIsHeaderVisible(true); // scrolling up
+      }
+      
+      lastScrollY.current = currentScrollY;
+    };
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
 
   const visibleTabs = useMemo(
     () => tabs.filter((tab) => (tab.adminOnly ? canManageUsers(session) : canAccessTab(session, tab.id))),
@@ -1339,7 +1358,7 @@ export default function App() {
           <StatusPill icon={Server} label="Backend" value={backendStatus} ok={backendStatus.includes("running")} />
         </div>
       )}
-      <header className="sticky top-0 z-30 border-b border-[#eadff2] bg-[#fff7f2] xl:static xl:border-0 xl:bg-transparent">
+      <header className={`sticky top-0 z-30 border-b border-[#eadff2] bg-[#fff7f2] transition-transform duration-300 xl:static xl:border-0 xl:bg-transparent xl:translate-y-0 ${!isHeaderVisible ? "-translate-y-full" : "translate-y-0"}`}>
         <div className="flex flex-col gap-4 px-4 py-4 xl:px-0 xl:py-0">
           <div className="flex items-center justify-between gap-3 xl:hidden">
             <div className="min-w-0">
