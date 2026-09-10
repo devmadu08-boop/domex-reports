@@ -436,11 +436,16 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null)
       }
     }
 
+    const targetMap = {};
+    for (const t of targets) {
+      targetMap[t.branch || t.branch_name] = t.target;
+    }
+
     const unsubmitted = targets.filter(t => submittedMap[t.branch || t.branch_name] == null).map(t => t.branch || t.branch_name);
     const submitted = targets.filter(t => submittedMap[t.branch || t.branch_name] != null).map(t => t.branch || t.branch_name);
 
     if (mode === "reminder") {
-      const reminderMsg = `🚨 *Dispatch Count Reminder*\n\nකරුණාකර අදාල ශාඛාවන් 11.30 ට පෙර ඔබගේ Dispatch Counts ලබා දෙන්න:\n\n*ලබා දී නොමැති ශාඛාවන්:*\n${unsubmitted.length > 0 ? unsubmitted.map(b => "❌ " + b).join("\n") : "✅ සියලුම ශාඛාවන් ලබා දී ඇත"}\n\n*ලබා දී ඇති ශාඛාවන්:*\n${submitted.length > 0 ? submitted.map(b => `✅ ${b} (${submittedMap[b]})`).join("\n") : "කිසිවක් නැත"}`;
+      const reminderMsg = `🚨 *DOMEX Dispatch Count Reminder*\n\nකරුණාකර පහත ශාඛාවන් රාත්‍රී 11.30 ට පෙර ඔබගේ Dispatch Counts ලබා දෙන්න:\n\n*ලබා දී නොමැති ශාඛාවන්:*\n${unsubmitted.length > 0 ? unsubmitted.map(b => `❌ ${b} (Target: ${targetMap[b] || 0})`).join("\n") : "✅ සියලුම ශාඛාවන් ලබා දී ඇත"}\n\n*ලබා දී ඇති ශාඛාවන්:*\n${submitted.length > 0 ? submitted.map(b => `✅ ${b}: ${submittedMap[b]}`).join("\n") : "කිසිවක් නැත"}`;
       await sendAccountRecipientText(activeKey, { phoneNumber: config.groupId, message: reminderMsg });
       console.log(`[regional-dispatch] Sent reminder to ${config.groupId} via ${activeKey}`);
       totalSent++;
@@ -476,9 +481,9 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null)
       }
 
       let caption = `📊 *Regional Dispatch Performance*\nDate: ${dateStr}\nTotal Dispatched: ${totalDispatch}\nAchievement: ${overallPercentage}%\n\n`;
-      caption += `*ලබා දී ඇති ශාඛාවන්:*\n${submitted.length > 0 ? submitted.map(b => `✅ ${b} (${submittedMap[b]})`).join("\n") : "කිසිවක් නැත"}\n\n`;
+      caption += `*ලබා දී ඇති ශාඛාවන්:*\n${submitted.length > 0 ? submitted.map(b => `✅ ${b}: ${submittedMap[b]}`).join("\n") : "කිසිවක් නැත"}\n\n`;
       if (unsubmitted.length > 0) {
-        caption += `*ලබා දී නොමැති ශාඛාවන්:*\n${unsubmitted.map(b => "❌ " + b).join("\n")}`;
+        caption += `*ලබා දී නොමැති ශාඛාවන්:*\n${unsubmitted.map(b => `❌ ${b} (Target: ${targetMap[b] || 0})`).join("\n")}`;
       } else {
         caption += `✅ *සියලුම ශාඛාවන් Dispatch Counts ලබා දී ඇත!*`;
       }
@@ -500,25 +505,33 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null)
   return { ok: true, sent: totalSent };
 }
 
+let lastReminderTriggerDate = "";
+let lastReportTriggerDate = "";
+
 // Start Cron-like Scheduler
 export function startRegionalDispatchAutomation() {
   setInterval(() => {
-    const d = new Date();
-    // Convert current UTC time to Asia/Colombo
-    const colomboTime = new Date(d.toLocaleString("en-US", { timeZone: "Asia/Colombo" }));
+    const colomboTime = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Colombo" }));
+    const dateStr = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Colombo" }).format(new Date());
     const hours = colomboTime.getHours();
     const minutes = colomboTime.getMinutes();
-    const seconds = colomboTime.getSeconds();
 
-    if (hours === 23 && minutes === 0 && seconds === 0) {
+    // 11:00 PM Reminder (Trigger between 23:00 and 23:05 Sri Lanka Time)
+    if (hours === 23 && minutes >= 0 && minutes < 5 && lastReminderTriggerDate !== dateStr) {
+      lastReminderTriggerDate = dateStr;
+      console.log(`[regional-dispatch] ⏰ Triggering automatic 11:00 PM Reminder for ${dateStr}`);
       runRegionalAutomation("reminder").catch(e => console.error("[regional-dispatch] Reminder error", e));
     }
-    if (hours === 23 && minutes === 30 && seconds === 0) {
+
+    // 11:30 PM Report (Trigger between 23:30 and 23:35 Sri Lanka Time)
+    if (hours === 23 && minutes >= 30 && minutes < 35 && lastReportTriggerDate !== dateStr) {
+      lastReportTriggerDate = dateStr;
+      console.log(`[regional-dispatch] ⏰ Triggering automatic 11:30 PM Report for ${dateStr}`);
       runRegionalAutomation("report").catch(e => console.error("[regional-dispatch] Report error", e));
     }
-  }, 1000).unref();
+  }, 10000).unref();
   
-  console.log("[regional-dispatch] Automation scheduler started");
+  console.log("[regional-dispatch] Automation scheduler active (Asia/Colombo 11:00 PM reminder & 11:30 PM report)");
 }
 
 export async function manualTrigger(accountKey, mode) {

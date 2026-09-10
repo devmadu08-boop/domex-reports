@@ -11,7 +11,8 @@ import {
   Check,
   Sparkles,
   Layers,
-  MessageSquare
+  MessageSquare,
+  Send
 } from "lucide-react";
 import { getWhatsAppAccountKey } from "../../services/whatsappApi.js";
 
@@ -27,6 +28,60 @@ export default function LiveWhatsAppDispatchTracker({
   const [lastRefreshed, setLastRefreshed] = useState(null);
   const [activeView, setActiveView] = useState("all");
   const [copiedReminder, setCopiedReminder] = useState(false);
+  const [sendingReminder, setSendingReminder] = useState(false);
+  const [sendingReport, setSendingReport] = useState(false);
+
+  async function handleSendReminderToGroup() {
+    if (!window.confirm("Send dispatch count reminder to WhatsApp group now?")) return;
+    setSendingReminder(true);
+    try {
+      const accountKey = getWhatsAppAccountKey(session);
+      const res = await fetch("/api/regional-dispatch/trigger", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-whatsapp-account": accountKey
+        },
+        body: JSON.stringify({ mode: "reminder" })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        alert("✅ Reminder message sent to WhatsApp group successfully!");
+      } else {
+        alert(`❌ Failed: ${data.error || "Could not send reminder"}`);
+      }
+    } catch (e) {
+      alert("❌ Error: " + e.message);
+    } finally {
+      setSendingReminder(false);
+    }
+  }
+
+  async function handleSendReportToGroup() {
+    if (!window.confirm("Send 11:30 PM performance report image to WhatsApp group now?")) return;
+    setSendingReport(true);
+    try {
+      const accountKey = getWhatsAppAccountKey(session);
+      const res = await fetch("/api/regional-dispatch/trigger", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-whatsapp-account": accountKey
+        },
+        body: JSON.stringify({ mode: "report" })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        alert("✅ Performance report sent to WhatsApp group successfully!");
+      } else {
+        alert(`❌ Failed: ${data.error || "Could not send report"}`);
+      }
+    } catch (e) {
+      alert("❌ Error: " + e.message);
+    } finally {
+      setSendingReport(false);
+    }
+  }
 
   const fetchLiveStatus = useCallback(async () => {
     setLoading(true);
@@ -263,14 +318,38 @@ export default function LiveWhatsAppDispatchTracker({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Send Reminder to Group Button */}
+          <button
+            type="button"
+            onClick={handleSendReminderToGroup}
+            disabled={sendingReminder}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-amber-400 bg-amber-500 px-3.5 py-1.5 text-xs font-black text-slate-950 shadow-md shadow-amber-200 transition hover:bg-amber-400 disabled:opacity-50"
+            title="Send reminder to WhatsApp group now"
+          >
+            <Send className={`h-3.5 w-3.5 ${sendingReminder ? "animate-spin" : ""}`} />
+            <span>{sendingReminder ? "Sending..." : "Send Reminder to Group"}</span>
+          </button>
+
+          {/* Send Full Report to Group Button */}
+          <button
+            type="button"
+            onClick={handleSendReportToGroup}
+            disabled={sendingReport}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-blue-400 bg-blue-600 px-3 py-1.5 text-xs font-black text-white shadow-md shadow-blue-200 transition hover:bg-blue-700 disabled:opacity-50"
+            title="Send full 11:30 PM performance report image to WhatsApp group now"
+          >
+            <Layers className={`h-3.5 w-3.5 ${sendingReport ? "animate-spin" : ""}`} />
+            <span>{sendingReport ? "Sending Report..." : "Send Report to Group"}</span>
+          </button>
+
           {unsubmittedCount > 0 && (
             <button
               type="button"
               onClick={handleCopyReminder}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-100/80 px-3 py-1.5 text-xs font-black text-amber-900 shadow-sm transition hover:bg-amber-200"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-slate-50"
             >
-              {copiedReminder ? <Check className="h-3.5 w-3.5 text-emerald-700" /> : <Copy className="h-3.5 w-3.5 text-amber-700" />}
-              <span>{copiedReminder ? "Copied to Clipboard!" : "Copy Reminder Text"}</span>
+              {copiedReminder ? <Check className="h-3.5 w-3.5 text-emerald-700" /> : <Copy className="h-3.5 w-3.5 text-slate-500" />}
+              <span>{copiedReminder ? "Copied!" : "Copy Reminder Text"}</span>
             </button>
           )}
 
@@ -281,7 +360,7 @@ export default function LiveWhatsAppDispatchTracker({
               className="inline-flex items-center gap-1.5 rounded-xl border border-violet-300 bg-violet-600 px-3 py-1.5 text-xs font-black text-white shadow-sm transition hover:bg-violet-700"
             >
               <MessageSquare className="h-3.5 w-3.5" />
-              <span>Load Messages into Parser</span>
+              <span>Load into Parser</span>
             </button>
           )}
 
