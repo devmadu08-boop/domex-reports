@@ -1,0 +1,376 @@
+﻿import { useEffect, useState, useCallback } from "react";
+import {
+  Radio,
+  RefreshCw,
+  CheckCircle2,
+  AlertCircle,
+  TrendingUp,
+  Clock,
+  ArrowRight,
+  Copy,
+  Check,
+  Sparkles,
+  Layers,
+  MessageSquare
+} from "lucide-react";
+
+export default function LiveWhatsAppDispatchTracker({
+  targets = [],
+  session,
+  onApplyLiveText,
+  onApplyLiveItems
+}) {
+  const [liveData, setLiveData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [lastRefreshed, setLastRefreshed] = useState(null);
+  const [activeView, setActiveView] = useState("all");
+  const [copiedReminder, setCopiedReminder] = useState(false);
+
+  const fetchLiveStatus = useCallback(async () => {
+    setLoading(true);
+    try {
+      const accountKey = session?.role === "regional_manager"
+        ? `user-${String(session?.userId || session?.branchName || "branch").trim().toLowerCase()}`.replace(/[^a-z0-9_-]/g, "-").slice(0, 80)
+        : "default";
+
+      const res = await fetch("/api/regional-dispatch/live", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-whatsapp-account": accountKey
+        },
+        body: JSON.stringify({
+          targets: targets.map(t => ({
+            branch: t.branch_name,
+            target: Number(t.target) || 0
+          }))
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setLiveData(data);
+        setLastRefreshed(new Date());
+      }
+    } catch (err) {
+      console.warn("Failed to fetch live dispatch status:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, [session, targets]);
+
+  useEffect(() => {
+    fetchLiveStatus();
+  }, [fetchLiveStatus]);
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const timer = setInterval(() => {
+      fetchLiveStatus();
+    }, 15000);
+    return () => clearInterval(timer);
+  }, [autoRefresh, fetchLiveStatus]);
+
+  function handleCopyReminder() {
+    if (!liveData?.unsubmitted) return;
+    const list = liveData.unsubmitted.map(b => `❌ ${b.branch} (Target: ${b.target})`).join("\n");
+    const submittedList = liveData.submitted?.length > 0
+      ? liveData.submitted.map(b => `✅ ${b.branch}: ${b.dispatch}`).join("\n")
+      : "කිසිවක් නැත";
+
+    const text = `🚨 *DOMEX Dispatch Count Reminder*\n\nකරුණාකර පහත ශාඛාවන් රාත්‍රී 11.30 ට පෙර ඔබගේ Dispatch Counts ලබා දෙන්න:\n\n*ලබා දී නොමැති ශාඛාවන්:*\n${list}\n\n*ලබා දී ඇති ශාඛාවන්:*\n${submittedList}`;
+    navigator.clipboard.writeText(text);
+    setCopiedReminder(true);
+    setTimeout(() => setCopiedReminder(false), 2500);
+  }
+
+  function handleApplyToParser() {
+    if (liveData?.rawText && onApplyLiveText) {
+      onApplyLiveText(liveData.rawText);
+    }
+  }
+
+  function handleApplyToReport() {
+    if (liveData?.submitted && onApplyLiveItems) {
+      const items = liveData.submitted.map(s => ({
+        branch: s.branch,
+        dispatch: s.dispatch
+      }));
+      onApplyLiveItems(items);
+    }
+  }
+
+  const submitted = liveData?.submitted || [];
+  const unsubmitted = liveData?.unsubmitted || [];
+  const totalBranches = (submitted.length + unsubmitted.length) || targets.length || 0;
+  const submittedCount = submitted.length;
+  const unsubmittedCount = unsubmitted.length;
+  const totalDispatch = liveData?.totalDispatch || 0;
+  const totalTarget = liveData?.totalTarget || 0;
+  const overallPercentage = liveData?.overallPercentage || 0;
+
+  return (
+    <div className="glass-panel overflow-hidden border border-violet-200/80 bg-gradient-to-br from-white via-violet-50/20 to-purple-50/30 p-4 sm:p-5 shadow-lg shadow-violet-100/50">
+      {/* Top Header with Live Indicator and Controls */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3.5 border-b border-violet-100">
+        <div className="flex items-center gap-2.5">
+          <span className="relative flex h-3.5 w-3.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500"></span>
+          </span>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-base sm:text-lg font-black text-[#071537]">
+                Live WhatsApp Dispatch Stream
+              </h3>
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-black uppercase text-emerald-800">
+                Live (4 PM - 11:30 PM)
+              </span>
+            </div>
+            <p className="text-xs font-semibold text-slate-500">
+              {liveData?.rawMessagesCount || 0} messages captured today from group
+              {lastRefreshed && (
+                <span> &bull; Refreshed at {lastRefreshed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+              )}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setAutoRefresh(!autoRefresh)}
+            className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-bold transition ${
+              autoRefresh
+                ? "bg-violet-100 text-violet-800 hover:bg-violet-200"
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+            }`}
+            title={autoRefresh ? "Auto-refreshing every 15s" : "Auto-refresh is paused"}
+          >
+            <Radio className={`h-3.5 w-3.5 ${autoRefresh ? "animate-pulse text-violet-600" : ""}`} />
+            <span>{autoRefresh ? "Auto-Live: ON" : "Auto-Live: OFF"}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={fetchLiveStatus}
+            disabled={loading}
+            className="inline-flex items-center gap-1 rounded-xl border border-violet-200 bg-white px-2.5 py-1.5 text-xs font-black text-violet-900 shadow-sm transition hover:bg-violet-50 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 text-violet-700 ${loading ? "animate-spin" : ""}`} />
+            <span>Refresh</span>
+          </button>
+        </div>
+      </div>
+
+      {/* KPI Metric Summary Cards */}
+      <div className="mt-3.5 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50/60 p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-black uppercase text-emerald-800">Submitted</span>
+            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+          </div>
+          <div className="mt-1 flex items-baseline gap-1">
+            <span className="text-xl sm:text-2xl font-black text-emerald-950">{submittedCount}</span>
+            <span className="text-xs font-bold text-emerald-700">/ {totalBranches}</span>
+          </div>
+          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-emerald-200/70">
+            <div
+              className="h-full bg-emerald-500 transition-all duration-500"
+              style={{ width: `${totalBranches > 0 ? (submittedCount / totalBranches) * 100 : 0}%` }}
+            />
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-amber-200/80 bg-amber-50/60 p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-black uppercase text-amber-800">Pending / Missing</span>
+            <AlertCircle className="h-4 w-4 text-amber-600" />
+          </div>
+          <div className="mt-1 flex items-baseline gap-1">
+            <span className="text-xl sm:text-2xl font-black text-amber-950">{unsubmittedCount}</span>
+            <span className="text-xs font-bold text-amber-700">branches</span>
+          </div>
+          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-amber-200/70">
+            <div
+              className="h-full bg-amber-500 transition-all duration-500"
+              style={{ width: `${totalBranches > 0 ? (unsubmittedCount / totalBranches) * 100 : 0}%` }}
+            />
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-blue-200/80 bg-blue-50/60 p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-black uppercase text-blue-800">Live Dispatched</span>
+            <TrendingUp className="h-4 w-4 text-blue-600" />
+          </div>
+          <div className="mt-1 flex items-baseline gap-1">
+            <span className="text-xl sm:text-2xl font-black text-blue-950">{totalDispatch.toLocaleString()}</span>
+            <span className="text-xs font-bold text-blue-700">/ {totalTarget.toLocaleString()}</span>
+          </div>
+          <p className="mt-1.5 text-[10px] font-bold text-blue-700 truncate">
+            Expected Target: {totalTarget}
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-violet-200/80 bg-violet-50/60 p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-black uppercase text-violet-800">Achievement</span>
+            <span className="text-xs font-black text-violet-700">%</span>
+          </div>
+          <div className="mt-1 flex items-baseline gap-1">
+            <span className="text-xl sm:text-2xl font-black text-violet-950">{overallPercentage}%</span>
+          </div>
+          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-violet-200/70">
+            <div
+              className="h-full bg-violet-600 transition-all duration-500"
+              style={{ width: `${Math.min(overallPercentage, 100)}%` }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Filter Tabs & Quick Action Bar */}
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2.5">
+        <div className="inline-flex rounded-xl bg-slate-100/90 p-1 border border-slate-200/60">
+          <button
+            type="button"
+            onClick={() => setActiveView("all")}
+            className={`rounded-lg px-3 py-1 text-xs font-black transition ${
+              activeView === "all" ? "bg-white text-[#071537] shadow-sm" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            All ({totalBranches})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveView("submitted")}
+            className={`rounded-lg px-3 py-1 text-xs font-black transition ${
+              activeView === "submitted" ? "bg-emerald-600 text-white shadow-sm" : "text-emerald-800 hover:text-emerald-950"
+            }`}
+          >
+            Submitted ({submittedCount})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveView("unsubmitted")}
+            className={`rounded-lg px-3 py-1 text-xs font-black transition ${
+              activeView === "unsubmitted" ? "bg-amber-600 text-white shadow-sm" : "text-amber-800 hover:text-amber-950"
+            }`}
+          >
+            Pending ({unsubmittedCount})
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {unsubmittedCount > 0 && (
+            <button
+              type="button"
+              onClick={handleCopyReminder}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-100/80 px-3 py-1.5 text-xs font-black text-amber-900 shadow-sm transition hover:bg-amber-200"
+            >
+              {copiedReminder ? <Check className="h-3.5 w-3.5 text-emerald-700" /> : <Copy className="h-3.5 w-3.5 text-amber-700" />}
+              <span>{copiedReminder ? "Copied to Clipboard!" : "Copy Reminder Text"}</span>
+            </button>
+          )}
+
+          {liveData?.rawText && (
+            <button
+              type="button"
+              onClick={handleApplyToParser}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-violet-300 bg-violet-600 px-3 py-1.5 text-xs font-black text-white shadow-sm transition hover:bg-violet-700"
+            >
+              <MessageSquare className="h-3.5 w-3.5" />
+              <span>Load Messages into Parser</span>
+            </button>
+          )}
+
+          {submittedCount > 0 && (
+            <button
+              type="button"
+              onClick={handleApplyToReport}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-600 bg-emerald-600 px-3 py-1.5 text-xs font-black text-white shadow-sm transition hover:bg-emerald-700"
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              <span>Apply to Report</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Grid of Branch Status Cards */}
+      <div className="mt-3.5 max-h-[360px] overflow-y-auto pr-1">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+          {(activeView === "all" || activeView === "submitted") &&
+            submitted.map((b) => (
+              <div
+                key={b.branch}
+                className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50/40 p-2.5 transition hover:bg-emerald-50"
+              >
+                <div className="min-w-0 flex-1 pr-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="flex h-2 w-2 rounded-full bg-emerald-500"></span>
+                    <h4 className="text-xs font-black text-emerald-950 truncate" title={b.branch}>
+                      {b.branch}
+                    </h4>
+                  </div>
+                  <div className="mt-1 flex items-center gap-2 text-[11px] font-bold text-slate-500">
+                    <span>Target: {b.target}</span>
+                    <span>&bull;</span>
+                    <span className={b.percentage >= 100 ? "text-emerald-700" : "text-slate-700"}>
+                      {b.percentage}%
+                    </span>
+                  </div>
+                </div>
+
+                <div className="text-right shrink-0">
+                  <span className="text-base font-black text-emerald-800">
+                    {b.dispatch.toLocaleString()}
+                  </span>
+                  <span className="block text-[9px] font-black uppercase tracking-wider text-emerald-600">
+                    Dispatched
+                  </span>
+                </div>
+              </div>
+            ))}
+
+          {(activeView === "all" || activeView === "unsubmitted") &&
+            unsubmitted.map((b) => (
+              <div
+                key={b.branch}
+                className="flex items-center justify-between rounded-xl border border-dashed border-amber-300 bg-amber-50/40 p-2.5 transition hover:bg-amber-50"
+              >
+                <div className="min-w-0 flex-1 pr-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="flex h-2 w-2 rounded-full bg-amber-400"></span>
+                    <h4 className="text-xs font-black text-amber-950 truncate" title={b.branch}>
+                      {b.branch}
+                    </h4>
+                  </div>
+                  <div className="mt-1 flex items-center gap-2 text-[11px] font-bold text-slate-500">
+                    <span>Target: {b.target}</span>
+                  </div>
+                </div>
+
+                <div className="text-right shrink-0">
+                  <span className="rounded-lg bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800">
+                    Pending
+                  </span>
+                  <span className="block text-[9px] font-bold text-slate-400 mt-0.5">
+                    Not sent yet
+                  </span>
+                </div>
+              </div>
+            ))}
+        </div>
+
+        {totalBranches === 0 && (
+          <div className="p-8 text-center text-xs font-semibold text-slate-500">
+            No branch targets configured. Add targets to track live dispatches.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

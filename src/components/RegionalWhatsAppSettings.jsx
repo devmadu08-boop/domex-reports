@@ -41,8 +41,16 @@ export default function RegionalWhatsAppSettings({ accountKey, session }) {
         setQrCode(null);
       }
       if (data.status === "connected") {
-        const g = await fetchWhatsAppGroups(accountKey);
-        setGroups(g?.groups || []);
+        setGroups((currentGroups) => {
+          if (!currentGroups || currentGroups.length === 0) {
+            fetchWhatsAppGroups(accountKey)
+              .then((g) => {
+                if (g?.groups?.length) setGroups(g.groups);
+              })
+              .catch((err) => console.warn("Failed fetching groups:", err));
+          }
+          return currentGroups;
+        });
       }
     } catch (error) {
       console.error(error);
@@ -68,6 +76,7 @@ export default function RegionalWhatsAppSettings({ accountKey, session }) {
     setIsLoading(true);
     try {
       await reconnectWhatsApp(accountKey);
+      setGroups([]);
       await fetchStatus();
     } finally { setIsLoading(false); }
   }

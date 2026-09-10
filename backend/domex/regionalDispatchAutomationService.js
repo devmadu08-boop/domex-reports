@@ -430,3 +430,86 @@ export function startRegionalDispatchAutomation() {
 export async function manualTrigger(accountKey, mode) {
   await runRegionalAutomation(mode, accountKey);
 }
+
+export async function getRegionalLiveStatus(accountKey, customTargets = null) {
+  const config = await getRegionalConfig(accountKey);
+  const rawText = await getTodayMessages(accountKey);
+  const targets = (Array.isArray(customTargets) && customTargets.length > 0)
+    ? customTargets
+    : (Array.isArray(config.targets) ? config.targets : []);
+
+  const branchNames = targets.map((t) => t.branch || t.branch_name).filter(Boolean);
+
+  const submittedMap = {};
+  if (rawText && rawText.trim()) {
+    for (const bName of branchNames) {
+      const cleanBranch = bName.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const lines = rawText.split("\n");
+      for (const line of lines) {
+        const cleanLine = line.toLowerCase().replace(/[^a-z0-9]/g, "");
+        if (cleanLine.includes(cleanBranch)) {
+          const numbers = line.match(/\b\d{1,5}\b/g);
+          if (numbers && numbers.length > 0) {
+            const val = parseInt(numbers[numbers.length - 1], 10);
+            if (!isNaN(val)) {
+              submittedMap[bName] = val;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const submitted = [];
+  const unsubmitted = [];
+  let totalTarget = 0;
+  let totalDispatch = 0;
+
+  for (const t of targets) {
+    const bName = t.branch || t.branch_name;
+    if (!bName) continue;
+    const tgt = Number(t.target) || 0;
+    const hasSubmitted = submittedMap[bName] != null;
+    const dispatch = hasSubmitted ? submittedMap[bName] : 0;
+    const percentage = tgt > 0 ? Math.round((dispatch / tgt) * 100) : 0;
+
+    totalTarget += tgt;
+    totalDispatch += dispatch;
+
+    const row = {
+      branch: bName,
+      target: tgt,
+      dispatch,
+      percentage,
+      isSubmitted: hasSubmitted,
+    };
+
+    if (hasSubmitted) {
+      submitted.push(row);
+    } else {
+      unsubmitted.push(row);
+    }
+  }
+
+  submitted.sort((a, b) => b.percentage - a.percentage);
+  unsubmitted.sort((a, b) => b.target - a.target);
+
+  const overallPercentage = totalTarget > 0 ? Math.round((totalDispatch / totalTarget) * 100) : 0;
+
+  return {
+    ok: true,
+    enabled: Boolean(config.enabled),
+    groupId: config.groupId || "",
+    rawMessagesCount: rawText ? rawText.split("---").filter((s) => s.trim()).length : 0,
+    rawText: rawText || "",
+    totalTarget,
+    totalDispatch,
+    overallPercentage,
+    submittedCount: submitted.length,
+    unsubmittedCount: unsubmitted.length,
+    totalBranches: targets.length,
+    submitted,
+    unsubmitted,
+    lastUpdated: new Date().toISOString(),
+  };
+}

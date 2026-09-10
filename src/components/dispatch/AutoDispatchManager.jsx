@@ -16,6 +16,7 @@ import DispatchProcessor from "./DispatchProcessor.jsx";
 import DispatchAnalytics from "./DispatchAnalytics.jsx";
 import BranchTargetModal from "./BranchTargetModal.jsx";
 import DispatchShareCard from "./DispatchShareCard.jsx";
+import LiveWhatsAppDispatchTracker from "./LiveWhatsAppDispatchTracker.jsx";
 import { parseDispatchText } from "../../services/geminiDispatchService.js";
 import {
   getDispatchTargets,
@@ -199,6 +200,22 @@ export default function AutoDispatchManager({ session, onBackToDashboard }) {
             </div>
           </div>
         </div>
+
+        {/* Live WhatsApp Group Dispatch Stream Tracker */}
+        <LiveWhatsAppDispatchTracker
+          targets={targets}
+          session={session}
+          onApplyLiveText={(text) => {
+            setRawText(text);
+          }}
+          onApplyLiveItems={(items) => {
+            setParsedItems(items);
+            setProcessMeta({
+              method: "whatsapp-live",
+              modelUsed: "live-stream-sync"
+            });
+          }}
+        />
 
         {/* Text Processor Section */}
         <DispatchProcessor

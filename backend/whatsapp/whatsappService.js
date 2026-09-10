@@ -327,19 +327,34 @@ export async function logoutWhatsApp() {
   return getWhatsAppStatus();
 }
 
+let primaryGroupsCache = { groups: [], timestamp: 0 };
+
 export async function fetchWhatsAppGroups() {
   if (!socket || connectionState !== "connected") {
     throw new Error("WhatsApp is not connected. Scan QR from Settings.");
   }
 
-  const groups = await socket.groupFetchAllParticipating();
-  return Object.values(groups)
-    .map((group) => ({
-      jid: group.id,
-      name: group.subject,
-      participants: group.participants?.length || 0,
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const now = Date.now();
+  if (primaryGroupsCache.groups.length > 0 && now - primaryGroupsCache.timestamp < 180000) {
+    return primaryGroupsCache.groups;
+  }
+
+  try {
+    const groups = await socket.groupFetchAllParticipating();
+    const list = Object.values(groups)
+      .map((group) => ({
+        jid: group.id,
+        name: group.subject,
+        participants: group.participants?.length || 0,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    primaryGroupsCache = { groups: list, timestamp: now };
+    return list;
+  } catch (error) {
+    console.warn("[whatsapp] groupFetchAllParticipating warning:", error.message || error);
+    if (primaryGroupsCache.groups.length > 0) return primaryGroupsCache.groups;
+    return [];
+  }
 }
 
 export function subscribeToPrimaryWhatsAppMessages(listener) {

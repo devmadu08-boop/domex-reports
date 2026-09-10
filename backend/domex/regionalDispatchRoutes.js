@@ -1,5 +1,5 @@
 import express from "express";
-import { getRegionalConfig, saveRegionalConfig, manualTrigger } from "./regionalDispatchAutomationService.js";
+import { getRegionalConfig, saveRegionalConfig, manualTrigger, getRegionalLiveStatus } from "./regionalDispatchAutomationService.js";
 import { normalizeWhatsAppAccountKey } from "../whatsapp/accountWhatsappService.js";
 
 const router = express.Router();
@@ -19,6 +19,25 @@ router.get("/config", async (request, response) => {
 router.post("/config", async (request, response) => {
   try {
     response.json(await saveRegionalConfig(accountKey(request), request.body));
+  } catch (error) {
+    response.status(500).json({ error: error.message });
+  }
+});
+
+router.get("/live", async (request, response) => {
+  try {
+    const data = await getRegionalLiveStatus(accountKey(request));
+    response.json(data);
+  } catch (error) {
+    response.status(500).json({ error: error.message });
+  }
+});
+
+router.post("/live", async (request, response) => {
+  try {
+    const customTargets = request.body?.targets;
+    const data = await getRegionalLiveStatus(accountKey(request), customTargets);
+    response.json(data);
   } catch (error) {
     response.status(500).json({ error: error.message });
   }

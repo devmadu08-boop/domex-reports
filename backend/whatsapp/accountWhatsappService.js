@@ -291,16 +291,33 @@ export async function logoutAccountWhatsApp(accountKey) {
   return getAccountWhatsAppStatus(runtime.key);
 }
 
+const accountGroupsCache = new Map();
+
 export async function fetchAccountGroups(accountKey) {
   if (isPrimary(accountKey)) return primary.fetchWhatsAppGroups();
   const runtime = getRuntime(accountKey);
-  const socket = await ensureConnected(runtime);
-  const groups = await socket.groupFetchAllParticipating();
-  return Object.values(groups).map((group) => ({
-    jid: group.id,
-    name: group.subject,
-    participants: group.participants?.length || 0,
-  })).sort((a, b) => a.name.localeCompare(b.name));
+  const cacheKey = runtime.key;
+  const cached = accountGroupsCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && now - cached.timestamp < 180000 && cached.groups?.length > 0) {
+    return cached.groups;
+  }
+
+  try {
+    const socket = await ensureConnected(runtime);
+    const groups = await socket.groupFetchAllParticipating();
+    const list = Object.values(groups).map((group) => ({
+      jid: group.id,
+      name: group.subject,
+      participants: group.participants?.length || 0,
+    })).sort((a, b) => a.name.localeCompare(b.name));
+    accountGroupsCache.set(cacheKey, { groups: list, timestamp: now });
+    return list;
+  } catch (error) {
+    console.warn(`[account-whatsapp] groupFetchAllParticipating for ${cacheKey}:`, error.message || error);
+    if (cached?.groups) return cached.groups;
+    return [];
+  }
 }
 
 const configFieldByType = {
