@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Send,
   Target,
@@ -17,14 +17,19 @@ import DispatchAnalytics from "./DispatchAnalytics.jsx";
 import BranchTargetModal from "./BranchTargetModal.jsx";
 import DispatchShareCard from "./DispatchShareCard.jsx";
 import LiveWhatsAppDispatchTracker from "./LiveWhatsAppDispatchTracker.jsx";
+import SavedDispatchReportsView from "./SavedDispatchReportsView.jsx";
 import { parseDispatchText } from "../../services/geminiDispatchService.js";
+import { getWhatsAppAccountKey } from "../../services/whatsappApi.js";
 import {
   getDispatchTargets,
   calculateDispatchMetrics,
   getDispatchReportsHistory,
   getDispatchReportByDate,
   saveDispatchReport,
-  deleteDispatchReport
+  deleteDispatchReport,
+  syncDispatchReportsFromBackend,
+  saveDispatchReportWithSync,
+  deleteDispatchReportWithSync
 } from "../../services/dispatchStorage.js";
 import { getSettings, saveSettings } from "../../services/reportStorage.js";
 import { todayIso, displayDate } from "../../utils/date.js";
@@ -39,11 +44,25 @@ export default function AutoDispatchManager({ session, onBackToDashboard }) {
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState("");
 
+  const [activeSubTab, setActiveSubTab] = useState("liveTracker"); // "liveTracker" or "savedReports"
+  const [savedReports, setSavedReports] = useState(() => getDispatchReportsHistory());
+
   const [showTargetModal, setShowTargetModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
 
   const [settings, setLocalSettings] = useState(() => getSettings());
+
+  const accountKey = getWhatsAppAccountKey(session);
+
+  const loadSavedReports = useCallback(async () => {
+    const list = await syncDispatchReportsFromBackend(accountKey);
+    setSavedReports(list);
+  }, [accountKey]);
+
+  useEffect(() => {
+    loadSavedReports();
+  }, [loadSavedReports]);
 
   // Load targets
   useEffect(() => {
@@ -111,19 +130,20 @@ export default function AutoDispatchManager({ session, onBackToDashboard }) {
     });
   }
 
-  function handleSaveReport() {
+  async function handleSaveReport() {
     if (!parsedItems.length) return;
     setSaving(true);
     setSaveStatus("");
 
     try {
-      saveDispatchReport({
+      await saveDispatchReportWithSync(accountKey, {
         date,
         items: parsedItems,
         summary: metrics.summary,
         rawText,
         user: session
       });
+      await loadSavedReports();
       setSaveStatus(`Dispatch report for ${date} saved successfully.`);
       setTimeout(() => setSaveStatus(""), 3500);
     } catch (err) {
@@ -191,53 +211,107 @@ export default function AutoDispatchManager({ session, onBackToDashboard }) {
 
               <button
                 type="button"
-                onClick={() => setShowHistoryModal(true)}
+                onClick={() => setActiveSubTab("savedReports")}
                 className="inline-flex items-center justify-center gap-1 rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2 text-xs font-black text-[#071537] shadow-sm transition hover:bg-white text-center"
               >
                 <History className="h-3.5 w-3.5 text-blue-700" />
-                <span>History</span>
+                <span>Reports ({savedReports.length})</span>
               </button>
             </div>
           </div>
         </div>
 
-        {/* Live WhatsApp Group Dispatch Stream Tracker */}
-        <LiveWhatsAppDispatchTracker
-          targets={targets}
-          session={session}
-          onApplyLiveText={(text) => {
-            setRawText(text);
-          }}
-          onApplyLiveItems={(items) => {
-            setParsedItems(items);
-            setProcessMeta({
-              method: "whatsapp-live",
-              modelUsed: "live-stream-sync"
-            });
-          }}
-        />
+        {/* Sub-Navigation Switcher: Live & Daily vs Saved Reports History */}
+        <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-white/70 border border-white shadow-sm backdrop-blur-sm">
+          <button
+            type="button"
+            onClick={() => setActiveSubTab("liveTracker")}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-black transition ${
+              activeSubTab === "liveTracker"
+                ? "bg-violet-700 text-white shadow-md"
+                : "text-slate-600 hover:text-slate-900 hover:bg-white/80"
+            }`}
+          >
+            <Sparkles className="h-4 w-4" />
+            <span>⚡ Live Tracker &amp; Daily Dispatch</span>
+          </button>
 
-        {/* Text Processor Section */}
-        <DispatchProcessor
-          rawText={rawText}
-          onRawTextChange={setRawText}
-          onProcess={handleProcess}
-          processing={processing}
-          processMeta={processMeta}
-          apiKey={settings.geminiApiKey}
-          onSaveApiKey={handleSaveApiKey}
-        />
+          <button
+            type="button"
+            onClick={() => setActiveSubTab("savedReports")}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-black transition ${
+              activeSubTab === "savedReports"
+                ? "bg-violet-700 text-white shadow-md"
+                : "text-slate-600 hover:text-slate-900 hover:bg-white/80"
+            }`}
+          >
+            <History className="h-4 w-4" />
+            <span>📁 Saved Reports (වාර්තා ඉතිහාසය)</span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-black ${
+                activeSubTab === "savedReports"
+                  ? "bg-white text-violet-800"
+                  : "bg-slate-200 text-slate-700"
+              }`}
+            >
+              {savedReports.length}
+            </span>
+          </button>
+        </div>
 
-        {/* Analytics Dashboard Section */}
-        <DispatchAnalytics
-          date={date}
-          metrics={metrics}
-          onUpdateItemDispatch={handleUpdateItemDispatch}
-          onSaveReport={handleSaveReport}
-          saving={saving}
-          saveStatus={saveStatus}
-          onOpenShareCard={() => setShowShareModal(true)}
-        />
+        {activeSubTab === "savedReports" ? (
+          <SavedDispatchReportsView
+            reports={savedReports}
+            session={session}
+            onRefresh={loadSavedReports}
+            onSelectForActiveView={(report) => {
+              setDate(report.date);
+              setParsedItems(report.items || []);
+              setRawText(report.rawText || "");
+              setActiveSubTab("liveTracker");
+            }}
+          />
+        ) : (
+          <>
+            {/* Live WhatsApp Group Dispatch Stream Tracker */}
+            <LiveWhatsAppDispatchTracker
+              targets={targets}
+              session={session}
+              onApplyLiveText={(text) => {
+                setRawText(text);
+              }}
+              onApplyLiveItems={(items) => {
+                setParsedItems(items);
+                setProcessMeta({
+                  method: "whatsapp-live",
+                  modelUsed: "live-stream-sync"
+                });
+              }}
+            />
+
+            {/* Text Processor Section */}
+            <DispatchProcessor
+              rawText={rawText}
+              onRawTextChange={setRawText}
+              onProcess={handleProcess}
+              processing={processing}
+              processMeta={processMeta}
+              apiKey={settings.geminiApiKey}
+              onSaveApiKey={handleSaveApiKey}
+            />
+
+            {/* Analytics Dashboard Section */}
+            <DispatchAnalytics
+              date={date}
+              metrics={metrics}
+              onUpdateItemDispatch={handleUpdateItemDispatch}
+              onSaveReport={handleSaveReport}
+              saving={saving}
+              saveStatus={saveStatus}
+              onOpenShareCard={() => setShowShareModal(true)}
+            />
+          </>
+        )}
 
         {/* Branch Targets Modal */}
         {showTargetModal && (

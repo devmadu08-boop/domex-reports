@@ -1,5 +1,13 @@
 import express from "express";
-import { getRegionalConfig, saveRegionalConfig, manualTrigger, getRegionalLiveStatus } from "./regionalDispatchAutomationService.js";
+import { 
+  getRegionalConfig, 
+  saveRegionalConfig, 
+  manualTrigger, 
+  getRegionalLiveStatus,
+  getRegionalDispatchReports,
+  saveRegionalDispatchReport,
+  deleteRegionalDispatchReport
+} from "./regionalDispatchAutomationService.js";
 import { normalizeWhatsAppAccountKey } from "../whatsapp/accountWhatsappService.js";
 
 const router = express.Router();
@@ -52,6 +60,43 @@ router.post("/trigger", async (request, response) => {
   } catch (error) {
     console.error("[regional-dispatch] Trigger error:", error.message || error);
     response.status(400).json({ ok: false, error: error.message });
+  }
+});
+
+router.get("/reports", async (request, response) => {
+  try {
+    const key = accountKey(request);
+    const reports = await getRegionalDispatchReports(key);
+    response.json({ ok: true, reports });
+  } catch (error) {
+    console.error("[regional-dispatch] Get reports error:", error.message || error);
+    response.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+router.post("/reports", async (request, response) => {
+  try {
+    const key = accountKey(request);
+    const report = request.body;
+    if (!report || !report.date) {
+      return response.status(400).json({ ok: false, error: "Missing report date or data" });
+    }
+    const saved = await saveRegionalDispatchReport(key, report);
+    response.json({ ok: true, report: saved });
+  } catch (error) {
+    console.error("[regional-dispatch] Save report error:", error.message || error);
+    response.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+router.delete("/reports/:id", async (request, response) => {
+  try {
+    const key = accountKey(request);
+    const result = await deleteRegionalDispatchReport(key, request.params.id);
+    response.json({ ok: true, ...result });
+  } catch (error) {
+    console.error("[regional-dispatch] Delete report error:", error.message || error);
+    response.status(500).json({ ok: false, error: error.message });
   }
 });
 

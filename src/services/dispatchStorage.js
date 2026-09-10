@@ -241,3 +241,69 @@ export function deleteDispatchReport(dateOrId) {
   writeJson(REPORTS_STORAGE_KEY, filtered);
   return filtered;
 }
+
+/**
+ * Sync saved reports from backend API and merge with local history
+ */
+export async function syncDispatchReportsFromBackend(accountKey = "default") {
+  try {
+    const res = await fetch("/api/regional-dispatch/reports", {
+      headers: { "x-whatsapp-account": accountKey }
+    });
+    if (!res.ok) return getDispatchReportsHistory();
+    const data = await res.json();
+    if (data.ok && Array.isArray(data.reports)) {
+      const local = getDispatchReportsHistory();
+      const map = new Map();
+      for (const r of local) {
+        map.set(r.id || r.date, r);
+      }
+      for (const r of data.reports) {
+        const key = r.id || r.date;
+        map.set(key, { ...(map.get(key) || {}), ...r });
+      }
+      const merged = Array.from(map.values()).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+      writeJson(REPORTS_STORAGE_KEY, merged);
+      return merged;
+    }
+  } catch (e) {
+    console.warn("Failed to sync dispatch reports from backend:", e);
+  }
+  return getDispatchReportsHistory();
+}
+
+/**
+ * Save dispatch report locally and to backend API
+ */
+export async function saveDispatchReportWithSync(accountKey, reportData) {
+  const localSaved = saveDispatchReport(reportData);
+  try {
+    await fetch("/api/regional-dispatch/reports", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-whatsapp-account": accountKey || "default"
+      },
+      body: JSON.stringify(localSaved)
+    });
+  } catch (e) {
+    console.warn("Failed to save dispatch report to backend:", e);
+  }
+  return localSaved;
+}
+
+/**
+ * Delete dispatch report locally and from backend API
+ */
+export async function deleteDispatchReportWithSync(accountKey, dateOrId) {
+  const localFiltered = deleteDispatchReport(dateOrId);
+  try {
+    await fetch(`/api/regional-dispatch/reports/${encodeURIComponent(dateOrId)}`, {
+      method: "DELETE",
+      headers: { "x-whatsapp-account": accountKey || "default" }
+    });
+  } catch (e) {
+    console.warn("Failed to delete dispatch report from backend:", e);
+  }
+  return localFiltered;
+}
