@@ -1597,6 +1597,7 @@ export default function App() {
               cloudStatus={cloudStatus}
               onThemeChange={handleThemeChange}
               whatsappAccountLabel={`${session.branchName}${session.email ? ` (${session.email})` : ""}`}
+              session={session}
             >
               {isSuperAdmin(session) && (
                 <SystemRecoveryPanel
