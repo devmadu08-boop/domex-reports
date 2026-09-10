@@ -260,13 +260,11 @@ export default function App() {
     const handleScroll = () => {
       const currentScrollY = window.scrollY;
       
-      if (currentScrollY > lastScrollY.current && currentScrollY > 60) {
-        setIsHeaderVisible(false); // scrolling down
-      } else if (currentScrollY < lastScrollY.current) {
-        setIsHeaderVisible(true); // scrolling up
+      if (currentScrollY > 60) {
+        setIsHeaderVisible(false);
+      } else {
+        setIsHeaderVisible(true);
       }
-      
-      lastScrollY.current = currentScrollY;
     };
 
     window.addEventListener("scroll", handleScroll, { passive: true });

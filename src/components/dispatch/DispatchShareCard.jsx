@@ -56,7 +56,13 @@ export default function DispatchShareCard({
   async function handleExportPng() {
     if (!cardRef.current) return;
     setExporting(true);
+    
+    const scalerEl = document.getElementById('export-scaler-wrapper');
+    const originalTransform = scalerEl ? scalerEl.style.transform : '';
+    
     try {
+      if (scalerEl) scalerEl.style.transform = 'none';
+      
       // 1. Ensure images are completely loaded with natural dimensions
       const images = Array.from(cardRef.current.querySelectorAll("img"));
       await Promise.all(
@@ -81,7 +87,7 @@ export default function DispatchShareCard({
 
           const cleanStyle = clonedDoc.createElement("style");
           cleanStyle.textContent = `
-            * { box-sizing: border-box !important; }
+            * { box-sizing: border-box !important; letter-spacing: normal !important; }
             html, body {
               margin: 0 !important;
               padding: 0 !important;
@@ -116,6 +122,7 @@ export default function DispatchShareCard({
       console.error("Export error:", err);
       alert("Failed to export image: " + (err.message || String(err)));
     } finally {
+      if (scalerEl) scalerEl.style.transform = originalTransform;
       setExporting(false);
     }
   }
@@ -202,6 +209,7 @@ export default function DispatchShareCard({
             >
               {/* The Scaler container */}
               <div
+                id="export-scaler-wrapper"
                 style={{
                   transform: `scale(${scale})`,
                   transformOrigin: "top left",
@@ -263,7 +271,7 @@ export default function DispatchShareCard({
                             fontSize: "18px",
                             fontWeight: "900",
                             textTransform: "uppercase",
-                            letterSpacing: "-0.02em",
+                            letterSpacing: "normal",
                             color: "#071537",
                             margin: "0 0 2px 0",
                             lineHeight: "1.2",
@@ -277,7 +285,7 @@ export default function DispatchShareCard({
                             fontSize: "11px",
                             fontWeight: "800",
                             textTransform: "uppercase",
-                            letterSpacing: "1px",
+                            letterSpacing: "normal",
                             color: "#6d28d9",
                             margin: "0 0 6px 0"
                           }}
@@ -315,7 +323,7 @@ export default function DispatchShareCard({
                           textTransform: "uppercase",
                           color: "#94a3b8",
                           margin: 0,
-                          letterSpacing: "0.5px"
+                          letterSpacing: "normal"
                         }}
                       >
                         Report Date
@@ -539,7 +547,7 @@ export default function DispatchShareCard({
                             fontWeight: "900",
                             textTransform: "uppercase",
                             fontSize: "10px",
-                            letterSpacing: "0.5px"
+                            letterSpacing: "normal"
                           }}
                         >
                           <th style={{ padding: "10px 6px", textAlign: "center", verticalAlign: "middle", overflow: "hidden" }}>Rank</th>
