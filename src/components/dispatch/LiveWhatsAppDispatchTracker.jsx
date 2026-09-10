@@ -514,30 +514,44 @@ export default function LiveWhatsAppDispatchTracker({
       </div>
 
       {/* Recent Sent Messages History & Delete for Everyone */}
-      {sentMessages.length > 0 && (
-        <div className="mt-4 border-t border-slate-200/80 pt-3">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <span className="flex h-2 w-2 rounded-full bg-blue-500"></span>
-              <h4 className="text-xs font-black uppercase tracking-wider text-slate-700">
-                Recent WhatsApp Messages &bull; මෑතකදී යැවූ පණිවිඩ
-              </h4>
-            </div>
-            <span className="text-[10px] font-bold text-slate-400">
-              Revoke / Delete for Everyone
+      <div className="mt-4 border-t border-slate-200/80 pt-3.5">
+        <div className="flex items-center justify-between mb-2.5">
+          <div className="flex items-center gap-2">
+            <span className="flex h-2 w-2 rounded-full bg-blue-500 animate-pulse"></span>
+            <h4 className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+              <span>Recent WhatsApp Messages</span>
+              <span className="text-slate-400 font-normal">&bull;</span>
+              <span className="text-slate-600 font-bold">මෑතකදී යැවූ පණිවිඩ</span>
+            </h4>
+            <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black text-blue-700 border border-blue-200">
+              {sentMessages.length} {sentMessages.length === 1 ? "Message" : "Messages"}
             </span>
           </div>
+          <span className="text-[10px] font-bold text-slate-400">
+            Revoke / Delete for Everyone
+          </span>
+        </div>
 
+        {sentMessages.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-4 text-center">
+            <p className="text-xs font-semibold text-slate-600">
+              තවමත් පද්ධතියෙන් පණිවිඩ යවා නොමැත.
+            </p>
+            <p className="text-[11px] text-slate-400 mt-1">
+              "Send Reminder to Group" හෝ "Send Report to Group" ක්ලික් කළ විට හෝ ස්වයංක්‍රීයව පණිවිඩ යැවූ පසු ඒවා මෙහි සටහන් වන අතර, ඕනෑම මොහොතක <b>Delete for Everyone</b> කළ හැක.
+            </p>
+          </div>
+        ) : (
           <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-            {sentMessages.slice(0, 10).map((msg) => (
+            {sentMessages.slice(0, 15).map((msg) => (
               <div
                 key={msg.id}
-                className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 transition hover:bg-slate-100/70"
+                className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/80 p-2.5 transition hover:bg-slate-100"
               >
                 <div className="min-w-0 flex-1 pr-3">
                   <div className="flex items-center gap-2">
                     <span className={`rounded-md px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider ${
-                      msg.type === "reminder" ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800"
+                      msg.type === "reminder" ? "bg-amber-100 text-amber-800 border border-amber-200" : "bg-blue-100 text-blue-800 border border-blue-200"
                     }`}>
                       {msg.type}
                     </span>
@@ -557,7 +571,7 @@ export default function LiveWhatsAppDispatchTracker({
 
                 <div className="shrink-0 flex items-center gap-2">
                   {msg.status === "deleted" ? (
-                    <span className="rounded-lg bg-rose-50 px-2 py-1 text-[10px] font-black text-rose-600 border border-rose-200">
+                    <span className="rounded-lg bg-rose-50 px-2.5 py-1 text-[10px] font-black text-rose-600 border border-rose-200">
                       Deleted for Everyone
                     </span>
                   ) : (
@@ -576,8 +590,8 @@ export default function LiveWhatsAppDispatchTracker({
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
