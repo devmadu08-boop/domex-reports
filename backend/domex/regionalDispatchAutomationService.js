@@ -91,8 +91,21 @@ subscribeToAccountMessages(async (accountKey, { messages, type }) => {
   }
 });
 
+const FREE_OPENROUTER_MODELS = [
+  "nvidia/nemotron-3-ultra:free",
+  "poolside/laguna-s-2.1:free",
+  "nvidia/nemotron-3.5-lightning:free",
+  "inclusionai/ling-3.0-flash-fin:free",
+  "meta-llama/llama-3.3-70b-instruct:free",
+  "google/gemini-2.0-flash-exp:free",
+  "google/gemini-2.0-flash-thinking-exp:free"
+];
+
 async function parseWithOpenRouter(apiKey, text, branchNames) {
-  if (!text.trim()) return [];
+  if (!text || !text.trim()) return [];
+  const cleanKey = String(apiKey || "").trim();
+  if (!cleanKey) return [];
+
   const prompt = `Extract dispatch counts from the following text.
 Branches available: ${branchNames.join(", ")}
 
@@ -101,23 +114,42 @@ ${text}
 
 Return a valid JSON array exactly matching this format: [{"branch": "Branch Name", "dispatch": 123}]. If none found, return []. Do NOT include markdown blocks.`;
 
-  try {
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({ model: "google/gemini-2.5-pro", messages: [{ role: "user", content: prompt }] })
-    });
-    const data = await res.json();
-    let resultText = data?.choices?.[0]?.message?.content || "[]";
-    resultText = resultText.replace(/```json/gi, "").replace(/```/g, "").trim();
-    return JSON.parse(resultText);
-  } catch (error) {
-    console.error("[regional-dispatch] AI Parse Error:", error);
-    return [];
+  for (const model of FREE_OPENROUTER_MODELS) {
+    try {
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${cleanKey}`
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: 1500
+        })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        console.warn(`[regional-dispatch] Free model ${model} failed (${res.status}): ${errText.slice(0, 100)}`);
+        continue;
+      }
+
+      const data = await res.json();
+      let resultText = data?.choices?.[0]?.message?.content || "[]";
+      resultText = resultText.replace(/```json/gi, "").replace(/```/g, "").trim();
+      const parsed = JSON.parse(resultText);
+      if (Array.isArray(parsed)) {
+        console.log(`[regional-dispatch] Successfully parsed dispatch with free model: ${model}`);
+        return parsed;
+      }
+    } catch (error) {
+      console.warn(`[regional-dispatch] Model ${model} error:`, error.message);
+    }
   }
+
+  console.error("[regional-dispatch] All free OpenRouter models exhausted.");
+  return [];
 }
 
 // Helper to find chromium path (copied from rescheduleReportRenderer)

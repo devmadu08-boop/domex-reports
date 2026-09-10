@@ -69,9 +69,13 @@ export function parseDispatchWithRegex(rawText, configuredTargets = []) {
 }
 
 const OPENROUTER_MODELS = [
-  "google/gemini-2.5-pro",
-  "google/gemini-exp-1206",
-  "meta-llama/llama-3.3-70b-instruct"
+  "nvidia/nemotron-3-ultra:free",
+  "poolside/laguna-s-2.1:free",
+  "nvidia/nemotron-3.5-lightning:free",
+  "inclusionai/ling-3.0-flash-fin:free",
+  "meta-llama/llama-3.3-70b-instruct:free",
+  "google/gemini-2.0-flash-exp:free",
+  "google/gemini-2.0-flash-thinking-exp:free"
 ];
 
 export async function testGeminiApiKey(apiKey) {
@@ -79,22 +83,40 @@ export async function testGeminiApiKey(apiKey) {
     return { ok: false, message: "Please provide an API key." };
   }
 
+  const cleanKey = apiKey.trim();
+
+  // 1. First verify key authenticity using OpenRouter auth check
+  try {
+    const authRes = await fetch("https://openrouter.ai/api/v1/auth/key", {
+      headers: { "Authorization": `Bearer ${cleanKey}` }
+    });
+    if (authRes.ok) {
+      const authData = await authRes.json();
+      const label = authData?.data?.label ? ` (${authData.data.label})` : "";
+      return { ok: true, message: `OpenRouter API key is valid and connected${label}! Free model ready.` };
+    }
+  } catch {
+    // If auth endpoint encounters network/CORS, continue to test completions
+  }
+
+  // 2. Direct completion test with free model and low max_tokens (to avoid 402 errors)
   const url = "https://openrouter.ai/api/v1/chat/completions";
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey.trim()}`
+        "Authorization": `Bearer ${cleanKey}`
       },
       body: JSON.stringify({
         model: OPENROUTER_MODELS[0],
-        messages: [{ role: "user", content: "ping" }]
+        messages: [{ role: "user", content: "ping" }],
+        max_tokens: 15
       })
     });
 
     if (res.ok) {
-      return { ok: true, message: "OpenRouter API key is valid and working!" };
+      return { ok: true, message: "OpenRouter API key is valid and working with Free models!" };
     }
     const errText = await res.text();
     return { ok: false, message: `API Key error (${res.status}): ${errText.slice(0, 150)}` };
@@ -115,7 +137,8 @@ async function callOpenRouterModel(model, apiKey, text, branchNames) {
     },
     body: JSON.stringify({
       model,
-      messages: [{ role: "user", content: prompt }]
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 1500
     })
   });
 

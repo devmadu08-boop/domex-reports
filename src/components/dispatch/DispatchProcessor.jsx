@@ -149,9 +149,9 @@ export default function DispatchProcessor({
                 <KeyRound className="h-5 w-5" />
               </span>
               <div>
-                <h4 className="text-base font-black text-[#071537]">Google Gemini API Key</h4>
+                <h4 className="text-base font-black text-[#071537]">OpenRouter API Key</h4>
                 <p className="text-xs font-semibold text-blue-950/60">
-                  Used for sequential multi-model parsing (2.5 &rarr; 2.0 &rarr; 1.5)
+                  Used for Free High-Speed AI models (Nemotron 3 Ultra, Laguna S, Llama 3.3, Gemini)
                 </p>
               </div>
             </div>
@@ -164,18 +164,18 @@ export default function DispatchProcessor({
                 type="text"
                 value={tempKey}
                 onChange={(e) => setTempKey(e.target.value)}
-                placeholder="AIzaSy..."
+                placeholder="sk-or-v1-..."
                 className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 font-mono text-xs font-bold text-[#071537] outline-none focus:border-violet-500 focus:bg-white focus:ring-2 focus:ring-violet-100"
               />
               <p className="mt-1.5 text-[11px] text-slate-500">
                 Get a free key from{" "}
                 <a
-                  href="https://aistudio.google.com/app/apikey"
+                  href="https://openrouter.ai/keys"
                   target="_blank"
                   rel="noreferrer"
                   className="font-bold text-violet-600 underline"
                 >
-                  Google AI Studio
+                  OpenRouter
                 </a>. If left blank or if an error occurs, the system automatically uses the offline Smart Regex Fallback.
               </p>
             </div>
