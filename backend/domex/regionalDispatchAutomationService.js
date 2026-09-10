@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { subscribeToAccountMessages, sendAccountRecipientText, getAccountWhatsAppStatus } from "../whatsapp/accountWhatsappService.js";
+import { subscribeToAccountMessages, sendAccountRecipientText, sendAccountRecipientReport, getAccountWhatsAppStatus } from "../whatsapp/accountWhatsappService.js";
 import { chromium } from "playwright-core";
 
 const dataDir = path.resolve("backend", "data", "regional-dispatch");
@@ -91,8 +91,7 @@ subscribeToAccountMessages(async (accountKey, { messages, type }) => {
   }
 });
 
-// AI Parser Helper (Equivalent to frontend geminiDispatchService)
-async function parseWithGemini(apiKey, text, branchNames) {
+async function parseWithOpenRouter(apiKey, text, branchNames) {
   if (!text.trim()) return [];
   const prompt = `Extract dispatch counts from the following text.
 Branches available: ${branchNames.join(", ")}
@@ -103,14 +102,17 @@ ${text}
 Return a valid JSON array exactly matching this format: [{"branch": "Branch Name", "dispatch": 123}]. If none found, return []. Do NOT include markdown blocks.`;
 
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      headers: { 
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({ model: "google/gemini-2.5-pro", messages: [{ role: "user", content: prompt }] })
     });
     const data = await res.json();
-    let resultText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
-    resultText = resultText.replace(/```json/g, "").replace(/```/g, "").trim();
+    let resultText = data?.choices?.[0]?.message?.content || "[]";
+    resultText = resultText.replace(/```json/gi, "").replace(/```/g, "").trim();
     return JSON.parse(resultText);
   } catch (error) {
     console.error("[regional-dispatch] AI Parse Error:", error);
@@ -281,9 +283,10 @@ async function renderDispatchImage(date, rows, summary, userName, userRole) {
 }
 
 // 3. Cron Schedules
-export async function runRegionalAutomation(mode, specificAccountKey = null) {
+async function runRegionalAutomation(mode = "reminder", manualAccountKey = null) {
+  await ensureDir(dataDir);
   const configs = await readAllConfigs();
-  const keys = specificAccountKey ? [specificAccountKey] : Object.keys(configs);
+  const keys = manualAccountKey ? [manualAccountKey] : Object.keys(configs);
   
   for (const accountKey of keys) {
     const config = configs[accountKey];
@@ -296,10 +299,10 @@ export async function runRegionalAutomation(mode, specificAccountKey = null) {
     const rawText = await getTodayMessages(accountKey);
     const branchNames = config.targets.map(t => t.branch);
     
-    // Parse using Gemini
-    const extractedData = await parseWithGemini(config.geminiApiKey, rawText, branchNames);
+    // Parse using OpenRouter
+    const extractedData = await parseWithOpenRouter(config.geminiApiKey, rawText, branchNames);
     
-    // Calculate unsubmitted
+    // Calculate unsubmitted and submitted
     const submittedMap = {};
     for (const item of extractedData) {
       if (item.branch && item.dispatch != null) {
@@ -312,11 +315,12 @@ export async function runRegionalAutomation(mode, specificAccountKey = null) {
     }
     
     const unsubmitted = config.targets.filter(t => submittedMap[t.branch] == null).map(t => t.branch);
+    const submitted = config.targets.filter(t => submittedMap[t.branch] != null).map(t => t.branch);
     
     if (mode === "reminder") {
       if (unsubmitted.length === 0) continue; // Everyone submitted
-      const reminderMsg = `⚠️ *Dispatch Count Reminder*\n\nකරුණාකර පහත ශාඛාවන් රාත්‍රී 11.30 ට පෙර ඔබගේ Dispatch Counts ලබා දෙන්න:\n\n${unsubmitted.map(b => "🔹 " + b).join("\n")}`;
-      await sendAccountRecipientText(accountKey, { jid: config.groupId, text: reminderMsg });
+      const reminderMsg = `🚨 *Dispatch Count Reminder*\n\nකරුණාකර අදාල ශාඛාවන් 11.30 ට පෙර ඔබගේ Dispatch Counts ලබා දෙන්න:\n\n*ලබා දී නොමැති ශාඛාවන්:*\n${unsubmitted.map(b => "❌ " + b).join("\n")}\n\n*ලබා දී ඇති ශාඛාවන්:*\n${submitted.length > 0 ? submitted.map(b => "✅ " + b).join("\n") : "කිසිවක් නැත"}`;
+      await sendAccountRecipientText(accountKey, { phoneNumber: config.groupId, message: reminderMsg });
       console.log(`[regional-dispatch] Sent 11PM reminder to ${accountKey}`);
     } 
     else if (mode === "report") {
@@ -348,21 +352,22 @@ export async function runRegionalAutomation(mode, specificAccountKey = null) {
         console.error("[regional-dispatch] Image render failed:", e);
       }
       
-      let caption = `📊 *Regional Dispatch Performance*\nDate: ${dateStr}\nTotal Dispatched: ${totalDispatch}\nAchievement: ${overallPercentage}%\n`;
+      let caption = `📊 *Regional Dispatch Performance*\nDate: ${dateStr}\nTotal Dispatched: ${totalDispatch}\nAchievement: ${overallPercentage}%\n\n`;
+      caption += `*ලබා දී ඇති ශාඛාවන්:*\n${submitted.length > 0 ? submitted.map(b => "✅ " + b).join("\n") : "කිසිවක් නැත"}\n\n`;
       if (unsubmitted.length > 0) {
-        caption += `\n⚠️ *අද දින Dispatch Counts ලබා දී නොමැති ශාඛාවන්:*\n${unsubmitted.map(b => "🔹 " + b).join("\n")}`;
+        caption += `*ලබා දී නොමැති ශාඛාවන්:*\n${unsubmitted.map(b => "❌ " + b).join("\n")}`;
       } else {
-        caption += `\n✅ *සියලුම ශාඛාවන් Dispatch Counts ලබා දී ඇත!*`;
+        caption += `✅ *සියලුම ශාඛාවන් Dispatch Counts ලබා දී ඇත!*`;
       }
       
       if (base64Img) {
-        await sendAccountRecipientText(accountKey, { 
-          jid: config.groupId, 
-          image: base64Img,
+        await sendAccountRecipientReport(accountKey, { 
+          phoneNumber: config.groupId, 
+          imageDataUrl: base64Img,
           caption: caption 
         });
       } else {
-        await sendAccountRecipientText(accountKey, { jid: config.groupId, text: caption });
+        await sendAccountRecipientText(accountKey, { phoneNumber: config.groupId, message: caption });
       }
       console.log(`[regional-dispatch] Sent 11:30PM report to ${accountKey}`);
     }

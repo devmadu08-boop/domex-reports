@@ -201,12 +201,12 @@ export default function RegionalWhatsAppSettings({ accountKey, session }) {
           </div>
 
           <div className="rounded-2xl border border-white/70 bg-white/50 p-4">
-            <label className="mb-2 block text-sm font-black text-[#071537]">Gemini AI API Key</label>
+            <label className="mb-2 block text-sm font-black text-[#071537]">OpenRouter API Key</label>
             <input
               type="password"
               value={config.geminiApiKey}
               onChange={e => setConfig(c => ({...c, geminiApiKey: e.target.value}))}
-              placeholder="AIzaSy..."
+              placeholder="sk-or-v1-..."
               className="w-full rounded-2xl border border-white/80 bg-white/70 px-4 py-3 font-semibold text-[#071537] outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
             />
             <p className="mt-2 text-xs font-semibold text-slate-500">Required for extracting numbers from messy group messages.</p>
