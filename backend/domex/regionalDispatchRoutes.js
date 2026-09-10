@@ -46,10 +46,12 @@ router.post("/live", async (request, response) => {
 router.post("/trigger", async (request, response) => {
   try {
     const { mode } = request.body; // "reminder" or "report"
-    await manualTrigger(accountKey(request), mode);
-    response.json({ ok: true, message: "Triggered successfully" });
+    const key = accountKey(request);
+    const result = await manualTrigger(key, mode);
+    response.json({ ok: true, message: "Triggered successfully", result });
   } catch (error) {
-    response.status(500).json({ error: error.message });
+    console.error("[regional-dispatch] Trigger error:", error.message || error);
+    response.status(400).json({ ok: false, error: error.message });
   }
 });
 

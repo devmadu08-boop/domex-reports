@@ -24,48 +24,77 @@ async function readAllConfigs() {
 
 export async function getRegionalConfig(accountKey) {
   const configs = await readAllConfigs();
-  return configs[accountKey] || { enabled: false, groupId: "", geminiApiKey: "", targets: [] };
+  const clean = String(accountKey || "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  const candidates = [
+    clean,
+    clean.startsWith("user-") ? clean.replace(/^user-/, "") : `user-${clean}`,
+    accountKey
+  ];
+  for (const k of candidates) {
+    if (configs[k]) return configs[k];
+  }
+  return { enabled: false, groupId: "", geminiApiKey: "", targets: [] };
 }
 
 export async function saveRegionalConfig(accountKey, payload) {
   const configs = await readAllConfigs();
-  configs[accountKey] = {
+  const clean = String(accountKey || "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  const data = {
     enabled: Boolean(payload.enabled),
-    groupId: payload.groupId || "",
-    geminiApiKey: payload.geminiApiKey || "",
+    groupId: String(payload.groupId || "").trim(),
+    geminiApiKey: String(payload.geminiApiKey || "").trim(),
     targets: Array.isArray(payload.targets) ? payload.targets : [],
     userName: payload.userName || "",
     userRole: payload.userRole || ""
   };
+  configs[clean] = data;
+  if (clean.startsWith("user-")) {
+    configs[clean.replace(/^user-/, "")] = data;
+  } else {
+    configs[`user-${clean}`] = data;
+  }
   await fs.writeFile(configFile, JSON.stringify(configs, null, 2));
-  return configs[accountKey];
+  return configs[clean];
 }
 
 function getTodayString() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Colombo" }).format(new Date());
 }
 
 async function saveMessage(accountKey, text) {
   const today = getTodayString();
   await ensureDir(path.join(messagesDir, today));
-  const msgFile = path.join(messagesDir, today, `${accountKey}.txt`);
-  
-  try {
-    await fs.appendFile(msgFile, text + "\n---\n");
-  } catch (error) {
-    console.error("[regional-dispatch] Error saving message", error);
+  const clean = String(accountKey || "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  const keys = new Set([
+    clean,
+    clean.startsWith("user-") ? clean.replace(/^user-/, "") : `user-${clean}`
+  ]);
+  for (const k of keys) {
+    const msgFile = path.join(messagesDir, today, `${k}.txt`);
+    try {
+      await fs.appendFile(msgFile, text + "\n---\n");
+    } catch (error) {
+      console.error("[regional-dispatch] Error saving message", error);
+    }
   }
 }
 
 export async function getTodayMessages(accountKey) {
   const today = getTodayString();
-  const msgFile = path.join(messagesDir, today, `${accountKey}.txt`);
-  try {
-    return await fs.readFile(msgFile, "utf8");
-  } catch (error) {
-    return "";
+  const clean = String(accountKey || "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  const candidates = [
+    clean,
+    clean.startsWith("user-") ? clean.replace(/^user-/, "") : `user-${clean}`,
+    accountKey
+  ];
+  for (const k of candidates) {
+    const msgFile = path.join(messagesDir, today, `${k}.txt`);
+    try {
+      const data = await fs.readFile(msgFile, "utf8");
+      if (data && data.trim()) return data;
+    } catch {}
   }
+  return "";
 }
 
 // 1. Subscribe to messages from accountWhatsappService
@@ -74,18 +103,29 @@ subscribeToAccountMessages(async (accountKey, { messages, type }) => {
   const config = await getRegionalConfig(accountKey);
   if (!config.enabled || !config.groupId) return;
 
-  const now = new Date();
-  const hours = now.getHours();
-  // Only collect between 16:00 and 23:30 (16 to 23)
-  if (hours < 16 || hours > 23) return;
+  // Convert current time to Asia/Colombo time
+  const colomboNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Colombo" }));
+  const hours = colomboNow.getHours();
+  // Collect dispatches sent between 12:00 PM and midnight 23:59 (Sri Lanka Time)
+  if (hours < 12) return;
+
+  const targetGroupId = String(config.groupId || "").trim();
 
   for (const msg of messages) {
-    const isGroup = msg.key?.remoteJid === config.groupId;
-    if (!isGroup) continue;
+    const incomingJid = String(msg.key?.remoteJid || "").trim();
+    if (incomingJid !== targetGroupId) continue;
     if (msg.key?.fromMe) continue;
 
-    const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
+    const m = msg.message;
+    const text = m?.conversation ||
+      m?.extendedTextMessage?.text ||
+      m?.imageMessage?.caption ||
+      m?.videoMessage?.caption ||
+      m?.documentMessage?.caption ||
+      "";
+
     if (text && text.trim()) {
+      console.log(`[regional-dispatch] Captured message for ${accountKey}: "${text.trim().slice(0, 70)}"`);
       await saveMessage(accountKey, text.trim());
     }
   }
@@ -319,91 +359,145 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null)
   await ensureDir(dataDir);
   const configs = await readAllConfigs();
   const keys = manualAccountKey ? [manualAccountKey] : Object.keys(configs);
-  
-  for (const accountKey of keys) {
-    const config = configs[accountKey];
-    if (!config || !config.enabled || !config.groupId || !config.geminiApiKey || config.targets.length === 0) continue;
-    
-    // Make sure socket is alive
-    const status = await getAccountWhatsAppStatus(accountKey);
-    if (status.status !== "connected") continue;
+  let totalSent = 0;
 
-    const rawText = await getTodayMessages(accountKey);
-    const branchNames = config.targets.map(t => t.branch);
-    
+  for (const requestedKey of keys) {
+    const config = await getRegionalConfig(requestedKey);
+    if (!config || !config.enabled) {
+      if (manualAccountKey) throw new Error("Automation is disabled. Please check 'Enable Auto Report' and save settings.");
+      continue;
+    }
+    if (!config.groupId) {
+      if (manualAccountKey) throw new Error("No WhatsApp Group selected. Please select a group and save settings.");
+      continue;
+    }
+
+    // Resolve which runtime key is actually connected
+    const cleanKey = String(requestedKey).trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+    const candidateKeys = [
+      cleanKey.startsWith("user-") ? cleanKey : `user-${cleanKey}`,
+      cleanKey.replace(/^user-/, ""),
+      requestedKey
+    ];
+
+    let activeKey = null;
+    for (const ck of candidateKeys) {
+      const st = await getAccountWhatsAppStatus(ck);
+      if (st.status === "connected") {
+        activeKey = ck;
+        break;
+      }
+    }
+
+    if (!activeKey) {
+      if (manualAccountKey) throw new Error("WhatsApp is disconnected. Please scan QR code in Settings to connect.");
+      continue;
+    }
+
+    const rawText = await getTodayMessages(activeKey);
+    const targets = Array.isArray(config.targets) ? config.targets : [];
+    const branchNames = targets.map(t => t.branch || t.branch_name).filter(Boolean);
+
     // Parse using OpenRouter
-    const extractedData = await parseWithOpenRouter(config.geminiApiKey, rawText, branchNames);
-    
-    // Calculate unsubmitted and submitted
+    let extractedData = [];
+    if (config.geminiApiKey && rawText.trim()) {
+      extractedData = await parseWithOpenRouter(config.geminiApiKey, rawText, branchNames);
+    }
+
     const submittedMap = {};
     for (const item of extractedData) {
       if (item.branch && item.dispatch != null) {
-        // Ensure dispatch is a number
         const val = Number(item.dispatch);
         if (!isNaN(val)) {
           submittedMap[item.branch] = (submittedMap[item.branch] || 0) + val;
         }
       }
     }
-    
-    const unsubmitted = config.targets.filter(t => submittedMap[t.branch] == null).map(t => t.branch);
-    const submitted = config.targets.filter(t => submittedMap[t.branch] != null).map(t => t.branch);
-    
+
+    // Local Regex Fallback for any branches not picked up by AI
+    if (rawText.trim()) {
+      for (const b of branchNames) {
+        if (submittedMap[b] == null) {
+          const cleanB = b.toLowerCase().replace(/[^a-z0-9]/g, "");
+          for (const line of rawText.split("\n")) {
+            const cleanL = line.toLowerCase().replace(/[^a-z0-9]/g, "");
+            if (cleanL.includes(cleanB)) {
+              const numbers = line.match(/\b\d{1,5}\b/g);
+              if (numbers && numbers.length > 0) {
+                const val = parseInt(numbers[numbers.length - 1], 10);
+                if (!isNaN(val)) {
+                  submittedMap[b] = val;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    const unsubmitted = targets.filter(t => submittedMap[t.branch || t.branch_name] == null).map(t => t.branch || t.branch_name);
+    const submitted = targets.filter(t => submittedMap[t.branch || t.branch_name] != null).map(t => t.branch || t.branch_name);
+
     if (mode === "reminder") {
-      if (unsubmitted.length === 0) continue; // Everyone submitted
-      const reminderMsg = `🚨 *Dispatch Count Reminder*\n\nකරුණාකර අදාල ශාඛාවන් 11.30 ට පෙර ඔබගේ Dispatch Counts ලබා දෙන්න:\n\n*ලබා දී නොමැති ශාඛාවන්:*\n${unsubmitted.map(b => "❌ " + b).join("\n")}\n\n*ලබා දී ඇති ශාඛාවන්:*\n${submitted.length > 0 ? submitted.map(b => "✅ " + b).join("\n") : "කිසිවක් නැත"}`;
-      await sendAccountRecipientText(accountKey, { phoneNumber: config.groupId, message: reminderMsg });
-      console.log(`[regional-dispatch] Sent 11PM reminder to ${accountKey}`);
+      const reminderMsg = `🚨 *Dispatch Count Reminder*\n\nකරුණාකර අදාල ශාඛාවන් 11.30 ට පෙර ඔබගේ Dispatch Counts ලබා දෙන්න:\n\n*ලබා දී නොමැති ශාඛාවන්:*\n${unsubmitted.length > 0 ? unsubmitted.map(b => "❌ " + b).join("\n") : "✅ සියලුම ශාඛාවන් ලබා දී ඇත"}\n\n*ලබා දී ඇති ශාඛාවන්:*\n${submitted.length > 0 ? submitted.map(b => `✅ ${b} (${submittedMap[b]})`).join("\n") : "කිසිවක් නැත"}`;
+      await sendAccountRecipientText(activeKey, { phoneNumber: config.groupId, message: reminderMsg });
+      console.log(`[regional-dispatch] Sent reminder to ${config.groupId} via ${activeKey}`);
+      totalSent++;
     } 
     else if (mode === "report") {
-      // Generate Image
       const dateStr = getTodayString();
       const rows = [];
       let totalTarget = 0;
       let totalDispatch = 0;
-      
-      for (const t of config.targets) {
-        const actual = submittedMap[t.branch] || 0;
-        const perc = t.target > 0 ? Math.round((actual / t.target) * 100) : 0;
-        rows.push({ branch: t.branch, target: t.target, dispatch: actual, percentage: perc });
-        totalTarget += t.target;
+
+      for (const t of targets) {
+        const bName = t.branch || t.branch_name;
+        const tgt = Number(t.target) || 0;
+        const actual = submittedMap[bName] || 0;
+        const perc = tgt > 0 ? Math.round((actual / tgt) * 100) : 0;
+        rows.push({ branch: bName, target: tgt, dispatch: actual, percentage: perc });
+        totalTarget += tgt;
         totalDispatch += actual;
       }
-      
+
       rows.sort((a, b) => b.percentage - a.percentage);
-      
+
       const overallPercentage = totalTarget > 0 ? Math.round((totalDispatch / totalTarget) * 100) : 0;
       const topBranch = rows.length > 0 ? rows[0] : null;
       const lowestBranch = rows.length > 0 ? rows[rows.length - 1] : null;
       const summary = { totalTarget, totalDispatch, overallPercentage, topBranch, lowestBranch };
-      
+
       let base64Img = "";
       try {
         base64Img = await renderDispatchImage(dateStr, rows, summary, config.userName || "Regional Manager", config.userRole || "Regional Manager");
       } catch (e) {
         console.error("[regional-dispatch] Image render failed:", e);
       }
-      
+
       let caption = `📊 *Regional Dispatch Performance*\nDate: ${dateStr}\nTotal Dispatched: ${totalDispatch}\nAchievement: ${overallPercentage}%\n\n`;
-      caption += `*ලබා දී ඇති ශාඛාවන්:*\n${submitted.length > 0 ? submitted.map(b => "✅ " + b).join("\n") : "කිසිවක් නැත"}\n\n`;
+      caption += `*ලබා දී ඇති ශාඛාවන්:*\n${submitted.length > 0 ? submitted.map(b => `✅ ${b} (${submittedMap[b]})`).join("\n") : "කිසිවක් නැත"}\n\n`;
       if (unsubmitted.length > 0) {
         caption += `*ලබා දී නොමැති ශාඛාවන්:*\n${unsubmitted.map(b => "❌ " + b).join("\n")}`;
       } else {
         caption += `✅ *සියලුම ශාඛාවන් Dispatch Counts ලබා දී ඇත!*`;
       }
-      
+
       if (base64Img) {
-        await sendAccountRecipientReport(accountKey, { 
+        await sendAccountRecipientReport(activeKey, { 
           phoneNumber: config.groupId, 
           imageDataUrl: base64Img,
           caption: caption 
         });
       } else {
-        await sendAccountRecipientText(accountKey, { phoneNumber: config.groupId, message: caption });
+        await sendAccountRecipientText(activeKey, { phoneNumber: config.groupId, message: caption });
       }
-      console.log(`[regional-dispatch] Sent 11:30PM report to ${accountKey}`);
+      console.log(`[regional-dispatch] Sent report to ${config.groupId} via ${activeKey}`);
+      totalSent++;
     }
   }
+
+  return { ok: true, sent: totalSent };
 }
 
 // Start Cron-like Scheduler

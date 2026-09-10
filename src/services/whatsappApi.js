@@ -1,13 +1,16 @@
 const whatsappApiBaseUrl = (import.meta.env.VITE_WHATSAPP_API_BASE_URL || "").replace(/\/$/, "");
 let whatsappAccountKey = "default";
 
-export function setWhatsAppAccountContext(session) {
+export function getWhatsAppAccountKey(session) {
   if (!session || session.role === "admin" || session.role === "superadmin") {
-    whatsappAccountKey = "default";
-    return whatsappAccountKey;
+    return "default";
   }
   const identity = String(session.userId || session.branchName || "branch").trim().toLowerCase();
-  whatsappAccountKey = `user-${identity}`.replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-").slice(0, 80);
+  return `user-${identity}`.replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-").slice(0, 80);
+}
+
+export function setWhatsAppAccountContext(session) {
+  whatsappAccountKey = getWhatsAppAccountKey(session);
   return whatsappAccountKey;
 }
 

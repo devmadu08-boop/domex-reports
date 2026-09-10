@@ -28,6 +28,7 @@ import WhatsAppSettings from "./WhatsAppSettings.jsx";
 import RegionalWhatsAppSettings from "./RegionalWhatsAppSettings.jsx";
 import RiderMeterMonitorSettings from "./RiderMeterMonitorSettings.jsx";
 import ThemeSwitcher from "./ThemeSwitcher.jsx";
+import { getWhatsAppAccountKey } from "../services/whatsappApi.js";
 
 const APPROVAL_REACTION_PRESETS = ["✅", "👍", "❤️", "🚀", "📤"];
 
@@ -323,7 +324,7 @@ export default function SettingsPage({
       </div>}
 
       <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        {activeSection === "regionalDispatch" && <RegionalWhatsAppSettings accountKey={session?.userId || "regional"} session={session} />}
+        {activeSection === "regionalDispatch" && <RegionalWhatsAppSettings accountKey={getWhatsAppAccountKey(session)} session={session} />}
         {activeSection === "whatsapp" && <WhatsAppSettings settings={settings} onSaveSettings={onSaveSettings} accountLabel={whatsappAccountLabel} />}
         {activeSection === "meter" && <RiderMeterMonitorSettings />}
 

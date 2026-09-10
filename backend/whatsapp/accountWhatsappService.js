@@ -31,7 +31,13 @@ export function normalizeWhatsAppAccountKey(value) {
 }
 
 export function getRuntime(accountKey) {
-  const key = normalizeWhatsAppAccountKey(accountKey);
+  let key = normalizeWhatsAppAccountKey(accountKey);
+  if (!runtimes.has(key)) {
+    const altKey = key.startsWith("user-") ? key.replace(/^user-/, "") : `user-${key}`;
+    if (runtimes.has(altKey)) {
+      return runtimes.get(altKey);
+    }
+  }
   if (!runtimes.has(key)) {
     const rootDir = path.join(accountsDir, key);
     runtimes.set(key, {

@@ -117,18 +117,25 @@ export default function RegionalWhatsAppSettings({ accountKey, session }) {
   async function handleTest(mode) {
     setTestMode(mode);
     try {
-       const res = await fetch("/api/regional-dispatch/trigger", {
-         method: "POST",
-         headers: {
-           "Content-Type": "application/json",
-           "x-whatsapp-account": accountKey
-         },
-         body: JSON.stringify({ mode })
-       });
-       if (res.ok) alert("Test triggered successfully. Check your WhatsApp group!");
-       else alert("Test failed.");
-    } catch (e) { alert("Test failed."); }
-    finally { setTestMode(""); }
+      const res = await fetch("/api/regional-dispatch/trigger", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-whatsapp-account": accountKey
+        },
+        body: JSON.stringify({ mode })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        alert("Test triggered successfully! Message sent to your WhatsApp group.");
+      } else {
+        alert(`Failed: ${data.error || "Could not send test message to group"}`);
+      }
+    } catch (e) {
+      alert("Test failed: " + e.message);
+    } finally {
+      setTestMode(null);
+    }
   }
 
   return (

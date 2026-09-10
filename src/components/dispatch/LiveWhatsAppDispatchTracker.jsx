@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   Radio,
   RefreshCw,
@@ -13,6 +13,7 @@ import {
   Layers,
   MessageSquare
 } from "lucide-react";
+import { getWhatsAppAccountKey } from "../../services/whatsappApi.js";
 
 export default function LiveWhatsAppDispatchTracker({
   targets = [],
@@ -30,9 +31,7 @@ export default function LiveWhatsAppDispatchTracker({
   const fetchLiveStatus = useCallback(async () => {
     setLoading(true);
     try {
-      const accountKey = session?.role === "regional_manager"
-        ? `user-${String(session?.userId || session?.branchName || "branch").trim().toLowerCase()}`.replace(/[^a-z0-9_-]/g, "-").slice(0, 80)
-        : "default";
+      const accountKey = getWhatsAppAccountKey(session);
 
       const res = await fetch("/api/regional-dispatch/live", {
         method: "POST",
