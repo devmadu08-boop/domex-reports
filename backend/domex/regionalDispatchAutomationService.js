@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { subscribeToAccountMessages, sendAccountRecipientText, getAccountWhatsAppStatus } from "../whatsapp/accountWhatsappService.js";
 import { chromium } from "playwright-core";
-import cron from "node-cron";
 
 const dataDir = path.resolve("backend", "data", "regional-dispatch");
 const configFile = path.join(dataDir, "config.json");
@@ -370,10 +369,24 @@ export async function runRegionalAutomation(mode, specificAccountKey = null) {
   }
 }
 
-// Start Cron
+// Start Cron-like Scheduler
 export function startRegionalDispatchAutomation() {
-  cron.schedule("0 23 * * *", () => runRegionalAutomation("reminder"), { timezone: "Asia/Colombo" });
-  cron.schedule("30 23 * * *", () => runRegionalAutomation("report"), { timezone: "Asia/Colombo" });
+  setInterval(() => {
+    const d = new Date();
+    // Convert current UTC time to Asia/Colombo
+    const colomboTime = new Date(d.toLocaleString("en-US", { timeZone: "Asia/Colombo" }));
+    const hours = colomboTime.getHours();
+    const minutes = colomboTime.getMinutes();
+    const seconds = colomboTime.getSeconds();
+
+    if (hours === 23 && minutes === 0 && seconds === 0) {
+      runRegionalAutomation("reminder").catch(e => console.error("[regional-dispatch] Reminder error", e));
+    }
+    if (hours === 23 && minutes === 30 && seconds === 0) {
+      runRegionalAutomation("report").catch(e => console.error("[regional-dispatch] Report error", e));
+    }
+  }, 1000).unref();
+  
   console.log("[regional-dispatch] Automation scheduler started");
 }
 
