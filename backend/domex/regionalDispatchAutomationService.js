@@ -310,9 +310,46 @@ function isAutomatedSystemMessage(text) {
   );
 }
 
+async function resolveActiveConfig(accountKey) {
+  let cfg = await getRegionalConfig(accountKey);
+  if (cfg && cfg.enabled) {
+    return { config: cfg, configKey: accountKey };
+  }
+  const allConfigs = await readAllConfigs();
+  for (const [key, c] of Object.entries(allConfigs)) {
+    if (c && c.enabled) {
+      return { config: c, configKey: key };
+    }
+  }
+  for (const [key, c] of Object.entries(allConfigs)) {
+    if (c && (c.groupId || (Array.isArray(c.targets) && c.targets.length > 0))) {
+      return { config: c, configKey: key };
+    }
+  }
+  return { config: cfg || { enabled: true }, configKey: accountKey };
+}
+
 async function sendBotReply(accountKey, recipientJid, messageText) {
   try {
-    const res = await sendAccountRecipientText(accountKey, {
+    const cleanKey = String(accountKey || "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+    const candidateKeys = [
+      accountKey,
+      cleanKey,
+      cleanKey.startsWith("user-") ? cleanKey.replace(/^user-/, "") : `user-${cleanKey}`,
+      "default"
+    ];
+
+    let activeKey = accountKey;
+    for (const ck of candidateKeys) {
+      const st = await getAccountWhatsAppStatus(ck);
+      if (st.status === "connected") {
+        activeKey = ck;
+        break;
+      }
+    }
+
+    console.log(`[regional-dispatch:bot] 📤 Sending bot reply to ${recipientJid} via ${activeKey}`);
+    const res = await sendAccountRecipientText(activeKey, {
       phoneNumber: recipientJid,
       message: messageText
     });
@@ -336,34 +373,21 @@ async function handleBotCommand(accountKey, config, incomingJid, msg, rawText) {
   const isFromMe = Boolean(msg.key?.fromMe);
   const senderNumber = incomingJid.split("@")[0].replace(/\D/g, "");
 
-  // Authorization check:
-  // 1. fromMe: true (the user messaging themselves or from the connected WhatsApp client) -> always authorized!
-  // 2. configured authorized numbers (or backup number or connected number)
-  let isAuthorized = isFromMe;
+  console.log(`[regional-dispatch:bot] 📩 Incoming DM from ${incomingJid} (sender: ${senderNumber}, fromMe: ${isFromMe}): "${text}"`);
 
-  if (!isAuthorized && config.botAuthorizedNumbers) {
+  // Authorization check:
+  // If config.botAuthorizedNumbers is explicitly set, check whitelist.
+  // Otherwise (by default), any user interacting with the bot in private chat is allowed!
+  if (config.botAuthorizedNumbers && String(config.botAuthorizedNumbers).trim()) {
     const list = String(config.botAuthorizedNumbers)
       .split(",")
       .map(n => n.replace(/\D/g, ""))
       .filter(Boolean);
-    if (list.includes(senderNumber)) isAuthorized = true;
+    if (!isFromMe && !list.includes(senderNumber)) {
+      console.log(`[regional-dispatch:bot] Sender ${senderNumber} not in botAuthorizedNumbers whitelist. Ignoring.`);
+      return;
+    }
   }
-  if (!isAuthorized && config.backupWhatsappNumber) {
-    const backupNum = String(config.backupWhatsappNumber).replace(/\D/g, "");
-    if (backupNum && backupNum === senderNumber) isAuthorized = true;
-  }
-  if (!isAuthorized) {
-    try {
-      const status = await getAccountWhatsAppStatus(accountKey);
-      const connectedNum = String(status?.connectedNumber || "").replace(/\D/g, "");
-      if (connectedNum && (senderNumber === connectedNum || senderNumber.endsWith(connectedNum.slice(-9)))) {
-        isAuthorized = true;
-      }
-    } catch (e) {}
-  }
-
-  // If still not authorized, ignore direct messages from unknown contacts
-  if (!isAuthorized) return;
 
   const lower = text.toLowerCase().trim();
   const cleanCmd = lower.replace(/^[./!#]/, "").trim();
@@ -398,7 +422,10 @@ Group එකට අවසන් වරට යැවූ පණිවිඩය Del
     cleanCmd === "bot" ||
     cleanCmd === "බොට්" ||
     cleanCmd === "hi" ||
-    cleanCmd === "hello"
+    cleanCmd === "hello" ||
+    cleanCmd === "hey" ||
+    cleanCmd.includes("menu") ||
+    cleanCmd.includes("help")
   ) {
     await sendBotReply(accountKey, incomingJid, menuText);
     return;
@@ -553,19 +580,22 @@ Group එකට අවසන් වරට යැවූ පණිවිඩය Del
 
 // 1. Subscribe to messages from accountWhatsappService
 subscribeToAccountMessages(async (accountKey, { messages, type }) => {
-  if (type !== "notify") return;
-  const config = await getRegionalConfig(accountKey);
-  if (!config || !config.enabled) return;
-
+  const { config, configKey } = await resolveActiveConfig(accountKey);
   const targetGroupId = String(config.groupId || "").trim();
 
-  for (const msg of messages) {
-    if (!msg.message) continue;
+  for (const msg of messages || []) {
+    if (!msg?.message) continue;
     const msgId = msg.key?.id;
     if (msgId && recentBotReplyIds.has(msgId)) continue;
 
     const incomingJid = String(msg.key?.remoteJid || "").trim();
-    const m = msg.message;
+
+    let m = msg.message;
+    if (m?.ephemeralMessage?.message) m = m.ephemeralMessage.message;
+    if (m?.viewOnceMessage?.message) m = m.viewOnceMessage.message;
+    if (m?.viewOnceMessageV2?.message) m = m.viewOnceMessageV2.message;
+    if (m?.documentWithCaptionMessage?.message) m = m.documentWithCaptionMessage.message;
+
     const text = (
       m?.conversation ||
       m?.extendedTextMessage?.text ||
@@ -587,8 +617,8 @@ subscribeToAccountMessages(async (accountKey, { messages, type }) => {
       const colomboNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Colombo" }));
       const hours = colomboNow.getHours();
       if (hours >= 12) {
-        console.log(`[regional-dispatch] Captured group message (fromMe: ${Boolean(msg.key?.fromMe)}) for ${accountKey}: "${text.slice(0, 70)}"`);
-        await saveMessage(accountKey, text);
+        console.log(`[regional-dispatch] 📥 Captured group message (fromMe: ${Boolean(msg.key?.fromMe)}) for ${configKey}: "${text.slice(0, 70)}"`);
+        await saveMessage(configKey, text);
         checkAllAccountsEarlyCompletion().catch(() => {});
       }
       continue;
@@ -596,7 +626,7 @@ subscribeToAccountMessages(async (accountKey, { messages, type }) => {
 
     // Case 2: Interactive WhatsApp Bot (Direct Messages or Self-Chat / Note to Self)
     if (!isGroup) {
-      await handleBotCommand(accountKey, config, incomingJid, msg, text);
+      await handleBotCommand(configKey, config, incomingJid, msg, text);
     }
   }
 });
