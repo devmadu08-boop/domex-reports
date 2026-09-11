@@ -5,7 +5,8 @@ import {
   sendAccountRecipientText, 
   sendAccountRecipientReport, 
   getAccountWhatsAppStatus,
-  deleteAccountMessage
+  deleteAccountMessage,
+  reactToAccountMessage
 } from "../whatsapp/accountWhatsappService.js";
 import { chromium } from "playwright-core";
 
@@ -412,7 +413,10 @@ Group එකට 11:30 PM Performance Report පින්තූරය යැව�
 5️⃣ *Delete Last Message* (.delete)
 Group එකට අවසන් වරට යැවූ පණිවිඩය Delete for Everyone කිරීම
 
-💡 _ඔබට අවශ්‍ය අංකය (1, 2, 3, 4, 5) හෝ Command එක ටයිප් කර එවන්න._`;
+6️⃣ *View Saved Reports* (.saved)
+පසුගිය සුරකින ලද වාර්තා ලැයිස්තුව බැලීම
+
+💡 _ඔබට අවශ්‍ය අංකය (1, 2, 3, 4, 5, 6) හෝ Command එක ටයිප් කර එවන්න._`;
 
   // 1. Menu triggers
   if (
@@ -572,6 +576,67 @@ Group එකට අවසන් වරට යැවූ පණිවිඩය Del
     return;
   }
 
+  // 7. Option 6: View Saved Reports (.saved)
+  if (
+    cleanCmd === "6" ||
+    cleanCmd === "saved" ||
+    cleanCmd === "reports" ||
+    cleanCmd.includes("saved report") ||
+    cleanCmd.includes("view saved")
+  ) {
+    try {
+      const reports = await getRegionalDispatchReports(accountKey);
+      if (!reports || reports.length === 0) {
+        await sendBotReply(accountKey, incomingJid, "📁 තවමත් සුරකින ලද වාර්තා (Saved Reports) කිසිවක් පද්ධතිය තුළ නොමැත.");
+        return;
+      }
+
+      let msg = `📁 *DOMEX Saved Dispatch Reports*\n\n`;
+      msg += `මෑතකදී සුරකින ලද වාර්තා (${Math.min(5, reports.length)}):\n`;
+      reports.slice(0, 5).forEach((r, idx) => {
+        const perc = r.summary?.overallPercentage != null ? r.summary.overallPercentage : (r.percentage || 0);
+        const disp = r.summary?.totalDispatch != null ? r.summary.totalDispatch : (r.totalDispatch || 0);
+        const tgt = r.summary?.totalTarget != null ? r.summary.totalTarget : (r.totalTarget || 0);
+        msg += `${idx + 1}️⃣ 📅 *${r.date}*: ${disp.toLocaleString()}/${tgt.toLocaleString()} (*${perc}%*)\n`;
+      });
+      msg += `\n💡 _විශේෂිත දිනයක සම්පූර්ණ විස්තර බැලීමට *.report දිනය* ලෙස එවන්න._\n_(උදා: *.report ${reports[0].date}*)_`;
+      await sendBotReply(accountKey, incomingJid, msg);
+    } catch (err) {
+      await sendBotReply(accountKey, incomingJid, `❌ Error loading saved reports: ${err.message || err}`);
+    }
+    return;
+  }
+
+  // Handle specific date report query: e.g. ".report 2026-09-11" or "2026-09-11"
+  const dateMatch = cleanCmd.match(/\b\d{4}-\d{2}-\d{2}\b/);
+  if (dateMatch && (cleanCmd.includes("report") || cleanCmd.includes("saved") || cleanCmd === dateMatch[0])) {
+    const targetDate = dateMatch[0];
+    try {
+      const reports = await getRegionalDispatchReports(accountKey);
+      const rep = reports.find(r => r.date === targetDate || r.id === targetDate || r.id === `dispatch-report-${targetDate}`);
+      if (!rep) {
+        await sendBotReply(accountKey, incomingJid, `⚠️ *${targetDate}* දිනයට අදාළව සුරකින ලද වාර්තාවක් හමු නොවීය.`);
+        return;
+      }
+      const sum = rep.summary || {};
+      let msg = `📊 *DOMEX Performance Report - ${targetDate}*\n`;
+      msg += `━━━━━━━━━━━━━━━━━━\n`;
+      msg += `🎯 Target: *${(sum.totalTarget || 0).toLocaleString()}*\n`;
+      msg += `📦 Dispatched: *${(sum.totalDispatch || 0).toLocaleString()}*\n`;
+      msg += `📈 Achievement: *${sum.overallPercentage || 0}%*\n\n`;
+
+      if (Array.isArray(rep.items) && rep.items.length > 0) {
+        msg += `*ශාඛා විස්තර:*\n`;
+        msg += rep.items.map(it => `• ${it.branch}: *${it.dispatch}* / ${it.target} (${it.percentage}%)`).join("\n") + "\n";
+      }
+      msg += `━━━━━━━━━━━━━━━━━━`;
+      await sendBotReply(accountKey, incomingJid, msg);
+    } catch (err) {
+      await sendBotReply(accountKey, incomingJid, `❌ Error loading report for ${targetDate}: ${err.message || err}`);
+    }
+    return;
+  }
+
   // If message starts with a dot or slash but didn't match above, send menu guidance
   if (text.startsWith(".") || text.startsWith("/")) {
     await sendBotReply(accountKey, incomingJid, `❓ අවලංගු Command එකකි. කරුණාකර *.menu* ටයිප් කර ලබාගත හැකි Options පරීක්ෂා කරන්න.\n\n${menuText}`);
@@ -619,6 +684,24 @@ subscribeToAccountMessages(async (accountKey, { messages, type }) => {
       if (hours >= 12) {
         console.log(`[regional-dispatch] 📥 Captured group message (fromMe: ${Boolean(msg.key?.fromMe)}) for ${configKey}: "${text.slice(0, 70)}"`);
         await saveMessage(configKey, text);
+
+        // React with ✅ if the message contains a recognized branch dispatch or numbers!
+        const targets = Array.isArray(config.targets) ? config.targets : [];
+        const matchedBranch = findBranchInLine(text, targets);
+        const hasNumbers = /\b\d{1,5}\b/.test(text);
+        if (matchedBranch || hasNumbers) {
+          try {
+            await reactToAccountMessage(accountKey, {
+              remoteJid: incomingJid,
+              key: msg.key,
+              emoji: "✅"
+            });
+            console.log(`[regional-dispatch] ✅ Reacted to message from ${msg.key?.participant || msg.key?.remoteJid} for branch ${matchedBranch || 'dispatch'}`);
+          } catch (reactErr) {
+            console.warn("[regional-dispatch] Reaction error:", reactErr.message || reactErr);
+          }
+        }
+
         checkAllAccountsEarlyCompletion().catch(() => {});
       }
       continue;
@@ -1087,11 +1170,50 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null,
         continue;
       }
 
-      const reminderMsg = `🚨 *DOMEX Dispatch Count Reminder*\n\nකරුණාකර පහත ශාඛාවන් රාත්‍රී 11.30 ට පෙර ඔබගේ Dispatch Counts ලබා දෙන්න:\n\n*ලබා දී නොමැති ශාඛාවන්:*\n${unsubmitted.map(b => `❌ ${b} (Target: ${targetMap[b] || 0})`).join("\n")}\n\n*ලබා දී ඇති ශාඛාවන්:*\n${submitted.length > 0 ? submitted.map(b => `✅ ${b}: ${submittedMap[b]}`).join("\n") : "කිසිවක් නැත"}`;
-      const sendRes = await sendAccountRecipientText(activeKey, { phoneNumber: config.groupId, message: reminderMsg });
-      console.log(`[regional-dispatch] Sent reminder to ${config.groupId} via ${activeKey}`);
+      // Collect unsubmitted target items with assigned members
+      const unsubmittedTargets = targets.filter(t => submittedMap[t.branch || t.branch_name] == null);
+      const mentionJids = [];
+      const unsubmittedLines = unsubmittedTargets.map(t => {
+        const bName = t.branch || t.branch_name;
+        const tgt = targetMap[bName] || 0;
+        const phone = t.assigned_phone || t.assignedPhone || (t.assigned_jid ? t.assigned_jid.split("@")[0] : null);
+        const jid = t.assigned_jid || t.assignedJid || (phone ? `${phone.replace(/\D/g, '')}@s.whatsapp.net` : null);
+        if (jid && !mentionJids.includes(jid)) {
+          mentionJids.push(jid);
+        }
+        const tagStr = phone ? ` @${phone.replace(/\D/g, '')}` : (t.assigned_name ? ` (${t.assigned_name})` : "");
+        return `❌ ${bName} (Target: ${tgt})${tagStr}`;
+      });
+
+      const reminderMsg = `🚨 *DOMEX Dispatch Count Reminder*\n\nකරුණාකර පහත ශාඛාවන් රාත්‍රී 11.30 ට පෙර ඔබගේ Dispatch Counts ලබා දෙන්න:\n\n*ලබා දී නොමැති ශාඛාවන්:*\n${unsubmittedLines.join("\n")}\n\n*ලබා දී ඇති ශාඛාවන්:*\n${submitted.length > 0 ? submitted.map(b => `✅ ${b}: ${submittedMap[b]}`).join("\n") : "කිසිවක් නැත"}`;
+      
+      const sendRes = await sendAccountRecipientText(activeKey, { 
+        phoneNumber: config.groupId, 
+        message: reminderMsg,
+        mentions: mentionJids
+      });
+      console.log(`[regional-dispatch] Sent reminder to ${config.groupId} via ${activeKey} (mentions: ${mentionJids.length})`);
       totalSent++;
       seenGroupIds.add(config.groupId);
+
+      // Send personal WhatsApp reminder to each unsubmitted branch's assigned person
+      for (const t of unsubmittedTargets) {
+        const bName = t.branch || t.branch_name;
+        const tgt = targetMap[bName] || 0;
+        const targetPhone = t.assigned_phone || t.assignedPhone || t.assigned_jid || t.assignedJid;
+        if (targetPhone) {
+          const personalMsg = `🚨 *DOMEX Dispatch Reminder*\n\nසුභ සන්ධ්‍යාවක්! කරුණාකර ඔබගේ *${bName}* ශාඛාවේ අද දින Dispatch Count එක රාත්‍රී 11.30 ට පෙර ලබා දෙන්න.\n\n🎯 දෛනික Target එක: *${tgt}*\n\nස්තූතියි!`;
+          try {
+            await sendAccountRecipientText(activeKey, {
+              phoneNumber: targetPhone,
+              message: personalMsg
+            });
+            console.log(`[regional-dispatch] 👤 Sent personal reminder to ${bName} (${targetPhone})`);
+          } catch (pErr) {
+            console.warn(`[regional-dispatch] Failed personal reminder to ${bName} (${targetPhone}):`, pErr.message || pErr);
+          }
+        }
+      }
 
       // Record sent message
       await recordSentMessage(activeKey, {

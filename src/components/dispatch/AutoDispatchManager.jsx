@@ -317,6 +317,7 @@ export default function AutoDispatchManager({ session, onBackToDashboard }) {
         {showTargetModal && (
           <BranchTargetModal
             targets={targets}
+            session={session}
             onTargetsChange={refreshTargets}
             onClose={() => setShowTargetModal(false)}
           />

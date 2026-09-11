@@ -10,13 +10,32 @@ import {
   getRecentSentMessages,
   deleteSentMessage
 } from "./regionalDispatchAutomationService.js";
-import { normalizeWhatsAppAccountKey } from "../whatsapp/accountWhatsappService.js";
+import { normalizeWhatsAppAccountKey, getAccountGroupMembers } from "../whatsapp/accountWhatsappService.js";
 
 const router = express.Router();
 
 function accountKey(request) {
   return normalizeWhatsAppAccountKey(request.get("x-whatsapp-account") || "default");
 }
+
+router.get("/group-members", async (request, response) => {
+  try {
+    const key = accountKey(request);
+    let groupId = request.query?.groupId;
+    if (!groupId) {
+      const config = await getRegionalConfig(key);
+      groupId = config?.groupId;
+    }
+    if (!groupId) {
+      return response.status(400).json({ ok: false, error: "groupId is required or must be configured in settings." });
+    }
+    const data = await getAccountGroupMembers(key, groupId);
+    response.json(data);
+  } catch (error) {
+    console.error("[regional-dispatch] Get group members error:", error.message || error);
+    response.status(500).json({ ok: false, error: error.message });
+  }
+});
 
 router.get("/config", async (request, response) => {
   try {

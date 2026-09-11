@@ -391,7 +391,9 @@ export async function sendAccountRecipientText(accountKey, payload) {
   const recipientJid = normalizeRecipientJid(payload.phoneNumber);
   const text = String(payload.message || "").trim();
   if (!recipientJid || !text) throw new Error("Recipient number and message are required.");
-  const sent = await socket.sendMessage(recipientJid, { text });
+  const mentionJids = Array.isArray(payload.mentions) ? payload.mentions : [];
+  const msgContent = mentionJids.length > 0 ? { text, mentions: mentionJids } : { text };
+  const sent = await socket.sendMessage(recipientJid, msgContent);
   return { 
     ok: true, 
     recipientJid, 
@@ -399,6 +401,61 @@ export async function sendAccountRecipientText(accountKey, payload) {
     sentAt: new Date().toISOString(),
     messageKey: sent?.key,
     messageKeys: sent?.key ? [sent.key] : []
+  };
+}
+
+export async function reactToAccountMessage(accountKey, { remoteJid, key, emoji = "✅" }) {
+  if (isPrimary(accountKey)) {
+    return primary.reactToMessage({ remoteJid, key, emoji });
+  }
+  const runtime = getRuntime(accountKey);
+  const socket = await ensureConnected(runtime);
+  const recipientJid = normalizeRecipientJid(remoteJid);
+  if (!recipientJid || !key) throw new Error("remoteJid and key are required to react.");
+  try {
+    const sent = await socket.sendMessage(recipientJid, {
+      react: {
+        text: emoji,
+        key: {
+          remoteJid: key.remoteJid || recipientJid,
+          id: key.id,
+          fromMe: key.fromMe,
+          participant: key.participant
+        }
+      }
+    });
+    return { ok: true, key: sent?.key };
+  } catch (err) {
+    console.warn(`[whatsapp] Failed to react to message ${key.id}:`, err.message || err);
+    return { ok: false, error: err.message };
+  }
+}
+
+export async function getAccountGroupMembers(accountKey, groupJid) {
+  if (isPrimary(accountKey)) {
+    return primary.getGroupMembers(groupJid);
+  }
+  const runtime = getRuntime(accountKey);
+  const socket = await ensureConnected(runtime);
+  const targetJid = normalizeRecipientJid(groupJid);
+  if (!targetJid || !targetJid.endsWith("@g.us")) {
+    throw new Error("Invalid WhatsApp group JID");
+  }
+  const metadata = await socket.groupMetadata(targetJid);
+  const participants = (metadata?.participants || []).map((p) => {
+    const phone = normalizePhone(p.id);
+    return {
+      jid: p.id,
+      phone,
+      name: phone ? `+${phone}` : p.id,
+      admin: p.admin || null
+    };
+  });
+  return {
+    ok: true,
+    groupJid: targetJid,
+    subject: metadata?.subject || "",
+    participants
   };
 }
 

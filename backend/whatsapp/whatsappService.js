@@ -574,7 +574,10 @@ export async function sendTextToRecipient({ phoneNumber, message }) {
   const text = String(message || "").trim();
   if (!text) throw new Error("Reminder message is required.");
 
-  const sent = await socket.sendMessage(recipientJid, { text });
+  const mentionJids = Array.isArray(mentions) ? mentions : [];
+  const msgContent = mentionJids.length > 0 ? { text, mentions: mentionJids } : { text };
+
+  const sent = await socket.sendMessage(recipientJid, msgContent);
   return {
     ok: true,
     recipientJid,
@@ -587,6 +590,58 @@ export async function sendTextToRecipient({ phoneNumber, message }) {
 
 export function getSocket() {
   return socket;
+}
+
+export async function reactToMessage({ remoteJid, key, emoji = "✅" }) {
+  if (!socket || connectionState !== "connected") {
+    throw new Error("WhatsApp is not connected.");
+  }
+  const recipientJid = normalizeRecipientJid(remoteJid);
+  if (!recipientJid || !key) throw new Error("remoteJid and key are required to react.");
+
+  try {
+    const sent = await socket.sendMessage(recipientJid, {
+      react: {
+        text: emoji,
+        key: {
+          remoteJid: key.remoteJid || recipientJid,
+          id: key.id,
+          fromMe: key.fromMe,
+          participant: key.participant
+        }
+      }
+    });
+    return { ok: true, key: sent?.key };
+  } catch (err) {
+    console.warn(`[whatsapp] Failed to react to message ${key.id}:`, err.message || err);
+    return { ok: false, error: err.message };
+  }
+}
+
+export async function getGroupMembers(groupJid) {
+  if (!socket || connectionState !== "connected") {
+    throw new Error("WhatsApp is not connected.");
+  }
+  const targetJid = normalizeRecipientJid(groupJid);
+  if (!targetJid || !targetJid.endsWith("@g.us")) {
+    throw new Error("Invalid WhatsApp group JID");
+  }
+  const metadata = await socket.groupMetadata(targetJid);
+  const participants = (metadata?.participants || []).map((p) => {
+    const phone = normalizePhone(p.id);
+    return {
+      jid: p.id,
+      phone,
+      name: phone ? `+${phone}` : p.id,
+      admin: p.admin || null
+    };
+  });
+  return {
+    ok: true,
+    groupJid: targetJid,
+    subject: metadata?.subject || "",
+    participants
+  };
 }
 
 export async function deleteMessage({ phoneNumber, messageKeys, messageKey }) {
