@@ -289,37 +289,314 @@ export async function getTodayMessages(accountKey) {
   return "";
 }
 
+const recentBotReplyIds = new Set();
+
+function isAutomatedSystemMessage(text) {
+  const t = String(text || "").trim();
+  return (
+    t.includes("DOMEX Dispatch Count Reminder") ||
+    t.includes("Regional Dispatch Performance") ||
+    t.includes("DOMEX Regional Dispatch Assistant") ||
+    t.includes("DOMEX Live Dispatch Status") ||
+    t.includes("DOMEX Regional Performance Summary") ||
+    t.startsWith("📊 *Regional Dispatch") ||
+    t.startsWith("🚨 *DOMEX Dispatch") ||
+    t.startsWith("🤖 *DOMEX") ||
+    t.startsWith("📊 *DOMEX") ||
+    t.startsWith("📋 *DOMEX") ||
+    t.includes("Delete for Everyone කරන ලදී") ||
+    t.includes("Reminder පණිවිඩය සාර්ථකව") ||
+    t.includes("Performance Report පින්තූරය සාර්ථකව")
+  );
+}
+
+async function sendBotReply(accountKey, recipientJid, messageText) {
+  try {
+    const res = await sendAccountRecipientText(accountKey, {
+      phoneNumber: recipientJid,
+      message: messageText
+    });
+    if (res?.messageKey?.id) {
+      recentBotReplyIds.add(res.messageKey.id);
+      if (recentBotReplyIds.size > 200) {
+        const first = recentBotReplyIds.values().next().value;
+        recentBotReplyIds.delete(first);
+      }
+    }
+    return res;
+  } catch (err) {
+    console.error(`[regional-dispatch:bot] Failed to send reply to ${recipientJid}:`, err.message || err);
+  }
+}
+
+async function handleBotCommand(accountKey, config, incomingJid, msg, rawText) {
+  const text = String(rawText || "").trim();
+  if (!text) return;
+
+  const isFromMe = Boolean(msg.key?.fromMe);
+  const senderNumber = incomingJid.split("@")[0].replace(/\D/g, "");
+
+  // Authorization check:
+  // 1. fromMe: true (the user messaging themselves or from the connected WhatsApp client) -> always authorized!
+  // 2. configured authorized numbers (or backup number or connected number)
+  let isAuthorized = isFromMe;
+
+  if (!isAuthorized && config.botAuthorizedNumbers) {
+    const list = String(config.botAuthorizedNumbers)
+      .split(",")
+      .map(n => n.replace(/\D/g, ""))
+      .filter(Boolean);
+    if (list.includes(senderNumber)) isAuthorized = true;
+  }
+  if (!isAuthorized && config.backupWhatsappNumber) {
+    const backupNum = String(config.backupWhatsappNumber).replace(/\D/g, "");
+    if (backupNum && backupNum === senderNumber) isAuthorized = true;
+  }
+  if (!isAuthorized) {
+    try {
+      const status = await getAccountWhatsAppStatus(accountKey);
+      const connectedNum = String(status?.connectedNumber || "").replace(/\D/g, "");
+      if (connectedNum && (senderNumber === connectedNum || senderNumber.endsWith(connectedNum.slice(-9)))) {
+        isAuthorized = true;
+      }
+    } catch (e) {}
+  }
+
+  // If still not authorized, ignore direct messages from unknown contacts
+  if (!isAuthorized) return;
+
+  const lower = text.toLowerCase().trim();
+  const cleanCmd = lower.replace(/^[./!#]/, "").trim();
+
+  // Interactive Bot Menu
+  const menuText = `🤖 *DOMEX Regional Dispatch Assistant*
+
+කරුණාකර ඔබට අවශ්‍ය අංකය හෝ Command එක Reply කරන්න:
+
+1️⃣ *Live Status* (.status)
+දැනට ලැබී ඇති සහ නොලැබී ඇති ශාඛා විස්තර බැලීම
+
+2️⃣ *Send Reminder to Group* (.reminder)
+Group එකට Dispatch Count Reminder පණිවිඩය යැවීම
+
+3️⃣ *Send Report to Group* (.report)
+Group එකට 11:30 PM Performance Report පින්තූරය යැවීම
+
+4️⃣ *View Today's Summary* (.summary)
+අද දවසේ කාර්ය සාධන සාරාංශය මෙතැනින් බැලීම
+
+5️⃣ *Delete Last Message* (.delete)
+Group එකට අවසන් වරට යැවූ පණිවිඩය Delete for Everyone කිරීම
+
+💡 _ඔබට අවශ්‍ය අංකය (1, 2, 3, 4, 5) හෝ Command එක ටයිප් කර එවන්න._`;
+
+  // 1. Menu triggers
+  if (
+    cleanCmd === "menu" ||
+    cleanCmd === "help" ||
+    cleanCmd === "start" ||
+    cleanCmd === "bot" ||
+    cleanCmd === "බොට්" ||
+    cleanCmd === "hi" ||
+    cleanCmd === "hello"
+  ) {
+    await sendBotReply(accountKey, incomingJid, menuText);
+    return;
+  }
+
+  // 2. Option 1: Live Status
+  if (
+    cleanCmd === "1" ||
+    cleanCmd === "status" ||
+    cleanCmd === "live" ||
+    cleanCmd.includes("check dispatch") ||
+    cleanCmd.includes("live status")
+  ) {
+    try {
+      const live = await getRegionalLiveStatus(accountKey);
+      const today = getTodayString();
+      let statusMsg = `📊 *DOMEX Live Dispatch Status*\n`;
+      statusMsg += `📅 දිනය: *${today}*\n`;
+      statusMsg += `🎯 Total Target: *${live.totalTarget.toLocaleString()}*\n`;
+      statusMsg += `📦 Dispatched: *${live.totalDispatch.toLocaleString()}*\n`;
+      statusMsg += `📈 ප්‍රගතිය: *${live.overallPercentage}%* (${live.submittedCount}/${live.totalBranches} Branches)\n\n`;
+
+      statusMsg += `*✅ ලැබී ඇති ශාඛාවන් (${live.submittedCount}):*\n`;
+      if (live.submitted.length > 0) {
+        statusMsg += live.submitted.map(b => `• ${b.branch}: *${b.dispatch}* (${b.percentage}%)`).join("\n") + "\n\n";
+      } else {
+        statusMsg += "කිසිවක් නැත\n\n";
+      }
+
+      statusMsg += `*❌ ලැබී නොමැති ශාඛාවන් (${live.unsubmittedCount}):*\n`;
+      if (live.unsubmitted.length > 0) {
+        statusMsg += live.unsubmitted.map(b => `• ${b.branch} (Target: ${b.target})`).join("\n");
+      } else {
+        statusMsg += "🎉 සියලුම ශාඛාවන්ගේ Dispatches ලැබී ඇත!";
+      }
+
+      await sendBotReply(accountKey, incomingJid, statusMsg);
+    } catch (err) {
+      await sendBotReply(accountKey, incomingJid, `❌ Error: ${err.message || "Failed to load live status"}`);
+    }
+    return;
+  }
+
+  // 3. Option 2: Send Reminder
+  if (
+    cleanCmd === "2" ||
+    cleanCmd === "reminder" ||
+    cleanCmd.includes("send reminder")
+  ) {
+    try {
+      await sendBotReply(accountKey, incomingJid, "⏳ Group එකට Reminder එක යවමින් පවතී...");
+      const res = await manualTrigger(accountKey, "reminder");
+      if (res?.sent > 0) {
+        await sendBotReply(accountKey, incomingJid, "✅ Dispatch Count Reminder පණිවිඩය සාර්ථකව WhatsApp Group එකට යවන ලදී!");
+      } else {
+        await sendBotReply(accountKey, incomingJid, "ℹ️ සියලුම ශාඛාවන් දැනටමත් Dispatch Counts ලබා දී ඇති බැවින් Reminder එකක් යැවීම අවශ්‍ය නොවේ.");
+      }
+    } catch (err) {
+      await sendBotReply(accountKey, incomingJid, `❌ Reminder Error: ${err.message || "Failed to send reminder"}`);
+    }
+    return;
+  }
+
+  // 4. Option 3: Send Report to Group
+  if (
+    cleanCmd === "3" ||
+    cleanCmd === "report" ||
+    cleanCmd.includes("send report")
+  ) {
+    try {
+      await sendBotReply(accountKey, incomingJid, "⏳ Performance Report පින්තූරය සකස් කර Group එකට යවමින් පවතී...");
+      const res = await manualTrigger(accountKey, "report");
+      if (res?.sent > 0) {
+        await sendBotReply(accountKey, incomingJid, "✅ 11:30 PM Performance Report පින්තූරය සාර්ථකව WhatsApp Group එකට යවා පද්ධතිය තුළ සුරකින ලදී!");
+      } else {
+        await sendBotReply(accountKey, incomingJid, "❌ Report එක යැවීමට නොහැකි විය. Settings සහ WhatsApp Connection එක පරීක්ෂා කරන්න.");
+      }
+    } catch (err) {
+      await sendBotReply(accountKey, incomingJid, `❌ Report Error: ${err.message || "Failed to send report"}`);
+    }
+    return;
+  }
+
+  // 5. Option 4: View Today's Summary
+  if (
+    cleanCmd === "4" ||
+    cleanCmd === "summary" ||
+    cleanCmd.includes("view report") ||
+    cleanCmd.includes("view summary")
+  ) {
+    try {
+      const live = await getRegionalLiveStatus(accountKey);
+      const today = getTodayString();
+      let summaryMsg = `📋 *DOMEX Regional Performance Summary*\n`;
+      summaryMsg += `📅 දිනය: *${today}*\n`;
+      summaryMsg += `━━━━━━━━━━━━━━━━━━\n`;
+      summaryMsg += `🎯 Total Target: *${live.totalTarget.toLocaleString()}*\n`;
+      summaryMsg += `📦 Total Dispatched: *${live.totalDispatch.toLocaleString()}*\n`;
+      summaryMsg += `📊 Achievement: *${live.overallPercentage}%*\n`;
+      summaryMsg += `🏢 Submitted: *${live.submittedCount} / ${live.totalBranches}*\n\n`;
+
+      const top = live.submitted.length > 0 ? live.submitted[0] : null;
+      const low = live.submitted.length > 0 ? live.submitted[live.submitted.length - 1] : null;
+
+      if (top) {
+        summaryMsg += `🏆 *Top Branch:* ${top.branch} (${top.dispatch} - ${top.percentage}%)\n`;
+      }
+      if (low && low !== top) {
+        summaryMsg += `⚠️ *Lowest Branch:* ${low.branch} (${low.dispatch} - ${low.percentage}%)\n`;
+      }
+      if (live.unsubmitted.length > 0) {
+        summaryMsg += `⏳ *Pending Branches:* ${live.unsubmitted.map(u => u.branch).join(", ")}\n`;
+      }
+      summaryMsg += `━━━━━━━━━━━━━━━━━━`;
+      await sendBotReply(accountKey, incomingJid, summaryMsg);
+    } catch (err) {
+      await sendBotReply(accountKey, incomingJid, `❌ Summary Error: ${err.message || "Failed to generate summary"}`);
+    }
+    return;
+  }
+
+  // 6. Option 5: Delete Last Sent Message
+  if (
+    cleanCmd === "5" ||
+    cleanCmd === "delete" ||
+    cleanCmd.includes("delete last") ||
+    cleanCmd.includes("delete message") ||
+    cleanCmd.includes("delete for everyone")
+  ) {
+    try {
+      const messages = await getRecentSentMessages(accountKey);
+      const activeMessage = messages.find(m => m.status !== "deleted");
+      if (!activeMessage) {
+        await sendBotReply(accountKey, incomingJid, "ℹ️ Delete කිරීමට මෑතකදී Group එකට යැවූ පණිවිඩ කිසිවක් හමු නොවීය.");
+        return;
+      }
+
+      await sendBotReply(accountKey, incomingJid, `⏳ "${activeMessage.title}" පණිවිඩය Group එකෙන් Delete for Everyone කරමින් පවතී...`);
+      await deleteSentMessage(accountKey, activeMessage.id);
+      await sendBotReply(accountKey, incomingJid, `🗑️ "${activeMessage.title}" පණිවිඩය WhatsApp Group එකෙන් සාර්ථකව Delete for Everyone කරන ලදී!`);
+    } catch (err) {
+      await sendBotReply(accountKey, incomingJid, `❌ Delete Error: ${err.message || "Failed to delete message"}`);
+    }
+    return;
+  }
+
+  // If message starts with a dot or slash but didn't match above, send menu guidance
+  if (text.startsWith(".") || text.startsWith("/")) {
+    await sendBotReply(accountKey, incomingJid, `❓ අවලංගු Command එකකි. කරුණාකර *.menu* ටයිප් කර ලබාගත හැකි Options පරීක්ෂා කරන්න.\n\n${menuText}`);
+  }
+}
+
 // 1. Subscribe to messages from accountWhatsappService
 subscribeToAccountMessages(async (accountKey, { messages, type }) => {
   if (type !== "notify") return;
   const config = await getRegionalConfig(accountKey);
-  if (!config.enabled || !config.groupId) return;
-
-  // Convert current time to Asia/Colombo time
-  const colomboNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Colombo" }));
-  const hours = colomboNow.getHours();
-  // Collect dispatches sent between 12:00 PM and midnight 23:59 (Sri Lanka Time)
-  if (hours < 12) return;
+  if (!config || !config.enabled) return;
 
   const targetGroupId = String(config.groupId || "").trim();
 
   for (const msg of messages) {
-    const incomingJid = String(msg.key?.remoteJid || "").trim();
-    if (incomingJid !== targetGroupId) continue;
-    if (msg.key?.fromMe) continue;
+    if (!msg.message) continue;
+    const msgId = msg.key?.id;
+    if (msgId && recentBotReplyIds.has(msgId)) continue;
 
+    const incomingJid = String(msg.key?.remoteJid || "").trim();
     const m = msg.message;
-    const text = m?.conversation ||
+    const text = (
+      m?.conversation ||
       m?.extendedTextMessage?.text ||
       m?.imageMessage?.caption ||
       m?.videoMessage?.caption ||
       m?.documentMessage?.caption ||
-      "";
+      ""
+    ).trim();
 
-    if (text && text.trim()) {
-      console.log(`[regional-dispatch] Captured message for ${accountKey}: "${text.trim().slice(0, 70)}"`);
-      await saveMessage(accountKey, text.trim());
-      checkAllAccountsEarlyCompletion().catch(() => {});
+    if (!text) continue;
+
+    // Ignore messages sent by the bot's own automated replies
+    if (isAutomatedSystemMessage(text)) continue;
+
+    const isGroup = incomingJid.endsWith("@g.us");
+
+    // Case 1: Message in the target dispatch group
+    if (isGroup && targetGroupId && incomingJid === targetGroupId) {
+      const colomboNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Colombo" }));
+      const hours = colomboNow.getHours();
+      if (hours >= 12) {
+        console.log(`[regional-dispatch] Captured group message (fromMe: ${Boolean(msg.key?.fromMe)}) for ${accountKey}: "${text.slice(0, 70)}"`);
+        await saveMessage(accountKey, text);
+        checkAllAccountsEarlyCompletion().catch(() => {});
+      }
+      continue;
+    }
+
+    // Case 2: Interactive WhatsApp Bot (Direct Messages or Self-Chat / Note to Self)
+    if (!isGroup) {
+      await handleBotCommand(accountKey, config, incomingJid, msg, text);
     }
   }
 });
