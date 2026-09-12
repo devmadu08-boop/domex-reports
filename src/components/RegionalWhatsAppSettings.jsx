@@ -1,6 +1,6 @@
-import { Bot, LogOut, MessageCircle, RefreshCw, Save, Send } from "lucide-react";
+import { Bot, Check, Copy, KeyRound, Loader2, LogOut, MessageCircle, QrCode, RefreshCw, Save, Send } from "lucide-react";
 import { useEffect, useState } from "react";
-import { getWhatsAppQr, getWhatsAppStatus, logoutWhatsApp, reconnectWhatsApp, fetchWhatsAppGroups } from "../services/whatsappApi.js";
+import { getWhatsAppQr, getWhatsAppStatus, logoutWhatsApp, reconnectWhatsApp, fetchWhatsAppGroups, getWhatsAppPairingCode } from "../services/whatsappApi.js";
 import { getDispatchTargets } from "../services/dispatchStorage.js";
 
 export default function RegionalWhatsAppSettings({ accountKey, session }) {
@@ -9,6 +9,12 @@ export default function RegionalWhatsAppSettings({ accountKey, session }) {
   const [groups, setGroups] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [linkMethod, setLinkMethod] = useState("qr");
+  const [pairingPhone, setPairingPhone] = useState("");
+  const [pairingCode, setPairingCode] = useState("");
+  const [pairingLoading, setPairingLoading] = useState(false);
+  const [pairingCopied, setPairingCopied] = useState(false);
+  const [pairingError, setPairingError] = useState("");
   
   const [config, setConfig] = useState({
     enabled: false,
@@ -101,6 +107,37 @@ export default function RegionalWhatsAppSettings({ accountKey, session }) {
     } finally { setIsLoading(false); }
   }
 
+  async function handleRequestPairingCode(e) {
+    if (e) e.preventDefault();
+    const cleanDigits = pairingPhone.replace(/\D/g, "");
+    if (!cleanDigits || cleanDigits.length < 8) {
+      setPairingError("Please enter a valid phone number with country code (e.g. 94771234567).");
+      return;
+    }
+    setPairingLoading(true);
+    setPairingError("");
+    setPairingCode("");
+    try {
+      const res = await getWhatsAppPairingCode(cleanDigits, accountKey);
+      if (res.pairingCode) {
+        setPairingCode(res.pairingCode);
+      } else {
+        throw new Error("No pairing code returned.");
+      }
+    } catch (err) {
+      setPairingError(err.message || "Failed to generate pairing code. Please try again.");
+    } finally {
+      setPairingLoading(false);
+    }
+  }
+
+  function handleCopyPairingCode() {
+    if (!pairingCode) return;
+    navigator.clipboard.writeText(pairingCode.replace(/[\s-]/g, ""));
+    setPairingCopied(true);
+    setTimeout(() => setPairingCopied(false), 3000);
+  }
+
   async function handleSave() {
     setIsSaving(true);
     try {
@@ -190,14 +227,7 @@ export default function RegionalWhatsAppSettings({ accountKey, session }) {
           </div>
         </div>
 
-        {status === "qr" && qrCode ? (
-          <div className="flex flex-col items-center justify-center rounded-2xl border border-white/70 bg-white/40 p-8">
-            <div className="rounded-2xl border-4 border-white bg-white p-2 shadow-xl">
-              <img src={qrCode} alt="WhatsApp QR Code" className="h-64 w-64 rounded-xl" />
-            </div>
-            <p className="mt-4 text-center font-bold text-[#071537]">Scan with WhatsApp</p>
-          </div>
-        ) : status === "connected" ? (
+        {status === "connected" ? (
           <div className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
             <div className="grid h-10 w-10 place-items-center rounded-full bg-emerald-100 text-emerald-600">
               <Bot className="h-5 w-5" />
@@ -208,8 +238,117 @@ export default function RegionalWhatsAppSettings({ accountKey, session }) {
             </div>
           </div>
         ) : (
-          <div className="flex items-center justify-center rounded-2xl border border-white/70 bg-white/40 p-8">
-            <p className="font-bold text-[#071537]/60">Waiting for connection...</p>
+          <div className="rounded-2xl border border-white/70 bg-white/40 p-6">
+            <div className="mx-auto mb-6 flex max-w-sm rounded-2xl bg-slate-100 p-1">
+              <button
+                type="button"
+                onClick={() => setLinkMethod("qr")}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-black transition ${
+                  linkMethod === "qr" ? "bg-white text-blue-950 shadow" : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                <QrCode className="h-4 w-4" />
+                QR Code
+              </button>
+              <button
+                type="button"
+                onClick={() => setLinkMethod("code")}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-black transition ${
+                  linkMethod === "code" ? "bg-white text-blue-950 shadow" : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                <KeyRound className="h-4 w-4" />
+                Pairing Code
+              </button>
+            </div>
+
+            {linkMethod === "qr" ? (
+              status === "qr" && qrCode ? (
+                <div className="flex flex-col items-center justify-center">
+                  <div className="rounded-2xl border-4 border-white bg-white p-2 shadow-xl">
+                    <img src={qrCode} alt="WhatsApp QR Code" className="h-64 w-64 rounded-xl" />
+                  </div>
+                  <p className="mt-4 text-center font-bold text-[#071537]">Scan with WhatsApp Linked Devices</p>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-8">
+                  <p className="font-bold text-[#071537]/60">Waiting for connection or QR code...</p>
+                  <p className="mt-1 text-xs text-[#071537]/40">Click Reconnect above if QR doesn't appear.</p>
+                </div>
+              )
+            ) : (
+              <div className="mx-auto max-w-md">
+                <div className="space-y-3">
+                  <div>
+                    <label className="mb-1 block text-xs font-black text-[#071537]">
+                      WhatsApp Phone Number
+                    </label>
+                    <input
+                      type="tel"
+                      placeholder="e.g. 94771234567"
+                      value={pairingPhone}
+                      onChange={(e) => setPairingPhone(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-sm font-bold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      disabled={pairingLoading}
+                    />
+                    <p className="mt-1 text-[11px] font-semibold text-slate-500">
+                      Include country code without + or spaces (e.g. 94771234567)
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleRequestPairingCode}
+                    disabled={pairingLoading || !pairingPhone.trim()}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-black text-white shadow hover:bg-blue-700 disabled:opacity-50 transition"
+                  >
+                    {pairingLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Generating Code...
+                      </>
+                    ) : (
+                      <>
+                        <KeyRound className="h-4 w-4" />
+                        Get Pairing Code
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {pairingError && (
+                  <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-2.5 text-xs font-bold text-red-700">
+                    {pairingError}
+                  </div>
+                )}
+
+                {pairingCode && (
+                  <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/80 p-4 text-center">
+                    <p className="text-xs font-black text-emerald-800">Your 8-Digit Secret Code:</p>
+                    <div className="my-2.5 flex items-center justify-center gap-2">
+                      <span className="rounded-xl border border-emerald-300 bg-white px-5 py-2 font-mono text-2xl font-black tracking-widest text-emerald-950 shadow-inner">
+                        {pairingCode}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleCopyPairingCode}
+                        title="Copy Code"
+                        className="rounded-xl border border-emerald-200 bg-white p-2.5 text-emerald-700 shadow hover:bg-emerald-100 transition"
+                      >
+                        {pairingCopied ? <Check className="h-5 w-5 text-emerald-600" /> : <Copy className="h-5 w-5" />}
+                      </button>
+                    </div>
+                    <div className="mt-3 space-y-1 rounded-xl bg-white/80 p-3 text-left text-xs text-slate-600">
+                      <p className="font-black text-[#071537]">How to link on your phone:</p>
+                      <p>1. Open WhatsApp ➔ Settings (or ⋮ menu) ➔ <b>Linked Devices</b></p>
+                      <p>2. Tap <b>Link a Device</b></p>
+                      <p>3. Tap <b>&quot;Link with phone number instead&quot;</b> at the bottom</p>
+                      <p>4. Enter the code shown above</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

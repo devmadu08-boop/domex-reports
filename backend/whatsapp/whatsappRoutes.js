@@ -15,6 +15,7 @@ import {
   sendAccountRecipientReport,
   sendAccountRecipientText,
   sendAccountRescheduleApproval,
+  requestAccountPairingCode,
 } from "./accountWhatsappService.js";
 import {
   configureWhatsAppQueue,
@@ -58,6 +59,19 @@ router.get("/status", async (request, response) => {
 
 router.get("/qr", async (request, response) => {
   try { response.json(await getAccountQr(accountKey(request))); } catch (error) { sendError(response, error); }
+});
+
+router.post("/pairing-code", async (request, response) => {
+  try {
+    const phoneNumber = request.body?.phoneNumber || request.body?.phone;
+    if (!phoneNumber) {
+      return response.status(400).json({ ok: false, error: "Phone number is required." });
+    }
+    const result = await requestAccountPairingCode(accountKey(request), phoneNumber);
+    response.json(result);
+  } catch (error) {
+    sendError(response, error);
+  }
 });
 
 router.post("/reconnect", async (request, response) => {

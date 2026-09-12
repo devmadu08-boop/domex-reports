@@ -99,6 +99,14 @@ export function getWhatsAppQr() {
   return requestJson("/qr");
 }
 
+export function getWhatsAppPairingCode(phoneNumber, accountKey = null) {
+  return requestJson("/pairing-code", {
+    method: "POST",
+    headers: accountKey ? { "X-WhatsApp-Account": accountKey } : {},
+    body: JSON.stringify({ phoneNumber }),
+  });
+}
+
 export function reconnectWhatsApp() {
   return requestJson("/reconnect", { method: "POST" });
 }

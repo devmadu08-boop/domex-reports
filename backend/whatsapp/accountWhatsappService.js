@@ -471,6 +471,52 @@ export async function getAccountGroupMembers(accountKey, groupJid) {
   };
 }
 
+export async function requestAccountPairingCode(accountKey, phoneNumber) {
+  if (isPrimary(accountKey)) {
+    return primary.requestWhatsAppPairingCode(phoneNumber);
+  }
+  const clean = normalizePhone(phoneNumber);
+  if (!clean || clean.length < 9) {
+    throw new Error("A valid phone number with country code is required (e.g. 94771234567).");
+  }
+
+  const runtime = getRuntime(accountKey);
+  if (runtime.status === "connected") {
+    throw new Error("WhatsApp is already connected for this account.");
+  }
+
+  let socket = runtime.socket;
+  if (!socket) {
+    socket = await startAccountClient(accountKey);
+  }
+
+  let retries = 0;
+  while ((!socket || !socket.authState?.creds) && retries < 15) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    socket = runtime.socket;
+    retries++;
+  }
+
+  if (!socket || typeof socket.requestPairingCode !== "function") {
+    throw new Error("Failed to initialize WhatsApp account. Please try reconnecting.");
+  }
+
+  try {
+    const rawCode = await socket.requestPairingCode(clean);
+    const formattedCode = rawCode ? (rawCode.match(/.{1,4}/g)?.join("-") || rawCode) : "";
+    return {
+      ok: true,
+      accountKey: runtime.key,
+      phoneNumber: clean,
+      pairingCode: formattedCode,
+      rawCode
+    };
+  } catch (err) {
+    console.error(`[whatsapp-pairing-code:${runtime.key}]`, err.message || err);
+    throw new Error(err.message || "Failed to generate pairing code. Make sure WhatsApp is not already linked.");
+  }
+}
+
 export async function deleteAccountMessage(accountKey, { phoneNumber, messageKeys, messageKey }) {
   if (isPrimary(accountKey)) {
     return primary.deleteMessage({ phoneNumber, messageKeys, messageKey });

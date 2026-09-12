@@ -777,6 +777,45 @@ export async function getGroupMembers(groupJid) {
   };
 }
 
+export async function requestWhatsAppPairingCode(phoneNumber) {
+  const clean = normalizePhone(phoneNumber);
+  if (!clean || clean.length < 9) {
+    throw new Error("A valid phone number with country code is required (e.g. 94771234567).");
+  }
+
+  if (connectionState === "connected") {
+    throw new Error("WhatsApp is already connected.");
+  }
+
+  if (!socket) {
+    await startWhatsAppClient();
+  }
+
+  let retries = 0;
+  while ((!socket || !socket.authState?.creds) && retries < 15) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    retries++;
+  }
+
+  if (!socket || typeof socket.requestPairingCode !== "function") {
+    throw new Error("Failed to initialize WhatsApp connection. Please try reconnecting.");
+  }
+
+  try {
+    const rawCode = await socket.requestPairingCode(clean);
+    const formattedCode = rawCode ? (rawCode.match(/.{1,4}/g)?.join("-") || rawCode) : "";
+    return {
+      ok: true,
+      phoneNumber: clean,
+      pairingCode: formattedCode,
+      rawCode
+    };
+  } catch (err) {
+    console.error("[whatsapp-pairing-code]", err.message || err);
+    throw new Error(err.message || "Failed to generate pairing code. Make sure WhatsApp is not already linked.");
+  }
+}
+
 export async function deleteMessage({ phoneNumber, messageKeys, messageKey }) {
   if (!socket || connectionState !== "connected") {
     throw new Error("WhatsApp is not connected.");
