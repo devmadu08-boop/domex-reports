@@ -9,6 +9,21 @@ import {
 } from "../../services/dispatchStorage.js";
 import { getWhatsAppAccountKey } from "../../services/whatsappApi.js";
 
+function formatPhoneNumber(phone) {
+  if (!phone) return "";
+  const digits = String(phone).replace(/\D/g, "");
+  if (digits.startsWith("94") && digits.length === 11) {
+    return `+94 ${digits.slice(2, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
+  }
+  if (digits.length === 10 && digits.startsWith("0")) {
+    return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
+  }
+  if (digits.length >= 9 && digits.length <= 12) {
+    return `+${digits}`;
+  }
+  return phone;
+}
+
 export default function BranchTargetModal({ targets, onTargetsChange, onClose, session }) {
   const [newBranch, setNewBranch] = useState("");
   const [newTarget, setNewTarget] = useState("");
@@ -48,6 +63,34 @@ export default function BranchTargetModal({ targets, onTargetsChange, onClose, s
     loadMembers();
   }, [session]);
 
+  // Auto-migrate any previously saved targets where assigned_phone is an LID (>12 digits)
+  useEffect(() => {
+    if (members.length > 0 && targets.length > 0) {
+      let changed = false;
+      for (const t of targets) {
+        const pStr = String(t.assigned_phone || "").replace(/\D/g, "");
+        if (pStr.length > 13) {
+          const match = members.find(m => 
+            (m.lidJid && m.lidJid.includes(pStr)) || 
+            (m.jid && m.jid.includes(pStr))
+          );
+          if (match && match.phone && match.phone !== t.assigned_phone) {
+            updateDispatchTarget(t.id, {
+              assigned_phone: match.phone,
+              assigned_name: t.assigned_name === t.assigned_phone ? (match.name || match.formattedPhone) : t.assigned_name,
+              assigned_jid: match.pnJid || `${match.phone}@s.whatsapp.net`,
+              assigned_lid: match.lidJid || ""
+            });
+            changed = true;
+          }
+        }
+      }
+      if (changed) {
+        onTargetsChange();
+      }
+    }
+  }, [members, targets]);
+
   function handleAdd(e) {
     e.preventDefault();
     setError("");
@@ -67,10 +110,12 @@ export default function BranchTargetModal({ targets, onTargetsChange, onClose, s
         const current = getDispatchTargets();
         const created = current.find(t => t.branch_name.toLowerCase() === newBranch.trim().toLowerCase());
         if (created) {
+          const found = members.find(m => m.phone === newAssignedPhone);
           updateDispatchTarget(created.id, {
-            assigned_name: newAssignedName.trim(),
+            assigned_name: newAssignedName.trim() || (found?.name !== found?.phone ? found?.name : formatPhoneNumber(newAssignedPhone)),
             assigned_phone: newAssignedPhone.trim(),
-            assigned_jid: `${newAssignedPhone.replace(/\D/g, "")}@s.whatsapp.net`
+            assigned_jid: found?.pnJid || `${newAssignedPhone.replace(/\D/g, "")}@s.whatsapp.net`,
+            assigned_lid: found?.lidJid || ""
           });
         }
       }
@@ -101,12 +146,14 @@ export default function BranchTargetModal({ targets, onTargetsChange, onClose, s
     }
 
     try {
+      const found = members.find(m => m.phone === editAssignedPhone);
       updateDispatchTarget(id, {
         branch_name: editBranch.trim(),
         target: count,
         assigned_name: editAssignedName.trim(),
         assigned_phone: editAssignedPhone.trim(),
-        assigned_jid: editAssignedPhone ? `${editAssignedPhone.replace(/\D/g, "")}@s.whatsapp.net` : ""
+        assigned_jid: editAssignedPhone ? (found?.pnJid || `${editAssignedPhone.replace(/\D/g, "")}@s.whatsapp.net`) : "",
+        assigned_lid: found?.lidJid || ""
       });
       setEditingId(null);
       onTargetsChange();
@@ -188,17 +235,24 @@ export default function BranchTargetModal({ targets, onTargetsChange, onClose, s
                 setNewAssignedPhone(phone);
                 const found = members.find(m => m.phone === phone);
                 if (found && !newAssignedName) {
-                  setNewAssignedName(found.name && found.name !== found.phone ? found.name : found.phone);
+                  const defaultName = found.name && found.name !== found.phone && found.name !== found.formattedPhone
+                    ? found.name
+                    : found.formattedPhone || found.phone;
+                  setNewAssignedName(defaultName);
                 }
               }}
               className="h-10 rounded-xl border border-white bg-white px-2.5 text-xs font-bold text-[#071537] outline-none focus:ring-2 focus:ring-violet-400 truncate"
             >
               <option value="">-- Select Member --</option>
-              {members.map((m) => (
-                <option key={m.jid} value={m.phone}>
-                  {m.phone} {m.name && m.name !== m.phone ? `(${m.name})` : ""} {m.admin ? "⭐" : ""}
-                </option>
-              ))}
+              {members.map((m) => {
+                const phoneText = m.formattedPhone || (m.phone ? `+${m.phone}` : m.jid);
+                const hasCustomName = m.name && m.name !== m.phone && m.name !== m.formattedPhone && m.name !== `+${m.phone}`;
+                return (
+                  <option key={m.jid || m.phone} value={m.phone}>
+                    {phoneText} {hasCustomName ? `(${m.name})` : ""} {m.admin ? "⭐" : ""}
+                  </option>
+                );
+              })}
             </select>
 
             <button
@@ -283,17 +337,24 @@ export default function BranchTargetModal({ targets, onTargetsChange, onClose, s
                               setEditAssignedPhone(phone);
                               const found = members.find(m => m.phone === phone);
                               if (found && !editAssignedName) {
-                                setEditAssignedName(found.name && found.name !== found.phone ? found.name : found.phone);
+                                const defaultName = found.name && found.name !== found.phone && found.name !== found.formattedPhone
+                                  ? found.name
+                                  : found.formattedPhone || found.phone;
+                                setEditAssignedName(defaultName);
                               }
                             }}
                             className="h-8 w-full max-w-[180px] rounded-lg border border-violet-300 bg-white px-2 text-xs font-bold outline-none"
                           >
                             <option value="">-- No Member --</option>
-                            {members.map((m) => (
-                              <option key={m.jid} value={m.phone}>
-                                {m.phone} {m.name && m.name !== m.phone ? `(${m.name})` : ""}
-                              </option>
-                            ))}
+                            {members.map((m) => {
+                              const phoneText = m.formattedPhone || (m.phone ? `+${m.phone}` : m.jid);
+                              const hasCustomName = m.name && m.name !== m.phone && m.name !== m.formattedPhone && m.name !== `+${m.phone}`;
+                              return (
+                                <option key={m.jid || m.phone} value={m.phone}>
+                                  {phoneText} {hasCustomName ? `(${m.name})` : ""} {m.admin ? "⭐" : ""}
+                                </option>
+                              );
+                            })}
                           </select>
                           <input
                             type="text"
@@ -306,10 +367,14 @@ export default function BranchTargetModal({ targets, onTargetsChange, onClose, s
                       ) : (
                         <div>
                           {t.assigned_phone || t.assigned_jid ? (
-                            <span className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2 py-0.5 text-xs font-black text-blue-700 border border-blue-200">
-                              <UserCheck className="h-3 w-3 text-blue-600" />
-                              <span>{t.assigned_name || t.assigned_phone}</span>
-                              <span className="text-[10px] text-blue-500 font-normal">(@{t.assigned_phone})</span>
+                            <span className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-2 py-1 text-xs font-black text-blue-700 border border-blue-200">
+                              <UserCheck className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                              <span>{t.assigned_name && t.assigned_name !== t.assigned_phone ? t.assigned_name : formatPhoneNumber(t.assigned_phone)}</span>
+                              {t.assigned_name && t.assigned_name !== t.assigned_phone && (
+                                <span className="text-[10px] text-blue-500 font-semibold">
+                                  ({formatPhoneNumber(t.assigned_phone)})
+                                </span>
+                              )}
                             </span>
                           ) : (
                             <span className="text-[11px] font-normal text-slate-400 italic">

@@ -25,6 +25,35 @@ let backupSchedulerStarted = false;
 let rescheduleApprovalSending = false;
 let rescheduleApprovalRequestRunning = false;
 const primaryMessageListeners = new Set();
+export const contactNameCache = new Map();
+
+function trackContactNamesFromMessages(messages) {
+  for (const msg of messages || []) {
+    if (msg?.pushName) {
+      const pJid = msg.key?.participant || msg.participant || msg.key?.remoteJid;
+      if (pJid) {
+        const clean = String(pJid).replace(/@.*$/, "").replace(/:\d+$/, "").replace(/\D/g, "");
+        if (clean) contactNameCache.set(clean, msg.pushName);
+        const user = String(pJid).split("@")[0].split(":")[0];
+        if (user) contactNameCache.set(user, msg.pushName);
+      }
+    }
+  }
+}
+
+function trackContactNamesFromContacts(contacts) {
+  for (const c of contacts || []) {
+    const name = c.name || c.notify || c.verifiedName;
+    if (name) {
+      const user = String(c.id || "").split("@")[0].split(":")[0];
+      if (user) contactNameCache.set(user, name);
+      if (c.phoneNumber) {
+        const clean = String(c.phoneNumber).replace(/@.*$/, "").replace(/\D/g, "");
+        if (clean) contactNameCache.set(clean, name);
+      }
+    }
+  }
+}
 
 async function ensureDataDir() {
   await fs.mkdir(dataDir, { recursive: true });
@@ -175,6 +204,7 @@ export async function startWhatsAppClient(force = false) {
 
   activeSocket.ev.on("creds.update", saveCreds);
   activeSocket.ev.on("messages.upsert", ({ messages, type }) => {
+    trackContactNamesFromMessages(messages);
     for (const listener of primaryMessageListeners) {
       try {
         listener({ messages: messages || [], type });
@@ -184,6 +214,8 @@ export async function startWhatsAppClient(force = false) {
     }
   });
   activeSocket.ev.on("messaging-history.set", ({ messages, chats, contacts }) => {
+    trackContactNamesFromMessages(messages);
+    trackContactNamesFromContacts(contacts);
     for (const listener of primaryMessageListeners) {
       try {
         listener({ messages: messages || [], chats, contacts, type: "history" });
@@ -202,6 +234,7 @@ export async function startWhatsAppClient(force = false) {
     }
   });
   activeSocket.ev.on("contacts.upsert", (contacts) => {
+    trackContactNamesFromContacts(contacts);
     for (const listener of primaryMessageListeners) {
       try {
         listener({ messages: [], contacts, type: "contacts" });
@@ -209,6 +242,9 @@ export async function startWhatsAppClient(force = false) {
         console.error("[whatsapp-contact-listener]", error.message || error);
       }
     }
+  });
+  activeSocket.ev.on("contacts.update", (contacts) => {
+    trackContactNamesFromContacts(contacts);
   });
   activeSocket.ev.on("messages.reaction", (reactions) => {
     for (const listener of primaryMessageListeners) {
@@ -618,6 +654,102 @@ export async function reactToMessage({ remoteJid, key, emoji = "✅" }) {
   }
 }
 
+export async function resolveParticipantPhoneAndName(socketInstance, customAuthDir, p) {
+  let phone = "";
+  const rawId = String(p?.id || "");
+  const idUser = rawId.split("@")[0].split(":")[0];
+  const isLid = rawId.endsWith("@lid") || (p?.lid && String(p.lid).endsWith("@lid"));
+
+  // 1. Direct phoneNumber property
+  if (p?.phoneNumber) {
+    const clean = normalizePhone(p.phoneNumber);
+    if (clean && clean.length >= 9 && clean.length <= 15) {
+      phone = clean;
+    }
+  }
+
+  // 2. Standard WhatsApp phone number JID (@s.whatsapp.net or @c.us)
+  if (!phone && (rawId.endsWith("@s.whatsapp.net") || rawId.endsWith("@c.us"))) {
+    const clean = normalizePhone(rawId);
+    if (clean && clean.length >= 9 && clean.length <= 15) {
+      phone = clean;
+    }
+  }
+
+  // 3. Resolve LID mappings
+  if (!phone && (isLid || idUser.length > 12)) {
+    // 3a. Socket signal repository
+    try {
+      if (socketInstance?.signalRepository?.lidMapping?.getPNForLID) {
+        const res = await socketInstance.signalRepository.lidMapping.getPNForLID(rawId);
+        if (res) {
+          const pnStr = typeof res === "string" ? res : (res.pn || res.user || "");
+          const clean = normalizePhone(pnStr);
+          if (clean && clean.length >= 9 && clean.length <= 15) {
+            phone = clean;
+          }
+        }
+      }
+    } catch (e) {}
+
+    // 3b. Reverse mapping file in auth directories
+    if (!phone && idUser) {
+      const candidateDirs = [
+        customAuthDir,
+        authDir,
+        path.resolve("backend", "data", "whatsapp-auth"),
+        path.resolve("backend", "data", "whatsapp-meter-auth")
+      ].filter(Boolean);
+
+      for (const dir of candidateDirs) {
+        try {
+          const revPath = path.join(dir, `lid-mapping-${idUser}_reverse.json`);
+          const raw = await fs.readFile(revPath, "utf8");
+          const parsed = JSON.parse(raw);
+          const clean = normalizePhone(parsed);
+          if (clean && clean.length >= 9 && clean.length <= 15) {
+            phone = clean;
+            break;
+          }
+        } catch (e) {}
+      }
+    }
+  }
+
+  // 4. Fallback if idUser is numeric and not a LID
+  if (!phone && idUser && idUser.length >= 9 && idUser.length <= 12 && !isLid) {
+    phone = normalizePhone(idUser);
+  }
+
+  // Format phone number
+  let formattedPhone = phone;
+  if (phone) {
+    if (phone.startsWith("94") && phone.length === 11) {
+      formattedPhone = `+94 ${phone.slice(2, 4)} ${phone.slice(4, 7)} ${phone.slice(7)}`;
+    } else if (phone.length === 10 && phone.startsWith("0")) {
+      formattedPhone = `${phone.slice(0, 3)} ${phone.slice(3, 6)} ${phone.slice(6)}`;
+    } else {
+      formattedPhone = `+${phone}`;
+    }
+  }
+
+  const cachedName = (phone && contactNameCache.get(phone)) || (idUser && contactNameCache.get(idUser)) || "";
+  const givenName = cachedName || p?.name || p?.notify || p?.displayName || p?.username || "";
+  const name = givenName && givenName !== idUser && givenName !== phone
+    ? givenName
+    : (formattedPhone || phone || idUser);
+
+  return {
+    jid: rawId,
+    phone: phone || idUser,
+    formattedPhone: formattedPhone || (phone ? `+${phone}` : idUser),
+    name,
+    admin: p?.admin || null,
+    lidJid: isLid ? rawId : (p?.lid || ""),
+    pnJid: phone ? `${phone}@s.whatsapp.net` : ""
+  };
+}
+
 export async function getGroupMembers(groupJid) {
   if (!socket || connectionState !== "connected") {
     throw new Error("WhatsApp is not connected.");
@@ -627,15 +759,16 @@ export async function getGroupMembers(groupJid) {
     throw new Error("Invalid WhatsApp group JID");
   }
   const metadata = await socket.groupMetadata(targetJid);
-  const participants = (metadata?.participants || []).map((p) => {
-    const phone = normalizePhone(p.id);
-    return {
-      jid: p.id,
-      phone,
-      name: phone ? `+${phone}` : p.id,
-      admin: p.admin || null
-    };
+  const participants = await Promise.all(
+    (metadata?.participants || []).map((p) => resolveParticipantPhoneAndName(socket, authDir, p))
+  );
+
+  participants.sort((a, b) => {
+    if (a.admin && !b.admin) return -1;
+    if (!a.admin && b.admin) return 1;
+    return (a.formattedPhone || a.phone).localeCompare(b.formattedPhone || b.phone);
   });
+
   return {
     ok: true,
     groupJid: targetJid,

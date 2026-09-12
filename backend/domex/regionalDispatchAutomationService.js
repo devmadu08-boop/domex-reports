@@ -1170,20 +1170,55 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null,
         continue;
       }
 
+      // Helper to resolve LID to real phone number from reverse mapping files
+      async function resolveLidPhone(lidUser) {
+        const clean = String(lidUser || "").replace(/@.*$/, "").replace(/:\d+$/, "").replace(/\D/g, "");
+        if (!clean) return null;
+        const candidateDirs = [
+          path.resolve("backend", "data", "whatsapp-auth"),
+          path.resolve("backend", "data", "whatsapp-meter-auth"),
+          path.resolve("backend", "data", "whatsapp-accounts", activeKey)
+        ];
+        for (const dir of candidateDirs) {
+          try {
+            const revFile = path.join(dir, `lid-mapping-${clean}_reverse.json`);
+            const raw = await fs.readFile(revFile, "utf8");
+            const phone = JSON.parse(raw);
+            if (phone && String(phone).length >= 9) return String(phone).replace(/\D/g, "");
+          } catch (e) {}
+        }
+        return null;
+      }
+
       // Collect unsubmitted target items with assigned members
       const unsubmittedTargets = targets.filter(t => submittedMap[t.branch || t.branch_name] == null);
       const mentionJids = [];
-      const unsubmittedLines = unsubmittedTargets.map(t => {
+      const unsubmittedLines = await Promise.all(unsubmittedTargets.map(async (t) => {
         const bName = t.branch || t.branch_name;
         const tgt = targetMap[bName] || 0;
-        const phone = t.assigned_phone || t.assignedPhone || (t.assigned_jid ? t.assigned_jid.split("@")[0] : null);
-        const jid = t.assigned_jid || t.assignedJid || (phone ? `${phone.replace(/\D/g, '')}@s.whatsapp.net` : null);
+        let phone = t.assigned_phone || t.assignedPhone || (t.assigned_jid ? t.assigned_jid.split("@")[0] : null);
+        let jid = t.assigned_jid || t.assignedJid;
+        let lid = t.assigned_lid || t.assignedLid;
+
+        if (phone && phone.length > 13) {
+          const resolved = await resolveLidPhone(phone);
+          if (resolved) {
+            if (!lid) lid = `${phone}@lid`;
+            phone = resolved;
+            jid = `${resolved}@s.whatsapp.net`;
+          }
+        }
+
         if (jid && !mentionJids.includes(jid)) {
           mentionJids.push(jid);
         }
+        if (lid && !mentionJids.includes(lid)) {
+          mentionJids.push(lid);
+        }
+
         const tagStr = phone ? ` @${phone.replace(/\D/g, '')}` : (t.assigned_name ? ` (${t.assigned_name})` : "");
         return `❌ ${bName} (Target: ${tgt})${tagStr}`;
-      });
+      }));
 
       const reminderMsg = `🚨 *DOMEX Dispatch Count Reminder*\n\nකරුණාකර පහත ශාඛාවන් රාත්‍රී 11.30 ට පෙර ඔබගේ Dispatch Counts ලබා දෙන්න:\n\n*ලබා දී නොමැති ශාඛාවන්:*\n${unsubmittedLines.join("\n")}\n\n*ලබා දී ඇති ශාඛාවන්:*\n${submitted.length > 0 ? submitted.map(b => `✅ ${b}: ${submittedMap[b]}`).join("\n") : "කිසිවක් නැත"}`;
       
@@ -1200,7 +1235,11 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null,
       for (const t of unsubmittedTargets) {
         const bName = t.branch || t.branch_name;
         const tgt = targetMap[bName] || 0;
-        const targetPhone = t.assigned_phone || t.assignedPhone || t.assigned_jid || t.assignedJid;
+        let targetPhone = t.assigned_phone || t.assignedPhone || t.assigned_jid || t.assignedJid;
+        if (targetPhone && String(targetPhone).replace(/\D/g, "").length > 13) {
+          const resolved = await resolveLidPhone(targetPhone);
+          if (resolved) targetPhone = resolved;
+        }
         if (targetPhone) {
           const personalMsg = `🚨 *DOMEX Dispatch Reminder*\n\nසුභ සන්ධ්‍යාවක්! කරුණාකර ඔබගේ *${bName}* ශාඛාවේ අද දින Dispatch Count එක රාත්‍රී 11.30 ට පෙර ලබා දෙන්න.\n\n🎯 දෛනික Target එක: *${tgt}*\n\nස්තූතියි!`;
           try {

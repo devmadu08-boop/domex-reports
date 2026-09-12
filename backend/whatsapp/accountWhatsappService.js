@@ -143,6 +143,17 @@ async function startAccountClient(accountKey, force = false) {
     runtime.socket = socket;
     socket.ev.on("creds.update", saveCreds);
     socket.ev.on("messages.upsert", ({ messages, type }) => {
+      for (const msg of messages || []) {
+        if (msg?.pushName) {
+          const pJid = msg.key?.participant || msg.participant || msg.key?.remoteJid;
+          if (pJid) {
+            const clean = String(pJid).replace(/@.*$/, "").replace(/:\d+$/, "").replace(/\D/g, "");
+            if (clean) primary.contactNameCache.set(clean, msg.pushName);
+            const user = String(pJid).split("@")[0].split(":")[0];
+            if (user) primary.contactNameCache.set(user, msg.pushName);
+          }
+        }
+      }
       for (const listener of accountMessageListeners) {
         try {
           listener(runtime.key, { messages: messages || [], type });
@@ -442,15 +453,16 @@ export async function getAccountGroupMembers(accountKey, groupJid) {
     throw new Error("Invalid WhatsApp group JID");
   }
   const metadata = await socket.groupMetadata(targetJid);
-  const participants = (metadata?.participants || []).map((p) => {
-    const phone = normalizePhone(p.id);
-    return {
-      jid: p.id,
-      phone,
-      name: phone ? `+${phone}` : p.id,
-      admin: p.admin || null
-    };
+  const participants = await Promise.all(
+    (metadata?.participants || []).map((p) => primary.resolveParticipantPhoneAndName(socket, runtime.authDir, p))
+  );
+
+  participants.sort((a, b) => {
+    if (a.admin && !b.admin) return -1;
+    if (!a.admin && b.admin) return 1;
+    return (a.formattedPhone || a.phone).localeCompare(b.formattedPhone || b.phone);
   });
+
   return {
     ok: true,
     groupJid: targetJid,
