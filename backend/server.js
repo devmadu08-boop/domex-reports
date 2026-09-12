@@ -1,3 +1,5 @@
+import path from "node:path";
+import fs from "node:fs";
 import cors from "cors";
 import express from "express";
 import domexAutomationRoutes from "./domex/domexAutomationRoutes.js";
@@ -73,6 +75,17 @@ app.use("/api/whatsapp", whatsappRoutes);
 app.use("/api/meter-monitor", meterMonitorRoutes);
 app.use("/api/domex", domexAutomationRoutes);
 app.use("/api/regional-dispatch", regionalDispatchRoutes);
+
+const distPath = path.resolve("dist");
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+  app.use((req, res, next) => {
+    if (req.method === "GET" && !req.path.startsWith("/api")) {
+      return res.sendFile(path.join(distPath, "index.html"));
+    }
+    next();
+  });
+}
 
 app.listen(port, host, () => {
   console.log(`Daily Report backend running at http://${host}:${port}`);
