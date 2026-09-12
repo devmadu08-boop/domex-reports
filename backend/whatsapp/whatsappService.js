@@ -1,4 +1,5 @@
 import makeWASocket, {
+  Browsers,
   DisconnectReason,
   fetchLatestBaileysVersion,
   useMultiFileAuthState,
@@ -123,6 +124,17 @@ function normalizePhone(jid) {
   return jid ? jid.split("@")[0] : "";
 }
 
+export function cleanPhoneNumberForPairing(phoneNumber) {
+  let digits = String(phoneNumber || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length === 10 && digits.startsWith("0")) {
+    digits = `94${digits.slice(1)}`;
+  } else if (digits.length === 9 && (digits.startsWith("7") || digits.startsWith("1"))) {
+    digits = `94${digits}`;
+  }
+  return digits;
+}
+
 function normalizeGroupJids(groupJids) {
   return [...new Set((Array.isArray(groupJids) ? groupJids : [groupJids]).map((jid) => String(jid || "").trim()).filter(Boolean))];
 }
@@ -197,7 +209,7 @@ export async function startWhatsAppClient(force = false) {
     version,
     printQRInTerminal: false,
     logger: Pino({ level: "silent" }),
-    browser: ["Daily Report System", "Chrome", "1.0.0"],
+    browser: Browsers.ubuntu("Chrome"),
     syncFullHistory: true,
   });
   socket = activeSocket;
@@ -329,9 +341,10 @@ export async function getQrCode() {
   };
 }
 
-export async function reconnectWhatsApp() {
+export async function reconnectWhatsApp(options = {}) {
   const previousSocket = socket;
   socket = null;
+  reconnecting = false;
   if (previousSocket) {
     try {
       previousSocket.end(undefined);
@@ -339,7 +352,23 @@ export async function reconnectWhatsApp() {
       // Existing socket may already be closed.
     }
   }
+
+  // If options.forceClean or if not currently connected, clean any unregistered/broken auth files
+  if (options.forceClean || connectionState !== "connected") {
+    try {
+      const { state } = await useMultiFileAuthState(authDir);
+      if (!state.creds?.registered || options.forceClean) {
+        await fs.rm(authDir, { recursive: true, force: true });
+      }
+    } catch {
+      await fs.rm(authDir, { recursive: true, force: true });
+    }
+  }
+
+  currentQr = "";
+  currentQrDataUrl = "";
   connectionState = "disconnected";
+  connectedNumber = "";
   await startWhatsAppClient(true);
   return getWhatsAppStatus();
 }
@@ -778,28 +807,47 @@ export async function getGroupMembers(groupJid) {
 }
 
 export async function requestWhatsAppPairingCode(phoneNumber) {
-  const clean = normalizePhone(phoneNumber);
+  const clean = cleanPhoneNumberForPairing(phoneNumber);
   if (!clean || clean.length < 9) {
-    throw new Error("A valid phone number with country code is required (e.g. 94771234567).");
+    throw new Error("A valid phone number is required (e.g. 94771234567 or 0771234567).");
   }
 
   if (connectionState === "connected") {
     throw new Error("WhatsApp is already connected.");
   }
 
-  if (!socket) {
-    await startWhatsAppClient();
+  // Purge any unregistered/corrupted auth state so Baileys generates fresh pairing keys
+  try {
+    const { state } = await useMultiFileAuthState(authDir);
+    if (!state.creds?.registered) {
+      if (socket) {
+        try { socket.end(undefined); } catch {}
+        socket = null;
+      }
+      await fs.rm(authDir, { recursive: true, force: true });
+    }
+  } catch {
+    await fs.rm(authDir, { recursive: true, force: true });
   }
 
+  currentQr = "";
+  currentQrDataUrl = "";
+  connectionState = "disconnected";
+  connectedNumber = "";
+  await startWhatsAppClient(true);
+
   let retries = 0;
-  while ((!socket || !socket.authState?.creds) && retries < 15) {
-    await new Promise((resolve) => setTimeout(resolve, 300));
+  while ((!socket || !socket.authState?.creds) && retries < 25) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
     retries++;
   }
 
   if (!socket || typeof socket.requestPairingCode !== "function") {
     throw new Error("Failed to initialize WhatsApp connection. Please try reconnecting.");
   }
+
+  // Small delay to allow WebSocket connection handshake
+  await new Promise((resolve) => setTimeout(resolve, 600));
 
   try {
     const rawCode = await socket.requestPairingCode(clean);

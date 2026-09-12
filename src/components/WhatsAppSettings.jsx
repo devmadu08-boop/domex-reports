@@ -68,21 +68,24 @@ export default function WhatsAppSettings({ settings, onSaveSettings, accountLabe
   const [pairingLoading, setPairingLoading] = useState(false);
   const [pairingCopied, setPairingCopied] = useState(false);
   const [pairingError, setPairingError] = useState("");
+  const [pairedPhone, setPairedPhone] = useState("");
 
   async function handleRequestPairingCode(e) {
     if (e) e.preventDefault();
-    const cleanDigits = pairingPhone.replace(/\D/g, "");
-    if (!cleanDigits || cleanDigits.length < 8) {
-      setPairingError("Please enter a valid phone number with country code (e.g. 94771234567).");
+    const raw = pairingPhone.trim();
+    if (!raw || raw.replace(/\D/g, "").length < 8) {
+      setPairingError("Please enter your WhatsApp phone number (e.g. 0771234567 or 94771234567).");
       return;
     }
     setPairingLoading(true);
     setPairingError("");
     setPairingCode("");
+    setPairedPhone("");
     try {
-      const res = await getWhatsAppPairingCode(cleanDigits);
+      const res = await getWhatsAppPairingCode(raw);
       if (res.pairingCode) {
         setPairingCode(res.pairingCode);
+        setPairedPhone(res.phoneNumber || raw);
       } else {
         throw new Error("No pairing code returned.");
       }
@@ -155,6 +158,20 @@ export default function WhatsAppSettings({ settings, onSaveSettings, accountLabe
       await action();
       setMessage(successText);
       await refreshStatus();
+      if (action === reconnectWhatsApp) {
+        for (let i = 0; i < 4; i++) {
+          await new Promise((r) => setTimeout(r, 1200));
+          const next = await getWhatsAppStatus();
+          setStatus(next);
+          if (!next.connected) {
+            const qr = await getWhatsAppQr();
+            if (qr?.qrDataUrl) {
+              setQrDataUrl(qr.qrDataUrl);
+              break;
+            }
+          }
+        }
+      }
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -436,14 +453,14 @@ export default function WhatsAppSettings({ settings, onSaveSettings, accountLabe
                       </label>
                       <input
                         type="tel"
-                        placeholder="e.g. 94771234567"
+                        placeholder="0771234567 or 94771234567"
                         value={pairingPhone}
                         onChange={(e) => setPairingPhone(e.target.value)}
                         className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-sm font-bold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                         disabled={pairingLoading}
                       />
                       <p className="mt-1 text-[11px] font-semibold text-slate-500">
-                        Enter country code + number without + (e.g. 9477xxxxxxx)
+                        Enter 07xxxxxxxx or 947xxxxxxxx (e.g. 0771234567)
                       </p>
                     </div>
 
@@ -476,6 +493,9 @@ export default function WhatsAppSettings({ settings, onSaveSettings, accountLabe
                   {pairingCode && (
                     <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50/80 p-3 text-center">
                       <p className="text-xs font-black text-emerald-800">Your 8-Digit Secret Code:</p>
+                      {pairedPhone && (
+                        <p className="text-[11px] font-bold text-emerald-700">for +{pairedPhone}</p>
+                      )}
                       <div className="my-2 flex items-center justify-center gap-2">
                         <span className="rounded-xl border border-emerald-300 bg-white px-4 py-1.5 font-mono text-xl font-black tracking-widest text-emerald-950 shadow-inner">
                           {pairingCode}

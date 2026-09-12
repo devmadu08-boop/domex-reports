@@ -1,4 +1,5 @@
 import makeWASocket, {
+  Browsers,
   DisconnectReason,
   fetchLatestBaileysVersion,
   useMultiFileAuthState,
@@ -137,7 +138,7 @@ async function startAccountClient(accountKey, force = false) {
       version,
       printQRInTerminal: false,
       logger: Pino({ level: "silent" }),
-      browser: [`Daily Report - ${runtime.key}`, "Chrome", "1.0.0"],
+      browser: Browsers.ubuntu("Chrome"),
       syncFullHistory: false,
     });
     runtime.socket = socket;
@@ -275,8 +276,8 @@ export async function getAccountQr(accountKey) {
   return { qr: runtime.qr, qrDataUrl: runtime.qrDataUrl };
 }
 
-export async function reconnectAccountWhatsApp(accountKey) {
-  if (isPrimary(accountKey)) return primary.reconnectWhatsApp();
+export async function reconnectAccountWhatsApp(accountKey, options = {}) {
+  if (isPrimary(accountKey)) return primary.reconnectWhatsApp(options);
   const runtime = getRuntime(accountKey);
   if (runtime.reconnectTimer) {
     clearTimeout(runtime.reconnectTimer);
@@ -284,8 +285,24 @@ export async function reconnectAccountWhatsApp(accountKey) {
   }
   const previousSocket = runtime.socket;
   runtime.socket = null;
+  runtime.reconnecting = false;
   try { previousSocket?.end(undefined); } catch { /* already closed */ }
+
+  if (options.forceClean || runtime.status !== "connected") {
+    try {
+      const { state } = await useMultiFileAuthState(runtime.authDir);
+      if (!state.creds?.registered || options.forceClean) {
+        await fs.rm(runtime.authDir, { recursive: true, force: true });
+      }
+    } catch {
+      await fs.rm(runtime.authDir, { recursive: true, force: true });
+    }
+  }
+
+  runtime.qr = "";
+  runtime.qrDataUrl = "";
   runtime.status = "disconnected";
+  runtime.connectedNumber = "";
   await startAccountClient(runtime.key, true);
   return getAccountWhatsAppStatus(runtime.key);
 }
@@ -475,9 +492,9 @@ export async function requestAccountPairingCode(accountKey, phoneNumber) {
   if (isPrimary(accountKey)) {
     return primary.requestWhatsAppPairingCode(phoneNumber);
   }
-  const clean = normalizePhone(phoneNumber);
+  const clean = primary.cleanPhoneNumberForPairing(phoneNumber);
   if (!clean || clean.length < 9) {
-    throw new Error("A valid phone number with country code is required (e.g. 94771234567).");
+    throw new Error("A valid phone number is required (e.g. 94771234567 or 0771234567).");
   }
 
   const runtime = getRuntime(accountKey);
@@ -485,14 +502,29 @@ export async function requestAccountPairingCode(accountKey, phoneNumber) {
     throw new Error("WhatsApp is already connected for this account.");
   }
 
-  let socket = runtime.socket;
-  if (!socket) {
-    socket = await startAccountClient(accountKey);
+  // Purge any unregistered/corrupted auth state so Baileys generates fresh pairing keys
+  try {
+    const { state } = await useMultiFileAuthState(runtime.authDir);
+    if (!state.creds?.registered) {
+      if (runtime.socket) {
+        try { runtime.socket.end(undefined); } catch {}
+        runtime.socket = null;
+      }
+      await fs.rm(runtime.authDir, { recursive: true, force: true });
+    }
+  } catch {
+    await fs.rm(runtime.authDir, { recursive: true, force: true });
   }
 
+  runtime.qr = "";
+  runtime.qrDataUrl = "";
+  runtime.status = "disconnected";
+  runtime.connectedNumber = "";
+  let socket = await startAccountClient(accountKey, true);
+
   let retries = 0;
-  while ((!socket || !socket.authState?.creds) && retries < 15) {
-    await new Promise((resolve) => setTimeout(resolve, 300));
+  while ((!socket || !socket.authState?.creds) && retries < 25) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
     socket = runtime.socket;
     retries++;
   }
@@ -500,6 +532,9 @@ export async function requestAccountPairingCode(accountKey, phoneNumber) {
   if (!socket || typeof socket.requestPairingCode !== "function") {
     throw new Error("Failed to initialize WhatsApp account. Please try reconnecting.");
   }
+
+  // Small delay to allow WebSocket connection handshake
+  await new Promise((resolve) => setTimeout(resolve, 600));
 
   try {
     const rawCode = await socket.requestPairingCode(clean);
