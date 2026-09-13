@@ -290,8 +290,15 @@ export async function reconnectAccountWhatsApp(accountKey, options = {}) {
 
   if (options.forceClean || runtime.status !== "connected") {
     try {
-      const { state } = await useMultiFileAuthState(runtime.authDir);
-      if (!state.creds?.registered || options.forceClean) {
+      const credsFile = path.join(runtime.authDir, "creds.json");
+      let registered = false;
+      try {
+        const raw = JSON.parse(await fs.readFile(credsFile, "utf8"));
+        registered = Boolean(raw?.registered);
+      } catch {
+        registered = false;
+      }
+      if (!registered || options.forceClean) {
         await fs.rm(runtime.authDir, { recursive: true, force: true });
       }
     } catch {

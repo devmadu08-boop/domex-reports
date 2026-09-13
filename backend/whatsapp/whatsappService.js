@@ -356,8 +356,15 @@ export async function reconnectWhatsApp(options = {}) {
   // If options.forceClean or if not currently connected, clean any unregistered/broken auth files
   if (options.forceClean || connectionState !== "connected") {
     try {
-      const { state } = await useMultiFileAuthState(authDir);
-      if (!state.creds?.registered || options.forceClean) {
+      const credsFile = path.join(authDir, "creds.json");
+      let registered = false;
+      try {
+        const raw = JSON.parse(await fs.readFile(credsFile, "utf8"));
+        registered = Boolean(raw?.registered);
+      } catch {
+        registered = false;
+      }
+      if (!registered || options.forceClean) {
         await fs.rm(authDir, { recursive: true, force: true });
       }
     } catch {

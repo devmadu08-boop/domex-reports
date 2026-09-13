@@ -52,9 +52,9 @@ export default function RegionalWhatsAppSettings({ accountKey, session }) {
     try {
       const data = await getWhatsAppStatus(accountKey);
       setStatus(data.status);
-      if (data.status === "qr") {
+      if (data.status !== "connected") {
         const qrData = await getWhatsAppQr(accountKey);
-        setQrCode(qrData.qrDataUrl);
+        setQrCode(qrData?.qrDataUrl || null);
       } else {
         setQrCode(null);
       }
@@ -100,9 +100,9 @@ export default function RegionalWhatsAppSettings({ accountKey, session }) {
         await new Promise((r) => setTimeout(r, 1200));
         const data = await getWhatsAppStatus(accountKey);
         setStatus(data.status);
-        if (data.status === "qr") {
+        if (data.status !== "connected") {
           const qrData = await getWhatsAppQr(accountKey);
-          if (qrData.qrDataUrl) {
+          if (qrData?.qrDataUrl) {
             setQrCode(qrData.qrDataUrl);
             break;
           }
@@ -278,7 +278,7 @@ export default function RegionalWhatsAppSettings({ accountKey, session }) {
             </div>
 
             {linkMethod === "qr" ? (
-              status === "qr" && qrCode ? (
+              qrCode ? (
                 <div className="flex flex-col items-center justify-center">
                   <div className="rounded-2xl border-4 border-white bg-white p-2 shadow-xl">
                     <img src={qrCode} alt="WhatsApp QR Code" className="h-64 w-64 rounded-xl" />

@@ -17,14 +17,15 @@ export function setWhatsAppAccountContext(session) {
 async function requestJson(path, options = {}) {
   let response;
   const url = whatsappApiBaseUrl ? `${whatsappApiBaseUrl}/api/whatsapp${path}` : `/api/whatsapp${path}`;
+  const resolvedAccount = options.headers?.["X-WhatsApp-Account"] || options.headers?.["x-whatsapp-account"] || whatsappAccountKey;
 
   try {
     response = await fetch(url, {
       ...options,
       headers: {
         "Content-Type": "application/json",
-        "X-WhatsApp-Account": whatsappAccountKey,
         ...(options.headers || {}),
+        "X-WhatsApp-Account": resolvedAccount,
       },
     });
   } catch {
@@ -62,8 +63,10 @@ async function requestJson(path, options = {}) {
   return data;
 }
 
-export function getWhatsAppStatus() {
-  return requestJson("/status");
+export function getWhatsAppStatus(accountKey = null) {
+  return requestJson("/status", {
+    headers: accountKey ? { "X-WhatsApp-Account": accountKey } : {},
+  });
 }
 
 export function getBackendHealth() {
@@ -95,8 +98,10 @@ export function retryWhatsAppQueueJob(jobId) {
   return requestJson(`/queue/${encodeURIComponent(jobId)}/retry`, { method: "POST" });
 }
 
-export function getWhatsAppQr() {
-  return requestJson("/qr");
+export function getWhatsAppQr(accountKey = null) {
+  return requestJson("/qr", {
+    headers: accountKey ? { "X-WhatsApp-Account": accountKey } : {},
+  });
 }
 
 export function getWhatsAppPairingCode(phoneNumber, accountKey = null) {
@@ -107,16 +112,24 @@ export function getWhatsAppPairingCode(phoneNumber, accountKey = null) {
   });
 }
 
-export function reconnectWhatsApp() {
-  return requestJson("/reconnect", { method: "POST" });
+export function reconnectWhatsApp(accountKey = null) {
+  return requestJson("/reconnect", {
+    method: "POST",
+    headers: accountKey ? { "X-WhatsApp-Account": accountKey } : {},
+  });
 }
 
-export function logoutWhatsApp() {
-  return requestJson("/logout", { method: "POST" });
+export function logoutWhatsApp(accountKey = null) {
+  return requestJson("/logout", {
+    method: "POST",
+    headers: accountKey ? { "X-WhatsApp-Account": accountKey } : {},
+  });
 }
 
-export function fetchWhatsAppGroups() {
-  return requestJson("/groups");
+export function fetchWhatsAppGroups(accountKey = null) {
+  return requestJson("/groups", {
+    headers: accountKey ? { "X-WhatsApp-Account": accountKey } : {},
+  });
 }
 
 export function saveDefaultWhatsAppGroup(groupJids) {
