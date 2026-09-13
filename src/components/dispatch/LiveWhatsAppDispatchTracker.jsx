@@ -67,6 +67,55 @@ export default function LiveWhatsAppDispatchTracker({
     }
   }
 
+  async function handleDeleteBranchDispatch(branch) {
+    if (!window.confirm(`Are you sure you want to delete/reset the dispatch record for "${branch}"? It will return to Pending.`)) {
+      return;
+    }
+    try {
+      const accountKey = getWhatsAppAccountKey(session);
+      const res = await fetch("/api/regional-dispatch/reset-dispatch", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-whatsapp-account": accountKey
+        },
+        body: JSON.stringify({ branch })
+      });
+      if (res.ok) {
+        await fetchLiveStatus();
+      } else {
+        const data = await res.json();
+        alert("Failed to reset: " + (data.error || "Unknown error"));
+      }
+    } catch (e) {
+      alert("Error: " + e.message);
+    }
+  }
+
+  async function handleResetAllDispatches() {
+    if (!window.confirm("⚠️ Are you sure you want to RESET ALL dispatch records for today? All branches will return to Pending!")) {
+      return;
+    }
+    try {
+      const accountKey = getWhatsAppAccountKey(session);
+      const res = await fetch("/api/regional-dispatch/reset-all", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-whatsapp-account": accountKey
+        }
+      });
+      if (res.ok) {
+        await fetchLiveStatus();
+      } else {
+        const data = await res.json();
+        alert("Failed to reset all: " + (data.error || "Unknown error"));
+      }
+    } catch (e) {
+      alert("Error: " + e.message);
+    }
+  }
+
   const fetchSentMessages = useCallback(async () => {
     try {
       const accountKey = getWhatsAppAccountKey(session);
@@ -470,6 +519,18 @@ export default function LiveWhatsAppDispatchTracker({
               <span>Apply to Report</span>
             </button>
           )}
+
+          {submittedCount > 0 && (
+            <button
+              type="button"
+              onClick={handleResetAllDispatches}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700 shadow-sm transition hover:bg-rose-100 hover:text-rose-800"
+              title="Reset all branch records back to Pending"
+            >
+              <Trash2 className="h-3.5 w-3.5 text-rose-500" />
+              <span>Reset All</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -550,6 +611,14 @@ export default function LiveWhatsAppDispatchTracker({
                       title="Edit Dispatch Count"
                     >
                       <Pencil className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteBranchDispatch(b.branch)}
+                      className="rounded p-1 text-slate-400 hover:bg-rose-100 hover:text-rose-600 transition"
+                      title="Delete / Reset record"
+                    >
+                      <Trash2 className="h-3 w-3" />
                     </button>
                   </div>
                 )}

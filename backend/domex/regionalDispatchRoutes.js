@@ -10,7 +10,8 @@ import {
   getRecentSentMessages,
   deleteSentMessage,
   setManualBranchDispatch,
-  resetManualBranchDispatch
+  resetManualBranchDispatch,
+  resetAllBranchDispatches
 } from "./regionalDispatchAutomationService.js";
 import { normalizeWhatsAppAccountKey, getAccountGroupMembers } from "../whatsapp/accountWhatsappService.js";
 
@@ -175,6 +176,17 @@ router.post("/reset-dispatch", async (request, response) => {
     response.json({ ok: true, ...result });
   } catch (error) {
     console.error("[regional-dispatch] Reset dispatch error:", error.message || error);
+    response.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+router.post("/reset-all", async (request, response) => {
+  try {
+    const key = accountKey(request);
+    const result = await resetAllBranchDispatches(key);
+    response.json({ ok: true, ...result });
+  } catch (error) {
+    console.error("[regional-dispatch] Reset all dispatches error:", error.message || error);
     response.status(500).json({ ok: false, error: error.message });
   }
 });

@@ -371,6 +371,35 @@ export function extractMessageInfo(msg) {
   const participant = key?.participant || msg.participant;
   const fromMe = Boolean(key?.fromMe);
 
+  // 1. Check if editedMessage is present directly on msg.message
+  const directEdit = msg.message?.editedMessage?.message;
+  if (directEdit) {
+    let editM = directEdit;
+    if (editM?.ephemeralMessage?.message) editM = editM.ephemeralMessage.message;
+    if (editM?.viewOnceMessage?.message) editM = editM.viewOnceMessage.message;
+    if (editM?.documentWithCaptionMessage?.message) editM = editM.documentWithCaptionMessage.message;
+    const text = (
+      editM?.conversation ||
+      editM?.extendedTextMessage?.text ||
+      editM?.imageMessage?.caption ||
+      editM?.videoMessage?.caption ||
+      editM?.documentMessage?.caption ||
+      ""
+    ).trim();
+    if (text) {
+      return {
+        type: "edit",
+        targetKey: key,
+        targetId: id,
+        text,
+        key,
+        remoteJid,
+        participant,
+        fromMe
+      };
+    }
+  }
+
   let m = msg.message;
   if (m?.ephemeralMessage?.message) m = m.ephemeralMessage.message;
   if (m?.viewOnceMessage?.message) m = m.viewOnceMessage.message;
@@ -378,7 +407,7 @@ export function extractMessageInfo(msg) {
   if (m?.documentWithCaptionMessage?.message) m = m.documentWithCaptionMessage.message;
   if (m?.editedMessage?.message) m = m.editedMessage.message;
 
-  const protocolMsg = m?.protocolMessage;
+  const protocolMsg = m?.protocolMessage || msg.message?.protocolMessage;
   if (protocolMsg) {
     const pType = protocolMsg.type;
     // REVOKE (0)
@@ -396,6 +425,7 @@ export function extractMessageInfo(msg) {
     // MESSAGE_EDIT (14)
     if (pType === 14 || pType === "MESSAGE_EDIT") {
       let editM = protocolMsg.editedMessage;
+      if (editM?.message) editM = editM.message;
       if (editM?.ephemeralMessage?.message) editM = editM.ephemeralMessage.message;
       if (editM?.viewOnceMessage?.message) editM = editM.viewOnceMessage.message;
       if (editM?.documentWithCaptionMessage?.message) editM = editM.documentWithCaptionMessage.message;
@@ -404,6 +434,7 @@ export function extractMessageInfo(msg) {
         editM?.extendedTextMessage?.text ||
         editM?.imageMessage?.caption ||
         editM?.videoMessage?.caption ||
+        editM?.documentMessage?.caption ||
         ""
       ).trim();
       return {
@@ -437,6 +468,93 @@ export function extractMessageInfo(msg) {
     fromMe,
     text
   };
+}
+
+export function extractInfoFromUpdate(upd) {
+  if (!upd) return null;
+  const key = upd.key;
+  const id = key?.id;
+  const remoteJid = key?.remoteJid;
+  const participant = key?.participant || upd.participant;
+  const fromMe = Boolean(key?.fromMe);
+
+  const update = upd.update;
+  const updMsg = update?.message;
+  const proto = updMsg?.protocolMessage;
+
+  // 1. Revoke / Delete
+  if (
+    proto?.type === 0 ||
+    proto?.type === "REVOKE" ||
+    update?.messageStubType === 1 ||
+    update?.messageStubType === "REVOKE" ||
+    update?.messageStubType === 68 ||
+    (update && update.message === null)
+  ) {
+    const targetId = proto?.key?.id || id;
+    const targetKey = proto?.key || key;
+    return {
+      type: "revoke",
+      targetId,
+      targetKey,
+      remoteJid,
+      participant,
+      fromMe
+    };
+  }
+
+  // 2. Edit
+  // Standard Baileys format: update.message.editedMessage.message
+  let editContent = updMsg?.editedMessage?.message || updMsg?.editedMessage;
+  if (!editContent && proto && (proto.type === 14 || proto.type === "MESSAGE_EDIT")) {
+    editContent = proto.editedMessage?.message || proto.editedMessage;
+  }
+  if (!editContent && updMsg?.protocolMessage?.editedMessage) {
+    editContent = updMsg.protocolMessage.editedMessage?.message || updMsg.protocolMessage.editedMessage;
+  }
+
+  let editText = "";
+  if (editContent) {
+    if (editContent.ephemeralMessage?.message) editContent = editContent.ephemeralMessage.message;
+    if (editContent.viewOnceMessage?.message) editContent = editContent.viewOnceMessage.message;
+    if (editContent.documentWithCaptionMessage?.message) editContent = editContent.documentWithCaptionMessage.message;
+    editText = (
+      editContent.conversation ||
+      editContent.extendedTextMessage?.text ||
+      editContent.imageMessage?.caption ||
+      editContent.videoMessage?.caption ||
+      editContent.documentMessage?.caption ||
+      ""
+    ).trim();
+  }
+
+  // Direct conversation / extendedTextMessage on update.message (fallback)
+  if (!editText && updMsg && !proto) {
+    let directM = updMsg;
+    if (directM.ephemeralMessage?.message) directM = directM.ephemeralMessage.message;
+    editText = (
+      directM.conversation ||
+      directM.extendedTextMessage?.text ||
+      directM.imageMessage?.caption ||
+      ""
+    ).trim();
+  }
+
+  if (editText) {
+    const targetId = proto?.key?.id || id;
+    const targetKey = proto?.key || key;
+    return {
+      type: "edit",
+      targetId,
+      targetKey,
+      text: editText,
+      remoteJid,
+      participant,
+      fromMe
+    };
+  }
+
+  return null;
 }
 
 export async function getDailyState(accountKey) {
@@ -540,6 +658,13 @@ export async function recordBranchDispatch(accountKey, { messageId, branch, disp
     source
   };
 
+  if (Array.isArray(state.clearedBranches)) {
+    state.clearedBranches = state.clearedBranches.filter(b => b !== canonicalBranch);
+  }
+  if (state.manualOverrides && state.manualOverrides[canonicalBranch]) {
+    delete state.manualOverrides[canonicalBranch];
+  }
+
   await saveDailyState(accountKey, state);
   await syncMessagesTxtFile(accountKey, state);
   return state;
@@ -553,19 +678,30 @@ export async function handleMessageEdit(accountKey, { targetId, targetKey, newTe
 
   if (extracted.length > 0) {
     const item = extracted[0];
-    const oldBranch = state.messages[targetId]?.branch;
-    const oldDispatch = state.messages[targetId]?.dispatch;
+    const canonicalBranch = item.branch;
+    const newDispatch = item.dispatch;
 
-    if (oldBranch && oldBranch !== item.branch) {
-      if (state.dispatches[oldBranch]?.messageId === targetId) {
-        delete state.dispatches[oldBranch];
+    // Check if targetId was previously associated with another branch
+    let previousBranch = state.messages[targetId]?.branch;
+    if (!previousBranch) {
+      for (const [id, m] of Object.entries(state.messages || {})) {
+        if (id === targetId || id.includes(targetId) || targetId.includes(id)) {
+          previousBranch = m.branch;
+          break;
+        }
+      }
+    }
+
+    if (previousBranch && previousBranch !== canonicalBranch) {
+      if (state.dispatches[previousBranch]?.messageId === targetId) {
+        delete state.dispatches[previousBranch];
       }
     }
 
     state.messages[targetId] = {
       id: targetId,
-      branch: item.branch,
-      dispatch: item.dispatch,
+      branch: canonicalBranch,
+      dispatch: newDispatch,
       text: newText,
       sender: sender || state.messages[targetId]?.sender || "",
       fromMe: Boolean(fromMe),
@@ -573,39 +709,73 @@ export async function handleMessageEdit(accountKey, { targetId, targetKey, newTe
       edited: true
     };
 
-    state.dispatches[item.branch] = {
-      dispatch: item.dispatch,
+    state.dispatches[canonicalBranch] = {
+      dispatch: newDispatch,
       messageId: targetId,
-      sender: sender || state.dispatches[item.branch]?.sender || "",
+      sender: sender || state.dispatches[canonicalBranch]?.sender || "",
       updatedAt: new Date().toISOString(),
       source: "edit"
     };
 
+    // Remove from clearedBranches if previously cleared
+    if (Array.isArray(state.clearedBranches)) {
+      state.clearedBranches = state.clearedBranches.filter(b => b !== canonicalBranch);
+    }
+    // Remove manual override so edited message takes effect
+    if (state.manualOverrides && state.manualOverrides[canonicalBranch]) {
+      delete state.manualOverrides[canonicalBranch];
+    }
+
     await saveDailyState(accountKey, state);
     await syncMessagesTxtFile(accountKey, state);
 
-    console.log(`[regional-dispatch] ✏️ Message edited for ${item.branch}: ${oldDispatch ?? "unknown"} -> ${item.dispatch}`);
+    console.log(`[regional-dispatch] ✏️ Successfully applied edit for ${canonicalBranch} -> ${newDispatch}`);
 
     if (targetKey) {
-      reactToAccountMessage(accountKey, {
-        remoteJid: targetKey.remoteJid,
-        key: targetKey,
-        emoji: "✅"
-      }).catch(() => {});
+      const rJid = targetKey.remoteJid || cfg.groupId;
+      if (rJid) {
+        reactToAccountMessage(accountKey, {
+          remoteJid: rJid,
+          key: {
+            ...targetKey,
+            remoteJid: targetKey.remoteJid || rJid
+          },
+          emoji: "✅"
+        }).catch((e) => console.warn(`[regional-dispatch] Edit reaction failed:`, e.message || e));
+      }
     }
 
     checkAllAccountsEarlyCompletion().catch(() => {});
     return true;
   } else {
-    if (state.messages[targetId]) {
-      const oldBranch = state.messages[targetId].branch;
+    // If edited to non-dispatch text, remove previous branch record
+    let foundBranch = state.messages[targetId]?.branch;
+    if (!foundBranch) {
+      for (const [id, m] of Object.entries(state.messages || {})) {
+        if (id === targetId || id.includes(targetId) || targetId.includes(id)) {
+          foundBranch = m.branch;
+          delete state.messages[id];
+          break;
+        }
+      }
+    } else {
       delete state.messages[targetId];
-      if (state.dispatches[oldBranch]?.messageId === targetId) {
-        delete state.dispatches[oldBranch];
+    }
+
+    if (foundBranch) {
+      if (state.dispatches[foundBranch]?.messageId === targetId || !state.dispatches[foundBranch]?.messageId) {
+        delete state.dispatches[foundBranch];
+      }
+      if (state.manualOverrides && state.manualOverrides[foundBranch]) {
+        delete state.manualOverrides[foundBranch];
+      }
+      if (!Array.isArray(state.clearedBranches)) state.clearedBranches = [];
+      if (!state.clearedBranches.includes(foundBranch)) {
+        state.clearedBranches.push(foundBranch);
       }
       await saveDailyState(accountKey, state);
       await syncMessagesTxtFile(accountKey, state);
-      console.log(`[regional-dispatch] ✏️ Message edited to non-dispatch text. Cleared record for ${oldBranch}`);
+      console.log(`[regional-dispatch] ✏️ Message edited to non-dispatch text. Cleared record for ${foundBranch}`);
       return true;
     }
   }
@@ -615,30 +785,37 @@ export async function handleMessageEdit(accountKey, { targetId, targetKey, newTe
 export async function handleMessageRevoke(accountKey, { targetId, targetKey }) {
   if (!targetId) return false;
   const state = await getDailyState(accountKey);
-  if (state.messages[targetId]) {
-    const deleted = state.messages[targetId];
-    const bName = deleted.branch;
-    const val = deleted.dispatch;
-    delete state.messages[targetId];
 
-    if (state.dispatches[bName]?.messageId === targetId) {
-      delete state.dispatches[bName];
-      const earlier = Object.values(state.messages).filter(m => m.branch === bName).pop();
-      if (earlier) {
-        state.dispatches[bName] = {
-          dispatch: earlier.dispatch,
-          messageId: earlier.id,
-          sender: earlier.sender,
-          updatedAt: earlier.timestamp,
-          source: "earlier_message"
-        };
+  let targetEntry = state.messages[targetId];
+  let actualId = targetId;
+  if (!targetEntry) {
+    for (const [id, m] of Object.entries(state.messages || {})) {
+      if (id === targetId || id.includes(targetId) || targetId.includes(id)) {
+        targetEntry = m;
+        actualId = id;
+        break;
       }
+    }
+  }
+
+  if (targetEntry) {
+    const bName = targetEntry.branch;
+    const val = targetEntry.dispatch;
+    delete state.messages[actualId];
+
+    delete state.dispatches[bName];
+    if (state.manualOverrides && state.manualOverrides[bName]) {
+      delete state.manualOverrides[bName];
+    }
+    if (!Array.isArray(state.clearedBranches)) state.clearedBranches = [];
+    if (!state.clearedBranches.includes(bName)) {
+      state.clearedBranches.push(bName);
     }
 
     await saveDailyState(accountKey, state);
     await syncMessagesTxtFile(accountKey, state);
 
-    console.log(`[regional-dispatch] 🗑️ Revoked/deleted message ${targetId} for ${bName} (${val}). Record removed.`);
+    console.log(`[regional-dispatch] 🗑️ Revoked/deleted message ${actualId} for ${bName} (${val}). Record completely removed.`);
     return true;
   }
   return false;
@@ -665,6 +842,11 @@ export async function setManualBranchDispatch(accountKey, branch, dispatch, sour
     source
   };
 
+  // Remove from clearedBranches if previously cleared
+  if (Array.isArray(state.clearedBranches)) {
+    state.clearedBranches = state.clearedBranches.filter(b => b !== canonicalBranch);
+  }
+
   await saveDailyState(accountKey, state);
   await syncMessagesTxtFile(accountKey, state);
   checkAllAccountsEarlyCompletion().catch(() => {});
@@ -684,20 +866,39 @@ export async function resetManualBranchDispatch(accountKey, branch) {
     delete state.dispatches[canonicalBranch];
   }
 
-  const earlier = Object.values(state.messages || {}).filter(m => m.branch === canonicalBranch).pop();
-  if (earlier) {
-    state.dispatches[canonicalBranch] = {
-      dispatch: earlier.dispatch,
-      messageId: earlier.id,
-      sender: earlier.sender,
-      updatedAt: earlier.timestamp,
-      source: "earlier_message"
-    };
+  if (state.messages) {
+    for (const [id, m] of Object.entries(state.messages)) {
+      if (m.branch === canonicalBranch) {
+        delete state.messages[id];
+      }
+    }
+  }
+
+  if (!Array.isArray(state.clearedBranches)) state.clearedBranches = [];
+  if (!state.clearedBranches.includes(canonicalBranch)) {
+    state.clearedBranches.push(canonicalBranch);
   }
 
   await saveDailyState(accountKey, state);
   await syncMessagesTxtFile(accountKey, state);
+  console.log(`[regional-dispatch] 🗑️ Reset branch dispatch for ${canonicalBranch}. Branch is now pending.`);
   return { ok: true, branch: canonicalBranch };
+}
+
+export async function resetAllBranchDispatches(accountKey) {
+  const state = await getDailyState(accountKey);
+  const cfg = await getRegionalConfig(accountKey);
+  const targets = Array.isArray(cfg?.targets) ? cfg.targets : [];
+
+  state.dispatches = {};
+  state.manualOverrides = {};
+  state.messages = {};
+  state.clearedBranches = targets.map(t => t.branch || t.branch_name).filter(Boolean);
+
+  await saveDailyState(accountKey, state);
+  await syncMessagesTxtFile(accountKey, state);
+  console.log(`[regional-dispatch] 🗑️ Cleared ALL branch dispatch records for ${accountKey}`);
+  return { ok: true, message: "All branch records have been cleared." };
 }
 
 async function saveMessage(accountKey, text) {
@@ -1097,24 +1298,35 @@ _(උදා: *.reset Middeniya*)_
     }
   }
 
-  // 9. Option 8: Reset Branch Dispatch: e.g. ".reset Middeniya" or ".delete Middeniya"
+  // 9. Option 8: Reset Branch Dispatch: e.g. ".reset Middeniya", ".delete Middeniya", ".clear Middeniya", or ".reset all" / ".delete all"
   if (
     cleanCmd === "8" ||
+    cleanCmd === "reset all" ||
+    cleanCmd === "delete all" ||
+    cleanCmd === "clear all" ||
+    cleanCmd === "reset-all" ||
+    cleanCmd === "delete-all" ||
     cleanCmd.startsWith("reset ") ||
-    (cleanCmd.startsWith("delete ") && cleanCmd.trim() !== "delete")
+    cleanCmd.startsWith("clear ") ||
+    (cleanCmd.startsWith("delete ") && !["delete", "delete last", "delete message", "delete for everyone"].includes(cleanCmd))
   ) {
     if (cleanCmd === "8") {
-      await sendBotReply(accountKey, incomingJid, "ℹ️ ශාඛාවක Dispatch Count ඉවත් කිරීමට:\n\n*උදාහරණ:*\n• `.reset Middeniya`\n• `.delete Middeniya`");
+      await sendBotReply(accountKey, incomingJid, "ℹ️ ශාඛාවක Dispatch Count ඉවත් කිරීමට:\n\n*උදාහරණ:*\n• `.reset Middeniya` (හෝ `.delete Middeniya`)\n• `.reset all` (සියලුම ශාඛා Reset කිරීමට)");
       return;
     }
-    const branchPart = cleanCmd.replace(/^(reset|delete)\s+/i, "").trim();
+    const branchPart = cleanCmd.replace(/^(reset|delete|clear)\s+/i, "").trim();
+    if (branchPart.toLowerCase() === "all" || cleanCmd.includes("all")) {
+      await resetAllBranchDispatches(accountKey);
+      await sendBotReply(accountKey, incomingJid, "🗑️ අද දිනට අදාළ *සියලුම ශාඛාවන්හි* Dispatch Records සාර්ථකව Reset කරන ලදී! සියලු ශාඛා නැවත Pending තත්ත්වයට පත්විය.");
+      return;
+    }
     const branch = findBranchInLine(branchPart, config.targets || []);
     if (branch) {
       await resetManualBranchDispatch(accountKey, branch);
       await sendBotReply(accountKey, incomingJid, `🗑️ *${branch}* ශාඛාවේ Dispatch Count එක සාර්ථකව ඉවත් කරන ලදී. ශාඛාව නැවත Pending ලැයිස්තුවට එක් විය.`);
       return;
     } else {
-      await sendBotReply(accountKey, incomingJid, `⚠️ "${branchPart}" නමින් ශාඛාවක් හමු නොවීය. කරුණාකර නිවැරදි ශාඛාවේ නම ලබා දෙන්න.`);
+      await sendBotReply(accountKey, incomingJid, `⚠️ "${branchPart}" නමින් ශාඛාවක් හමු නොවීය. කරුණාකර නිවැරදි ශාඛාවේ නම ලබා දෙන්න.\n_(උදා: .reset Middeniya)_`);
       return;
     }
   }
@@ -1185,38 +1397,22 @@ subscribeToAccountMessages(async (accountKey, { messages, updates, type }) => {
       if (!updId) continue;
       if (targetGroupId && updJid !== targetGroupId) continue;
 
-      const updMsg = upd.update?.message;
-      const proto = updMsg?.protocolMessage;
-      
-      // 1. Revoke / Delete
-      if (
-        proto?.type === 0 ||
-        proto?.type === "REVOKE" ||
-        upd.update?.messageStubType === 1 ||
-        (upd.update && upd.update.message === null)
-      ) {
-        const targetId = proto?.key?.id || updId;
-        await handleMessageRevoke(configKey, { targetId, targetKey: proto?.key || updKey });
-      }
-      // 2. Edit
-      else if (proto?.type === 14 || proto?.type === "MESSAGE_EDIT") {
-        const targetId = proto?.key?.id || updId;
-        const editM = proto.editedMessage;
-        const editText = (
-          editM?.conversation ||
-          editM?.extendedTextMessage?.text ||
-          editM?.imageMessage?.caption ||
-          ""
-        ).trim();
-        if (editText) {
-          await handleMessageEdit(configKey, {
-            targetId,
-            targetKey: proto?.key || updKey,
-            newText: editText,
-            sender: updKey?.participant || updKey?.remoteJid,
-            fromMe: Boolean(updKey?.fromMe)
-          });
-        }
+      const info = extractInfoFromUpdate(upd);
+      if (!info) continue;
+
+      if (info.type === "revoke") {
+        await handleMessageRevoke(configKey, {
+          targetId: info.targetId,
+          targetKey: info.targetKey
+        });
+      } else if (info.type === "edit") {
+        await handleMessageEdit(configKey, {
+          targetId: info.targetId,
+          targetKey: info.targetKey,
+          newText: info.text,
+          sender: info.participant || updJid,
+          fromMe: info.fromMe
+        });
       }
     }
     return;
@@ -1263,8 +1459,8 @@ subscribeToAccountMessages(async (accountKey, { messages, updates, type }) => {
 
     // Check if message is a bot command
     const isBotCommand = isGroup
-      ? /^[./!#](menu|help|start|bot|බොට්|status|live|reminder|report|summary|delete|saved|set|edit|reset)\b/i.test(text.trim())
-      : /^[./!#]?(menu|help|start|bot|බොට්|status|live|reminder|report|summary|delete|saved|set|edit|reset|1|2|3|4|5|6|7|8)\b/i.test(text.trim()) ||
+      ? /^[./!#](menu|help|start|bot|බොට්|status|live|reminder|report|summary|delete|saved|set|edit|reset|clear)\b/i.test(text.trim())
+      : /^[./!#]?(menu|help|start|bot|බොට්|status|live|reminder|report|summary|delete|saved|set|edit|reset|clear|1|2|3|4|5|6|7|8)\b/i.test(text.trim()) ||
         Boolean(findBranchInLine(text, config.targets || []) && /\b\d{1,5}\b/.test(text));
 
     if (isBotCommand) {
@@ -1668,13 +1864,16 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null,
     }
 
     const dailyState = await getDailyState(activeKey);
+    const clearedSet = new Set(Array.isArray(dailyState.clearedBranches) ? dailyState.clearedBranches : []);
     const submittedMap = {};
 
     // 1. From daily state dispatches (captured group messages, edits)
     for (const [b, d] of Object.entries(dailyState.dispatches || {})) {
       if (d?.dispatch != null) {
         const canonical = findBranchInLine(b, targets) || b;
-        submittedMap[canonical] = Number(d.dispatch);
+        if (!clearedSet.has(canonical)) {
+          submittedMap[canonical] = Number(d.dispatch);
+        }
       }
     }
 
@@ -1682,13 +1881,15 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null,
     for (const [b, d] of Object.entries(dailyState.manualOverrides || {})) {
       if (d?.dispatch != null) {
         const canonical = findBranchInLine(b, targets) || b;
-        submittedMap[canonical] = Number(d.dispatch);
+        if (!clearedSet.has(canonical)) {
+          submittedMap[canonical] = Number(d.dispatch);
+        }
       }
     }
 
     const rawText = await getTodayMessages(activeKey);
     const branchNames = targets.map(t => t.branch || t.branch_name).filter(Boolean);
-    const pendingBranchNames = branchNames.filter(b => submittedMap[b] == null);
+    const pendingBranchNames = branchNames.filter(b => submittedMap[b] == null && !clearedSet.has(b));
 
     // Parse using OpenRouter
     let extractedData = [];
@@ -1702,7 +1903,7 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null,
         if (!isNaN(val)) {
           // Find canonical target branch via fuzzy matcher
           const canonical = findBranchInLine(item.branch, targets) || item.branch;
-          if (submittedMap[canonical] == null) {
+          if (submittedMap[canonical] == null && !clearedSet.has(canonical)) {
             submittedMap[canonical] = val;
           }
         }
@@ -1713,7 +1914,7 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null,
     if (rawText.trim()) {
       for (const line of rawText.split("\n")) {
         const fuzzyBranch = findBranchInLine(line, targets);
-        if (fuzzyBranch && submittedMap[fuzzyBranch] == null) {
+        if (fuzzyBranch && !clearedSet.has(fuzzyBranch) && submittedMap[fuzzyBranch] == null) {
           const numbers = line.match(/\b\d{1,5}\b/g);
           if (numbers && numbers.length > 0) {
             const val = parseInt(numbers[numbers.length - 1], 10);
@@ -2035,25 +2236,30 @@ export async function getRegionalLiveStatus(accountKey, customTargets = null) {
   }
 
   const dailyState = await getDailyState(accountKey);
+  const clearedSet = new Set(Array.isArray(dailyState.clearedBranches) ? dailyState.clearedBranches : []);
   const submittedMap = {};
 
   for (const [b, d] of Object.entries(dailyState.dispatches || {})) {
     if (d?.dispatch != null) {
       const canonical = findBranchInLine(b, targets) || b;
-      submittedMap[canonical] = Number(d.dispatch);
+      if (!clearedSet.has(canonical)) {
+        submittedMap[canonical] = Number(d.dispatch);
+      }
     }
   }
   for (const [b, d] of Object.entries(dailyState.manualOverrides || {})) {
     if (d?.dispatch != null) {
       const canonical = findBranchInLine(b, targets) || b;
-      submittedMap[canonical] = Number(d.dispatch);
+      if (!clearedSet.has(canonical)) {
+        submittedMap[canonical] = Number(d.dispatch);
+      }
     }
   }
 
   if (rawText && rawText.trim()) {
     for (const line of rawText.split("\n")) {
       const fuzzyBranch = findBranchInLine(line, targets);
-      if (fuzzyBranch && submittedMap[fuzzyBranch] == null) {
+      if (fuzzyBranch && !clearedSet.has(fuzzyBranch) && submittedMap[fuzzyBranch] == null) {
         const numbers = line.match(/\b\d{1,5}\b/g);
         if (numbers && numbers.length > 0) {
           const val = parseInt(numbers[numbers.length - 1], 10);
