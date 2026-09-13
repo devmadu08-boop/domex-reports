@@ -1574,32 +1574,41 @@ let isEarlyChecking = false;
 export async function checkAllAccountsEarlyCompletion() {
   if (isEarlyChecking) return;
   const dateStr = getTodayString();
-  if (lastReportTriggerDate === dateStr) return;
-
   const colomboNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Colombo" }));
   const hours = colomboNow.getHours();
-  if (hours < 12) return;
+  const minutes = colomboNow.getMinutes();
+  const currentMinutes = hours * 60 + minutes;
 
   isEarlyChecking = true;
   try {
-    const configs = await readAllConfigs();
-    for (const key of Object.keys(configs)) {
-      if (lastReportTriggerDate === dateStr) break;
-      const cfg = configs[key];
-      if (cfg?.enabled && cfg?.groupId && Array.isArray(cfg?.targets) && cfg.targets.length > 0) {
-        const live = await getRegionalLiveStatus(key);
-        if (
-          live &&
-          live.enabled &&
-          live.totalBranches > 0 &&
-          live.unsubmittedCount === 0 &&
-          live.submittedCount >= live.totalBranches
-        ) {
-          console.log(`[regional-dispatch] 🎯 100% Branches Submitted (${live.submittedCount}/${live.totalBranches})! Auto-sending and saving report early for ${key} without waiting for 11:30 PM...`);
-          lastReportTriggerDate = dateStr;
-          await runRegionalAutomation("report", key);
-          break;
-        }
+    const allConfigs = await readAllConfigs();
+    const keys = Object.keys(allConfigs);
+    if (!keys.includes("default")) keys.push("default");
+
+    for (const key of keys) {
+      const reportKey = `${dateStr}_${key}_report`;
+      if (triggeredReports.has(reportKey)) continue;
+
+      const cfg = await getRegionalConfig(key);
+      if (!cfg || !cfg.enabled || !cfg.groupId || !Array.isArray(cfg.targets) || cfg.targets.length === 0) {
+        continue;
+      }
+
+      // Verify current time is during or after check-in start time
+      const { h: startH, m: startM } = parseTime(cfg.checkInStartTime, 16, 0);
+      const startMinutes = startH * 60 + startM;
+      if (currentMinutes < startMinutes) continue;
+
+      const live = await getRegionalLiveStatus(key);
+      if (
+        live &&
+        live.totalBranches > 0 &&
+        live.unsubmittedCount === 0 &&
+        live.submittedCount >= live.totalBranches
+      ) {
+        triggeredReports.add(reportKey);
+        console.log(`[regional-dispatch] 🎯 100% Branches Submitted (${live.submittedCount}/${live.totalBranches}) during check-in window! Auto-sending and saving report early for ${key} without waiting for scheduled time...`);
+        await runRegionalAutomation("report", key);
       }
     }
   } catch (err) {
