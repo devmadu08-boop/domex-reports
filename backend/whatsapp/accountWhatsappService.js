@@ -20,6 +20,17 @@ export function subscribeToAccountMessages(listener) {
   return () => accountMessageListeners.delete(listener);
 }
 
+// Forward incoming messages on primary WhatsApp socket to accountMessageListeners as "default" account
+primary.subscribeToPrimaryWhatsAppMessages(({ messages, type }) => {
+  for (const listener of accountMessageListeners) {
+    try {
+      listener("default", { messages: messages || [], type });
+    } catch (error) {
+      console.error("[whatsapp-account-message-listener:default]", error.message || error);
+    }
+  }
+});
+
 const accountsDir = path.resolve("backend", "data", "whatsapp-accounts");
 const runtimes = new Map();
 

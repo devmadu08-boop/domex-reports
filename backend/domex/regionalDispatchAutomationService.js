@@ -221,12 +221,29 @@ export async function getRegionalConfig(accountKey) {
   const candidates = [
     clean,
     clean.startsWith("user-") ? clean.replace(/^user-/, "") : `user-${clean}`,
-    accountKey
+    accountKey,
+    "default"
   ];
+  let cfg = null;
   for (const k of candidates) {
-    if (configs[k]) return configs[k];
+    if (configs[k]) {
+      cfg = configs[k];
+      break;
+    }
   }
-  return { enabled: false, groupId: "", geminiApiKey: "", targets: [] };
+  return {
+    enabled: Boolean(cfg?.enabled),
+    groupId: String(cfg?.groupId || "").trim(),
+    geminiApiKey: String(cfg?.geminiApiKey || "").trim(),
+    targets: Array.isArray(cfg?.targets) ? cfg.targets : [],
+    checkInStartTime: String(cfg?.checkInStartTime || "16:00").trim(),
+    reportSendTime: String(cfg?.reportSendTime || "23:30").trim(),
+    reminderTimes: Array.isArray(cfg?.reminderTimes) && cfg.reminderTimes.length > 0
+      ? cfg.reminderTimes
+      : (cfg?.reminderTime ? [String(cfg.reminderTime).trim()] : ["23:00"]),
+    userName: cfg?.userName || "",
+    userRole: cfg?.userRole || ""
+  };
 }
 
 export async function saveRegionalConfig(accountKey, payload) {
@@ -237,6 +254,11 @@ export async function saveRegionalConfig(accountKey, payload) {
     groupId: String(payload.groupId || "").trim(),
     geminiApiKey: String(payload.geminiApiKey || "").trim(),
     targets: Array.isArray(payload.targets) ? payload.targets : [],
+    checkInStartTime: String(payload.checkInStartTime || "16:00").trim(),
+    reportSendTime: String(payload.reportSendTime || "23:30").trim(),
+    reminderTimes: Array.isArray(payload.reminderTimes) && payload.reminderTimes.length > 0
+      ? payload.reminderTimes.map(t => String(t || "").trim()).filter(Boolean)
+      : (payload.reminderTime ? [String(payload.reminderTime).trim()] : ["23:00"]),
     userName: payload.userName || "",
     userRole: payload.userRole || ""
   };
@@ -372,9 +394,10 @@ async function handleBotCommand(accountKey, config, incomingJid, msg, rawText) {
   if (!text) return;
 
   const isFromMe = Boolean(msg.key?.fromMe);
-  const senderNumber = incomingJid.split("@")[0].replace(/\D/g, "");
+  const senderJid = msg.key?.participant || msg.participant || incomingJid;
+  const senderNumber = senderJid.split("@")[0].replace(/\D/g, "");
 
-  console.log(`[regional-dispatch:bot] 📩 Incoming DM from ${incomingJid} (sender: ${senderNumber}, fromMe: ${isFromMe}): "${text}"`);
+  console.log(`[regional-dispatch:bot] 📩 Incoming command from ${incomingJid} (sender: ${senderNumber}, fromMe: ${isFromMe}): "${text}"`);
 
   // Authorization check:
   // If config.botAuthorizedNumbers is explicitly set, check whitelist.
@@ -677,11 +700,25 @@ subscribeToAccountMessages(async (accountKey, { messages, type }) => {
 
     const isGroup = incomingJid.endsWith("@g.us");
 
+    // Check if message is a bot command (e.g. .menu, .status, .report, .reminder, .summary, .delete, .saved, or 1-6)
+    const isBotCommand = isGroup
+      ? /^[./!#](menu|help|start|bot|බොට්|status|live|reminder|report|summary|delete|saved)\b/i.test(text.trim())
+      : /^[./!#]?(menu|help|start|bot|බොට්|status|live|reminder|report|summary|delete|saved|1|2|3|4|5|6)\b/i.test(text.trim());
+
+    if (isBotCommand) {
+      console.log(`[regional-dispatch:bot] 🤖 Bot command detected: "${text.slice(0, 30)}" from ${incomingJid}`);
+      await handleBotCommand(configKey, config, incomingJid, msg, text);
+      continue;
+    }
+
     // Case 1: Message in the target dispatch group
     if (isGroup && targetGroupId && incomingJid === targetGroupId) {
       const colomboNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Colombo" }));
-      const hours = colomboNow.getHours();
-      if (hours >= 12) {
+      const { h: startH, m: startM } = parseTime(config.checkInStartTime, 16, 0);
+      const currentMinutes = colomboNow.getHours() * 60 + colomboNow.getMinutes();
+      const startMinutes = startH * 60 + startM;
+
+      if (currentMinutes >= startMinutes) {
         console.log(`[regional-dispatch] 📥 Captured group message (fromMe: ${Boolean(msg.key?.fromMe)}) for ${configKey}: "${text.slice(0, 70)}"`);
         await saveMessage(configKey, text);
 
@@ -1351,43 +1388,95 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null,
   return { ok: true, sent: totalSent };
 }
 
-let lastReminderTriggerDate = "";
-let lastReportTriggerDate = "";
+const triggeredReminders = new Set();
+const triggeredReports = new Set();
+
+function parseTime(str, defaultH, defaultM) {
+  if (!str || typeof str !== "string") return { h: defaultH, m: defaultM };
+  const parts = str.split(":");
+  const h = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  return {
+    h: isNaN(h) ? defaultH : h,
+    m: isNaN(m) ? defaultM : m
+  };
+}
+
+function isTimeMatch(colomboTime, targetH, targetM) {
+  const h = colomboTime.getHours();
+  const m = colomboTime.getMinutes();
+  return h === targetH && m >= targetM && m < targetM + 5;
+}
 
 // Start Cron-like Scheduler
 export function startRegionalDispatchAutomation() {
-  setInterval(() => {
-    const colomboTime = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Colombo" }));
-    const dateStr = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Colombo" }).format(new Date());
-    const hours = colomboTime.getHours();
-    const minutes = colomboTime.getMinutes();
+  setInterval(async () => {
+    try {
+      const colomboTime = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Colombo" }));
+      const dateStr = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Colombo" }).format(new Date());
+      const hours = colomboTime.getHours();
+      const minutes = colomboTime.getMinutes();
 
-    // 11:00 PM Reminder (Trigger between 23:00 and 23:05 Sri Lanka Time)
-    if (hours === 23 && minutes >= 0 && minutes < 5 && lastReminderTriggerDate !== dateStr) {
-      lastReminderTriggerDate = dateStr;
-      if (lastReportTriggerDate === dateStr) {
-        console.log(`[regional-dispatch] ⏰ Skipping 11:00 PM Reminder for ${dateStr} because final report has already been sent.`);
-      } else {
-        console.log(`[regional-dispatch] ⏰ Triggering automatic 11:00 PM Reminder for ${dateStr}`);
-        runRegionalAutomation("reminder").catch(e => console.error("[regional-dispatch] Reminder error", e));
+      // Clean up older dates from memory
+      for (const tKey of triggeredReminders) {
+        if (!tKey.startsWith(dateStr)) triggeredReminders.delete(tKey);
       }
-    }
+      for (const rKey of triggeredReports) {
+        if (!rKey.startsWith(dateStr)) triggeredReports.delete(rKey);
+      }
 
-    // 11:30 PM Report (Trigger between 23:30 and 23:35 Sri Lanka Time)
-    if (hours === 23 && minutes >= 30 && minutes < 35 && lastReportTriggerDate !== dateStr) {
-      lastReportTriggerDate = dateStr;
-      console.log(`[regional-dispatch] ⏰ Triggering automatic 11:30 PM Report for ${dateStr}`);
-      runRegionalAutomation("report").catch(e => console.error("[regional-dispatch] Report error", e));
-    }
+      const allConfigs = await readAllConfigs();
+      const keys = Object.keys(allConfigs);
+      if (!keys.includes("default")) keys.push("default");
 
-    // Auto-Send & Save Early if 100% of branches have submitted before 11:30 PM
-    if (hours >= 12 && lastReportTriggerDate !== dateStr) {
-      checkAllAccountsEarlyCompletion().catch(() => {});
+      for (const key of keys) {
+        const config = await getRegionalConfig(key);
+        if (!config || !config.enabled || !config.groupId) continue;
+
+        const reportKey = `${dateStr}_${key}_report`;
+        const { h: repH, m: repM } = parseTime(config.reportSendTime, 23, 30);
+
+        // 1. Check Multiple Reminder Times
+        const reminderTimes = Array.isArray(config.reminderTimes) && config.reminderTimes.length > 0
+          ? config.reminderTimes
+          : (config.reminderTime ? [config.reminderTime] : ["23:00"]);
+
+        for (const rTime of reminderTimes) {
+          const { h: remH, m: remM } = parseTime(rTime, 23, 0);
+          const reminderKey = `${dateStr}_${key}_reminder_${rTime}`;
+
+          if (isTimeMatch(colomboTime, remH, remM) && !triggeredReminders.has(reminderKey)) {
+            triggeredReminders.add(reminderKey);
+            if (triggeredReports.has(reportKey)) {
+              console.log(`[regional-dispatch] ⏰ Skipping reminder at ${rTime} for ${key} because final report has already been sent today.`);
+            } else {
+              console.log(`[regional-dispatch] ⏰ Triggering scheduled reminder (${rTime}) for ${key}`);
+              runRegionalAutomation("reminder", key).catch(e => console.error(`[regional-dispatch] Reminder error for ${key}:`, e));
+            }
+          }
+        }
+
+        // 2. Check Report Send Time
+        if (isTimeMatch(colomboTime, repH, repM) && !triggeredReports.has(reportKey)) {
+          triggeredReports.add(reportKey);
+          console.log(`[regional-dispatch] ⏰ Triggering scheduled report (${config.reportSendTime || '23:30'}) for ${key}`);
+          runRegionalAutomation("report", key).catch(e => console.error(`[regional-dispatch] Report error for ${key}:`, e));
+        }
+
+        // 3. Auto-Send & Save Early if 100% of branches have submitted before report send time
+        const { h: startH, m: startM } = parseTime(config.checkInStartTime, 16, 0);
+        const currentMinutes = hours * 60 + minutes;
+        const startMinutes = startH * 60 + startM;
+        if (currentMinutes >= startMinutes && !triggeredReports.has(reportKey)) {
+          checkAllAccountsEarlyCompletion().catch(() => {});
+        }
+      }
+    } catch (schedErr) {
+      console.error("[regional-dispatch] Scheduler error:", schedErr.message || schedErr);
     }
   }, 10000).unref();
 
-  
-  console.log("[regional-dispatch] Automation scheduler active (Asia/Colombo 11:00 PM reminder & 11:30 PM report & 100% early completion auto-trigger)");
+  console.log("[regional-dispatch] Automation scheduler active with customizable check-in, report, and multiple reminder times");
 }
 
 export async function manualTrigger(accountKey, mode, customTargets = null) {

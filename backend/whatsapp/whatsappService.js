@@ -646,7 +646,7 @@ export async function sendReportToRecipient({ phoneNumber, imageDataUrl, imageDa
   };
 }
 
-export async function sendTextToRecipient({ phoneNumber, message }) {
+export async function sendTextToRecipient({ phoneNumber, message, mentions }) {
   if (!socket || connectionState !== "connected") {
     throw new Error("WhatsApp is not connected. Scan QR from Settings.");
   }

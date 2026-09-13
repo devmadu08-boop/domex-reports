@@ -1,4 +1,4 @@
-import { Bot, Check, Copy, KeyRound, Loader2, LogOut, MessageCircle, QrCode, RefreshCw, Save, Send } from "lucide-react";
+import { Bot, Check, Copy, KeyRound, Loader2, LogOut, MessageCircle, Plus, QrCode, RefreshCw, Save, Send, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getWhatsAppQr, getWhatsAppStatus, logoutWhatsApp, reconnectWhatsApp, fetchWhatsAppGroups, getWhatsAppPairingCode } from "../services/whatsappApi.js";
 import { getDispatchTargets } from "../services/dispatchStorage.js";
@@ -24,10 +24,35 @@ export default function RegionalWhatsAppSettings({ accountKey: propAccountKey, s
     enabled: false,
     groupId: "",
     geminiApiKey: "",
-    targets: []
+    targets: [],
+    checkInStartTime: "16:00",
+    reportSendTime: "23:30",
+    reminderTimes: ["23:00"]
   });
 
   const [testMode, setTestMode] = useState("");
+
+  function handleAddReminderTime() {
+    setConfig(c => ({
+      ...c,
+      reminderTimes: [...(c.reminderTimes || ["23:00"]), "22:00"]
+    }));
+  }
+
+  function handleUpdateReminderTime(index, value) {
+    setConfig(c => {
+      const copy = [...(c.reminderTimes || ["23:00"])];
+      copy[index] = value;
+      return { ...c, reminderTimes: copy };
+    });
+  }
+
+  function handleRemoveReminderTime(index) {
+    setConfig(c => {
+      const copy = (c.reminderTimes || ["23:00"]).filter((_, i) => i !== index);
+      return { ...c, reminderTimes: copy.length > 0 ? copy : ["23:00"] };
+    });
+  }
 
   async function loadConfig() {
     try {
@@ -46,7 +71,16 @@ export default function RegionalWhatsAppSettings({ accountKey: propAccountKey, s
             }));
           }
         }
-        setConfig(prev => ({ ...prev, ...data, targets: targets || prev.targets || [] }));
+        setConfig(prev => ({
+          ...prev,
+          ...data,
+          targets: targets || prev.targets || [],
+          checkInStartTime: data.checkInStartTime || prev.checkInStartTime || "16:00",
+          reportSendTime: data.reportSendTime || prev.reportSendTime || "23:30",
+          reminderTimes: Array.isArray(data.reminderTimes) && data.reminderTimes.length > 0
+            ? data.reminderTimes
+            : (prev.reminderTimes || ["23:00"])
+        }));
       }
     } catch (e) { console.error("Error loading config", e); }
   }
@@ -383,7 +417,7 @@ export default function RegionalWhatsAppSettings({ accountKey: propAccountKey, s
             <input type="checkbox" checked={config.enabled} onChange={e => setConfig(c => ({...c, enabled: e.target.checked}))} className="h-5 w-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
             <div>
               <p className="font-black text-[#071537]">Enable Auto Report</p>
-              <p className="text-xs font-semibold text-[#071537]/60">Read dispatches from 4 PM to 11 PM and auto-reply at 11:30 PM</p>
+              <p className="text-xs font-semibold text-[#071537]/60">Read dispatches automatically and send reminders and performance reports to group</p>
             </div>
           </label>
 
@@ -401,6 +435,80 @@ export default function RegionalWhatsAppSettings({ accountKey: propAccountKey, s
             </select>
           </div>
 
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="rounded-2xl border border-white/70 bg-white/50 p-4">
+              <label className="mb-2 block text-sm font-black text-[#071537]">
+                Check-in Start Time (පණිවිඩ කියවීම අරඹන වේලාව)
+              </label>
+              <input
+                type="time"
+                value={config.checkInStartTime || "16:00"}
+                onChange={e => setConfig(c => ({ ...c, checkInStartTime: e.target.value }))}
+                className="w-full rounded-2xl border border-white/80 bg-white/70 px-4 py-3 font-mono font-bold text-[#071537] outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+              />
+              <p className="mt-2 text-xs font-semibold text-slate-500">
+                මෙම වේලාවෙන් පසු group එකට ලැබෙන dispatch counts capture කිරීම ආරම්භ කරයි (Default: 16:00 / 04:00 PM).
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-white/70 bg-white/50 p-4">
+              <label className="mb-2 block text-sm font-black text-[#071537]">
+                Report Send Time (අවසන් වාර්තාව යවන වේලාව)
+              </label>
+              <input
+                type="time"
+                value={config.reportSendTime || "23:30"}
+                onChange={e => setConfig(c => ({ ...c, reportSendTime: e.target.value }))}
+                className="w-full rounded-2xl border border-white/80 bg-white/70 px-4 py-3 font-mono font-bold text-[#071537] outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+              />
+              <p className="mt-2 text-xs font-semibold text-slate-500">
+                අවසන් Performance Report පින්තූරය WhatsApp Group එකට යවන වේලාව (Default: 23:30 / 11:30 PM).
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/70 bg-white/50 p-4">
+            <div className="mb-3 flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <label className="block text-sm font-black text-[#071537]">Reminder Send Times (Reminder යවන වේලාවන්)</label>
+                <p className="text-xs font-semibold text-slate-500">Group එකට Reminder පණිවිඩ ස්වයංක්‍රීයව යැවෙන වේලාවන් (ඔබට අවශ්‍ය පරිදි තව වේලාවන් එකතු කළ හැක)</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleAddReminderTime}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-blue-50 px-3 py-1.5 text-xs font-black text-blue-700 hover:bg-blue-100 transition shadow-sm border border-blue-200"
+              >
+                <Plus className="h-3.5 w-3.5" /> Add Reminder Time
+              </button>
+            </div>
+
+            <div className="space-y-2.5">
+              {(config.reminderTimes || ["23:00"]).map((timeStr, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <span className="grid h-9 w-9 place-items-center rounded-xl bg-white text-xs font-black text-slate-700 shadow-sm border border-slate-200">
+                    {idx + 1}
+                  </span>
+                  <input
+                    type="time"
+                    value={timeStr}
+                    onChange={e => handleUpdateReminderTime(idx, e.target.value)}
+                    className="flex-1 rounded-xl border border-white/80 bg-white/80 px-3 py-2.5 font-mono font-bold text-[#071537] outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                  {(config.reminderTimes || []).length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveReminderTime(idx)}
+                      title="Remove reminder time"
+                      className="grid h-9 w-9 place-items-center rounded-xl border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
           <div className="rounded-2xl border border-white/70 bg-white/50 p-4">
             <label className="mb-2 block text-sm font-black text-[#071537]">OpenRouter API Key</label>
             <input
@@ -412,17 +520,35 @@ export default function RegionalWhatsAppSettings({ accountKey: propAccountKey, s
             />
             <p className="mt-2 text-xs font-semibold text-slate-500">Required for extracting numbers from messy group messages.</p>
           </div>
+
+          <div className="rounded-2xl border border-violet-200 bg-violet-50/60 p-4">
+            <h3 className="mb-1 text-sm font-black text-violet-950 flex items-center gap-2">
+              <Bot className="h-4 w-4 text-violet-600" />
+              WhatsApp Bot .menu Commands
+            </h3>
+            <p className="mb-2 text-xs font-semibold text-violet-900/70">
+              WhatsApp Group එක තුළ හෝ බොට්ගේ Direct Message එකක් තුළ ඕනෑම මොහොතක පහත commands භාවිතා කළ හැක:
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs font-bold text-violet-900">
+              <div className="rounded-xl bg-white/80 p-2 border border-violet-100"><code className="font-mono text-violet-700">.menu</code> - සම්පූර්ණ Menu එක</div>
+              <div className="rounded-xl bg-white/80 p-2 border border-violet-100"><code className="font-mono text-violet-700">.status</code> - Live Status විස්තර</div>
+              <div className="rounded-xl bg-white/80 p-2 border border-violet-100"><code className="font-mono text-violet-700">.reminder</code> - Group Reminder</div>
+              <div className="rounded-xl bg-white/80 p-2 border border-violet-100"><code className="font-mono text-violet-700">.report</code> - Performance Report</div>
+              <div className="rounded-xl bg-white/80 p-2 border border-violet-100"><code className="font-mono text-violet-700">.summary</code> - අද දවසේ සාරාංශය</div>
+              <div className="rounded-xl bg-white/80 p-2 border border-violet-100"><code className="font-mono text-violet-700">.delete</code> - අවසන් පණිවිඩය Delete</div>
+            </div>
+          </div>
         </div>
       </div>
 
       <div className="glass-panel p-6">
         <h2 className="mb-4 text-xl font-black text-[#071537]">Manual Triggers (Testing)</h2>
-        <div className="flex gap-4">
+        <div className="flex gap-4 flex-wrap">
           <button type="button" onClick={() => handleTest("reminder")} disabled={!!testMode} className="inline-flex items-center gap-2 rounded-2xl bg-amber-500 px-5 py-3 text-sm font-black text-white shadow-lg hover:bg-amber-600 disabled:opacity-50">
-            <MessageCircle className="h-4 w-4" /> Trigger 11:00 PM Reminder
+            <MessageCircle className="h-4 w-4" /> Send Reminder to Group Now
           </button>
           <button type="button" onClick={() => handleTest("report")} disabled={!!testMode} className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 text-sm font-black text-white shadow-lg hover:bg-blue-700 disabled:opacity-50">
-            <Send className="h-4 w-4" /> Trigger 11:30 PM Report
+            <Send className="h-4 w-4" /> Send Performance Report Now
           </button>
         </div>
       </div>
