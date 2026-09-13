@@ -2,7 +2,13 @@ const whatsappApiBaseUrl = (import.meta.env.VITE_WHATSAPP_API_BASE_URL || "").re
 let whatsappAccountKey = "default";
 
 export function getWhatsAppAccountKey(session) {
-  if (!session || session.role === "admin" || session.role === "superadmin") {
+  if (
+    !session ||
+    session.role === "admin" ||
+    session.role === "superadmin" ||
+    session.role === "regional_manager" ||
+    session.role === "regional"
+  ) {
     return "default";
   }
   const identity = String(session.userId || session.branchName || "branch").trim().toLowerCase();

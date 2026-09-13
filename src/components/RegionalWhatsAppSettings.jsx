@@ -3,7 +3,10 @@ import { useEffect, useState } from "react";
 import { getWhatsAppQr, getWhatsAppStatus, logoutWhatsApp, reconnectWhatsApp, fetchWhatsAppGroups, getWhatsAppPairingCode } from "../services/whatsappApi.js";
 import { getDispatchTargets } from "../services/dispatchStorage.js";
 
-export default function RegionalWhatsAppSettings({ accountKey, session }) {
+export default function RegionalWhatsAppSettings({ accountKey: propAccountKey, session }) {
+  const accountKey = (session?.role === "admin" || session?.role === "superadmin" || session?.role === "regional_manager" || session?.role === "regional" || !propAccountKey)
+    ? "default"
+    : propAccountKey;
   const [status, setStatus] = useState("disconnected");
   const [qrCode, setQrCode] = useState(null);
   const [groups, setGroups] = useState([]);
@@ -80,7 +83,7 @@ export default function RegionalWhatsAppSettings({ accountKey, session }) {
   useEffect(() => {
     loadConfig();
     fetchStatus();
-    const interval = setInterval(fetchStatus, 5000);
+    const interval = setInterval(fetchStatus, 3000);
     return () => clearInterval(interval);
   }, [accountKey]);
 
