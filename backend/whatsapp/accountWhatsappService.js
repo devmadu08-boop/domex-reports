@@ -20,11 +20,11 @@ export function subscribeToAccountMessages(listener) {
   return () => accountMessageListeners.delete(listener);
 }
 
-// Forward incoming messages on primary WhatsApp socket to accountMessageListeners as "default" account
-primary.subscribeToPrimaryWhatsAppMessages(({ messages, type }) => {
+// Forward incoming messages and updates on primary WhatsApp socket to accountMessageListeners as "default" account
+primary.subscribeToPrimaryWhatsAppMessages(({ messages, updates, type }) => {
   for (const listener of accountMessageListeners) {
     try {
-      listener("default", { messages: messages || [], type });
+      listener("default", { messages: messages || [], updates: updates || [], type });
     } catch (error) {
       console.error("[whatsapp-account-message-listener:default]", error.message || error);
     }
@@ -171,6 +171,15 @@ async function startAccountClient(accountKey, force = false) {
           listener(runtime.key, { messages: messages || [], type });
         } catch (error) {
           console.error(`[whatsapp-account-message-listener:${runtime.key}]`, error.message || error);
+        }
+      }
+    });
+    socket.ev.on("messages.update", (updates) => {
+      for (const listener of accountMessageListeners) {
+        try {
+          listener(runtime.key, { messages: [], updates: updates || [], type: "update" });
+        } catch (error) {
+          console.error(`[whatsapp-account-update-listener:${runtime.key}]`, error.message || error);
         }
       }
     });

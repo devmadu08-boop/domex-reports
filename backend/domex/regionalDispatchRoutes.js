@@ -8,7 +8,9 @@ import {
   saveRegionalDispatchReport,
   deleteRegionalDispatchReport,
   getRecentSentMessages,
-  deleteSentMessage
+  deleteSentMessage,
+  setManualBranchDispatch,
+  resetManualBranchDispatch
 } from "./regionalDispatchAutomationService.js";
 import { normalizeWhatsAppAccountKey, getAccountGroupMembers } from "../whatsapp/accountWhatsappService.js";
 
@@ -143,6 +145,36 @@ router.post("/delete-message", async (request, response) => {
     response.json({ ok: true, ...result });
   } catch (error) {
     console.error("[regional-dispatch] Delete message error:", error.message || error);
+    response.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+router.post("/set-dispatch", async (request, response) => {
+  try {
+    const key = accountKey(request);
+    const { branch, dispatch } = request.body || {};
+    if (!branch || dispatch == null) {
+      return response.status(400).json({ ok: false, error: "branch and dispatch are required." });
+    }
+    const result = await setManualBranchDispatch(key, branch, dispatch, "api");
+    response.json({ ok: true, ...result });
+  } catch (error) {
+    console.error("[regional-dispatch] Set dispatch error:", error.message || error);
+    response.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+router.post("/reset-dispatch", async (request, response) => {
+  try {
+    const key = accountKey(request);
+    const { branch } = request.body || {};
+    if (!branch) {
+      return response.status(400).json({ ok: false, error: "branch is required." });
+    }
+    const result = await resetManualBranchDispatch(key, branch);
+    response.json({ ok: true, ...result });
+  } catch (error) {
+    console.error("[regional-dispatch] Reset dispatch error:", error.message || error);
     response.status(500).json({ ok: false, error: error.message });
   }
 });

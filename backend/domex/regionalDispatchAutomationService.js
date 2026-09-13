@@ -15,6 +15,7 @@ const configFile = path.join(dataDir, "config.json");
 const reportsFile = path.join(dataDir, "reports.json");
 const sentMessagesFile = path.join(dataDir, "sent-messages.json");
 const messagesDir = path.join(dataDir, "messages");
+const dispatchesDir = path.join(dataDir, "dispatches");
 
 // Helper to ensure directory exists
 async function ensureDir(dir) {
@@ -276,6 +277,429 @@ function getTodayString() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Colombo" }).format(new Date());
 }
 
+function normalizeBranchStem(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .replace(/th/g, "t")
+    .replace(/[aeiou]+$/g, "");
+}
+
+function levenshteinDistance(a, b) {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const matrix = [];
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) matrix[i][j] = matrix[i - 1][j - 1];
+      else matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j] + 1);
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+export function findBranchInLine(line, targetBranches) {
+  const cleanLine = String(line || "").toLowerCase().replace(/[^a-z0-9]/g, " ");
+  const lineWords = cleanLine.split(/\s+/).filter(Boolean);
+  const stemWords = lineWords.map(normalizeBranchStem);
+
+  for (const t of targetBranches) {
+    const orig = t.branch || t.branch_name || t;
+    const cleanT = String(orig).toLowerCase().replace(/[^a-z0-9]/g, "");
+    const stemT = normalizeBranchStem(orig);
+
+    if (cleanLine.includes(cleanT)) return orig;
+
+    if (stemT.length >= 4) {
+      for (let i = 0; i < stemWords.length; i++) {
+        const sw = stemWords[i];
+        if (sw.length >= 4 && (sw.includes(stemT) || stemT.includes(sw))) {
+          return orig;
+        }
+      }
+    }
+
+    if (cleanT.length >= 5) {
+      for (const w of lineWords) {
+        if (w.length >= 4 && Math.abs(w.length - cleanT.length) <= 2) {
+          if (levenshteinDistance(w, cleanT) <= (cleanT.length >= 7 ? 2 : 1)) {
+            return orig;
+          }
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+export function extractAllBranchDispatchesFromText(text, targets) {
+  if (!text || !Array.isArray(targets) || targets.length === 0) return [];
+  const lines = String(text).split("\n");
+  const results = [];
+  const seen = new Set();
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const branch = findBranchInLine(trimmed, targets);
+    if (branch && !seen.has(branch)) {
+      const cleanLine = trimmed
+        .replace(/\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b/g, "")
+        .replace(/\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b/g, "")
+        .replace(/\b\d{1,2}[-/.]\d{1,2}\b/g, "")
+        .replace(/\b\d{1,2}[:.]\d{2}(?::\d{2})?\s*(?:am|pm)?\b/gi, "");
+      const numbers = cleanLine.match(/\b\d{1,5}\b/g);
+      if (numbers && numbers.length > 0) {
+        const val = parseInt(numbers[numbers.length - 1], 10);
+        if (!isNaN(val) && val >= 0) {
+          results.push({ branch, dispatch: val });
+          seen.add(branch);
+        }
+      }
+    }
+  }
+  return results;
+}
+
+export function extractMessageInfo(msg) {
+  if (!msg) return null;
+  const key = msg.key;
+  const id = key?.id;
+  const remoteJid = key?.remoteJid;
+  const participant = key?.participant || msg.participant;
+  const fromMe = Boolean(key?.fromMe);
+
+  let m = msg.message;
+  if (m?.ephemeralMessage?.message) m = m.ephemeralMessage.message;
+  if (m?.viewOnceMessage?.message) m = m.viewOnceMessage.message;
+  if (m?.viewOnceMessageV2?.message) m = m.viewOnceMessageV2.message;
+  if (m?.documentWithCaptionMessage?.message) m = m.documentWithCaptionMessage.message;
+  if (m?.editedMessage?.message) m = m.editedMessage.message;
+
+  const protocolMsg = m?.protocolMessage;
+  if (protocolMsg) {
+    const pType = protocolMsg.type;
+    // REVOKE (0)
+    if (pType === 0 || pType === "REVOKE") {
+      return {
+        type: "revoke",
+        targetKey: protocolMsg.key,
+        targetId: protocolMsg.key?.id || id,
+        key,
+        remoteJid,
+        participant,
+        fromMe
+      };
+    }
+    // MESSAGE_EDIT (14)
+    if (pType === 14 || pType === "MESSAGE_EDIT") {
+      let editM = protocolMsg.editedMessage;
+      if (editM?.ephemeralMessage?.message) editM = editM.ephemeralMessage.message;
+      if (editM?.viewOnceMessage?.message) editM = editM.viewOnceMessage.message;
+      if (editM?.documentWithCaptionMessage?.message) editM = editM.documentWithCaptionMessage.message;
+      const text = (
+        editM?.conversation ||
+        editM?.extendedTextMessage?.text ||
+        editM?.imageMessage?.caption ||
+        editM?.videoMessage?.caption ||
+        ""
+      ).trim();
+      return {
+        type: "edit",
+        targetKey: protocolMsg.key,
+        targetId: protocolMsg.key?.id || id,
+        text,
+        key,
+        remoteJid,
+        participant,
+        fromMe
+      };
+    }
+  }
+
+  const text = (
+    m?.conversation ||
+    m?.extendedTextMessage?.text ||
+    m?.imageMessage?.caption ||
+    m?.videoMessage?.caption ||
+    m?.documentMessage?.caption ||
+    ""
+  ).trim();
+
+  return {
+    type: "normal",
+    id,
+    key,
+    remoteJid,
+    participant,
+    fromMe,
+    text
+  };
+}
+
+export async function getDailyState(accountKey) {
+  const today = getTodayString();
+  const clean = String(accountKey || "default").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  await ensureDir(path.join(dispatchesDir, today));
+  const file = path.join(dispatchesDir, today, `${clean}.json`);
+  try {
+    const raw = await fs.readFile(file, "utf8");
+    const data = JSON.parse(raw);
+    if (data && typeof data === "object") {
+      if (!data.dispatches) data.dispatches = {};
+      if (!data.messages) data.messages = {};
+      if (!data.manualOverrides) data.manualOverrides = {};
+      return data;
+    }
+  } catch {}
+  return { date: today, dispatches: {}, messages: {}, manualOverrides: {} };
+}
+
+export async function saveDailyState(accountKey, state) {
+  const today = getTodayString();
+  const clean = String(accountKey || "default").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  await ensureDir(path.join(dispatchesDir, today));
+  const keys = new Set([
+    clean,
+    clean.startsWith("user-") ? clean.replace(/^user-/, "") : `user-${clean}`
+  ]);
+  for (const k of keys) {
+    const file = path.join(dispatchesDir, today, `${k}.json`);
+    try {
+      await fs.writeFile(file, JSON.stringify(state, null, 2));
+    } catch (e) {
+      console.error("[regional-dispatch] Error writing daily state JSON:", e);
+    }
+  }
+}
+
+export async function syncMessagesTxtFile(accountKey, state) {
+  const today = getTodayString();
+  await ensureDir(path.join(messagesDir, today));
+  const clean = String(accountKey || "default").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  
+  const lines = [];
+  const sortedMsgs = Object.values(state.messages || {}).sort((a, b) => 
+    String(a.timestamp || "").localeCompare(String(b.timestamp || ""))
+  );
+  for (const m of sortedMsgs) {
+    if (m.text) {
+      lines.push(m.text);
+    } else if (m.branch && m.dispatch != null) {
+      lines.push(`${m.branch} dispatch ${m.dispatch}`);
+    }
+  }
+
+  for (const [branch, data] of Object.entries(state.manualOverrides || {})) {
+    if (data?.dispatch != null && !sortedMsgs.some(m => m.branch === branch)) {
+      lines.push(`${branch} dispatch ${data.dispatch}`);
+    }
+  }
+
+  const content = lines.join("\n---\n") + (lines.length > 0 ? "\n---\n" : "");
+
+  const keys = new Set([
+    clean,
+    clean.startsWith("user-") ? clean.replace(/^user-/, "") : `user-${clean}`
+  ]);
+  for (const k of keys) {
+    const msgFile = path.join(messagesDir, today, `${k}.txt`);
+    try {
+      await fs.writeFile(msgFile, content, "utf8");
+    } catch (e) {
+      console.error("[regional-dispatch] Error syncing txt file:", e);
+    }
+  }
+}
+
+export async function recordBranchDispatch(accountKey, { messageId, branch, dispatch, text, sender, fromMe, source = "group" }) {
+  const state = await getDailyState(accountKey);
+  const cfg = await getRegionalConfig(accountKey);
+  const targets = Array.isArray(cfg?.targets) ? cfg.targets : [];
+  const canonicalBranch = findBranchInLine(branch, targets) || branch;
+
+  if (messageId) {
+    state.messages[messageId] = {
+      id: messageId,
+      branch: canonicalBranch,
+      dispatch: Number(dispatch),
+      text,
+      sender: sender || "",
+      fromMe: Boolean(fromMe),
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  state.dispatches[canonicalBranch] = {
+    dispatch: Number(dispatch),
+    messageId: messageId || "",
+    sender: sender || "",
+    updatedAt: new Date().toISOString(),
+    source
+  };
+
+  await saveDailyState(accountKey, state);
+  await syncMessagesTxtFile(accountKey, state);
+  return state;
+}
+
+export async function handleMessageEdit(accountKey, { targetId, targetKey, newText, sender, fromMe }) {
+  const state = await getDailyState(accountKey);
+  const cfg = await getRegionalConfig(accountKey);
+  const targets = Array.isArray(cfg?.targets) ? cfg.targets : [];
+  const extracted = extractAllBranchDispatchesFromText(newText, targets);
+
+  if (extracted.length > 0) {
+    const item = extracted[0];
+    const oldBranch = state.messages[targetId]?.branch;
+    const oldDispatch = state.messages[targetId]?.dispatch;
+
+    if (oldBranch && oldBranch !== item.branch) {
+      if (state.dispatches[oldBranch]?.messageId === targetId) {
+        delete state.dispatches[oldBranch];
+      }
+    }
+
+    state.messages[targetId] = {
+      id: targetId,
+      branch: item.branch,
+      dispatch: item.dispatch,
+      text: newText,
+      sender: sender || state.messages[targetId]?.sender || "",
+      fromMe: Boolean(fromMe),
+      timestamp: new Date().toISOString(),
+      edited: true
+    };
+
+    state.dispatches[item.branch] = {
+      dispatch: item.dispatch,
+      messageId: targetId,
+      sender: sender || state.dispatches[item.branch]?.sender || "",
+      updatedAt: new Date().toISOString(),
+      source: "edit"
+    };
+
+    await saveDailyState(accountKey, state);
+    await syncMessagesTxtFile(accountKey, state);
+
+    console.log(`[regional-dispatch] ✏️ Message edited for ${item.branch}: ${oldDispatch ?? "unknown"} -> ${item.dispatch}`);
+
+    if (targetKey) {
+      reactToAccountMessage(accountKey, {
+        remoteJid: targetKey.remoteJid,
+        key: targetKey,
+        emoji: "✅"
+      }).catch(() => {});
+    }
+
+    checkAllAccountsEarlyCompletion().catch(() => {});
+    return true;
+  } else {
+    if (state.messages[targetId]) {
+      const oldBranch = state.messages[targetId].branch;
+      delete state.messages[targetId];
+      if (state.dispatches[oldBranch]?.messageId === targetId) {
+        delete state.dispatches[oldBranch];
+      }
+      await saveDailyState(accountKey, state);
+      await syncMessagesTxtFile(accountKey, state);
+      console.log(`[regional-dispatch] ✏️ Message edited to non-dispatch text. Cleared record for ${oldBranch}`);
+      return true;
+    }
+  }
+  return false;
+}
+
+export async function handleMessageRevoke(accountKey, { targetId, targetKey }) {
+  if (!targetId) return false;
+  const state = await getDailyState(accountKey);
+  if (state.messages[targetId]) {
+    const deleted = state.messages[targetId];
+    const bName = deleted.branch;
+    const val = deleted.dispatch;
+    delete state.messages[targetId];
+
+    if (state.dispatches[bName]?.messageId === targetId) {
+      delete state.dispatches[bName];
+      const earlier = Object.values(state.messages).filter(m => m.branch === bName).pop();
+      if (earlier) {
+        state.dispatches[bName] = {
+          dispatch: earlier.dispatch,
+          messageId: earlier.id,
+          sender: earlier.sender,
+          updatedAt: earlier.timestamp,
+          source: "earlier_message"
+        };
+      }
+    }
+
+    await saveDailyState(accountKey, state);
+    await syncMessagesTxtFile(accountKey, state);
+
+    console.log(`[regional-dispatch] 🗑️ Revoked/deleted message ${targetId} for ${bName} (${val}). Record removed.`);
+    return true;
+  }
+  return false;
+}
+
+export async function setManualBranchDispatch(accountKey, branch, dispatch, source = "inbox") {
+  const state = await getDailyState(accountKey);
+  const cfg = await getRegionalConfig(accountKey);
+  const targets = Array.isArray(cfg?.targets) ? cfg.targets : [];
+  const canonicalBranch = findBranchInLine(branch, targets) || branch;
+
+  if (!state.manualOverrides) state.manualOverrides = {};
+  if (!state.dispatches) state.dispatches = {};
+
+  const val = Number(dispatch) || 0;
+  state.manualOverrides[canonicalBranch] = {
+    dispatch: val,
+    updatedAt: new Date().toISOString(),
+    source
+  };
+  state.dispatches[canonicalBranch] = {
+    dispatch: val,
+    updatedAt: new Date().toISOString(),
+    source
+  };
+
+  await saveDailyState(accountKey, state);
+  await syncMessagesTxtFile(accountKey, state);
+  checkAllAccountsEarlyCompletion().catch(() => {});
+  return { ok: true, branch: canonicalBranch, dispatch: val };
+}
+
+export async function resetManualBranchDispatch(accountKey, branch) {
+  const state = await getDailyState(accountKey);
+  const cfg = await getRegionalConfig(accountKey);
+  const targets = Array.isArray(cfg?.targets) ? cfg.targets : [];
+  const canonicalBranch = findBranchInLine(branch, targets) || branch;
+
+  if (state.manualOverrides && state.manualOverrides[canonicalBranch]) {
+    delete state.manualOverrides[canonicalBranch];
+  }
+  if (state.dispatches && state.dispatches[canonicalBranch]) {
+    delete state.dispatches[canonicalBranch];
+  }
+
+  const earlier = Object.values(state.messages || {}).filter(m => m.branch === canonicalBranch).pop();
+  if (earlier) {
+    state.dispatches[canonicalBranch] = {
+      dispatch: earlier.dispatch,
+      messageId: earlier.id,
+      sender: earlier.sender,
+      updatedAt: earlier.timestamp,
+      source: "earlier_message"
+    };
+  }
+
+  await saveDailyState(accountKey, state);
+  await syncMessagesTxtFile(accountKey, state);
+  return { ok: true, branch: canonicalBranch };
+}
+
 async function saveMessage(accountKey, text) {
   const today = getTodayString();
   await ensureDir(path.join(messagesDir, today));
@@ -322,6 +746,8 @@ function isAutomatedSystemMessage(text) {
     t.includes("DOMEX Regional Dispatch Assistant") ||
     t.includes("DOMEX Live Dispatch Status") ||
     t.includes("DOMEX Regional Performance Summary") ||
+    t.includes("Dispatch Count එක සාර්ථකව") ||
+    t.includes("Dispatch Count එක ඉවත් කරන ලදී") ||
     t.startsWith("📊 *Regional Dispatch") ||
     t.startsWith("🚨 *DOMEX Dispatch") ||
     t.startsWith("🤖 *DOMEX") ||
@@ -439,7 +865,15 @@ Group එකට අවසන් වරට යැවූ පණිවිඩය Del
 6️⃣ *View Saved Reports* (.saved)
 පසුගිය සුරකින ලද වාර්තා ලැයිස්තුව බැලීම
 
-💡 _ඔබට අවශ්‍ය අංකය (1, 2, 3, 4, 5, 6) හෝ Command එක ටයිප් කර එවන්න._`;
+7️⃣ *Edit/Set Dispatch Count* (.set <ශාඛාව> <ගණන>)
+ශාඛාවක Dispatch එක Inbox එකෙන් වෙනස් කිරීම
+_(උදා: *.set Middeniya 450* හෝ *Middeniya 450*)_
+
+8️⃣ *Reset Branch* (.reset <ශාඛාව>)
+ශාඛාවක Dispatch එක ඉවත් කර නැවත Pending කිරීම
+_(උදා: *.reset Middeniya*)_
+
+💡 _ඔබට අවශ්‍ය අංකය (1-8) හෝ Command එක ටයිප් කර එවන්න._`;
 
   // 1. Menu triggers
   if (
@@ -574,13 +1008,13 @@ Group එකට අවසන් වරට යැවූ පණිවිඩය Del
     return;
   }
 
-  // 6. Option 5: Delete Last Sent Message
+  // 6. Option 5: Delete Last Sent Message from Group
   if (
     cleanCmd === "5" ||
     cleanCmd === "delete" ||
-    cleanCmd.includes("delete last") ||
-    cleanCmd.includes("delete message") ||
-    cleanCmd.includes("delete for everyone")
+    cleanCmd === "delete last" ||
+    cleanCmd === "delete message" ||
+    cleanCmd === "delete for everyone"
   ) {
     try {
       const messages = await getRecentSentMessages(accountKey);
@@ -630,6 +1064,77 @@ Group එකට අවසන් වරට යැවූ පණිවිඩය Del
     return;
   }
 
+  // 8. Option 7: Edit / Set Branch Dispatch: e.g. ".set Middeniya 450" or ".edit Middeniya 450"
+  if (
+    cleanCmd === "7" ||
+    cleanCmd.startsWith("set ") ||
+    cleanCmd.startsWith("edit ") ||
+    cleanCmd.startsWith("dispatch ")
+  ) {
+    if (cleanCmd === "7") {
+      await sendBotReply(accountKey, incomingJid, "ℹ️ Dispatch එක වෙනස් කිරීමට ශාඛාව සහ අගය ටයිප් කරන්න:\n\n*උදාහරණ:*\n• `.set Middeniya 450`\n• `.edit Kahawatta 96`\n• හෝ සරලව `Middeniya 450`");
+      return;
+    }
+    const cleanArgs = cleanCmd.replace(/^(set|edit|dispatch)\s+/i, "").trim();
+    const branch = findBranchInLine(cleanArgs, config.targets || []);
+    const cleanNumbers = cleanArgs
+      .replace(/\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b/g, "")
+      .replace(/\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b/g, "")
+      .replace(/\b\d{1,2}[:.]\d{2}(?::\d{2})?\s*(?:am|pm)?\b/gi, "");
+    const numbers = cleanNumbers.match(/\b\d{1,5}\b/g);
+
+    if (branch && numbers && numbers.length > 0) {
+      const count = parseInt(numbers[numbers.length - 1], 10);
+      await setManualBranchDispatch(accountKey, branch, count, "inbox");
+      const targetObj = (config.targets || []).find(t => (t.branch || t.branch_name) === branch);
+      const tgt = targetObj ? Number(targetObj.target) : 0;
+      const perc = tgt > 0 ? Math.round((count / tgt) * 100) : 0;
+      await sendBotReply(accountKey, incomingJid, `✅ *${branch}* ශාඛාවේ Dispatch Count එක *${count}* ලෙස සාර්ථකව සටහන් විය!\n\n🎯 Target: *${tgt}*\n📊 ප්‍රගතිය: *${perc}%*\n\n_(අද Live Status එකට සහ Report එකට මෙම අගය එකතු කර ඇත)_`);
+      return;
+    } else {
+      await sendBotReply(accountKey, incomingJid, "⚠️ ශාඛාවේ නම හෝ Dispatch අගය හඳුනාගත නොහැකි විය.\nකරුණාකර `.set [ශාඛාව] [අගය]` ලෙස එවන්න.\n_(උදා: `.set Middeniya 450`)_");
+      return;
+    }
+  }
+
+  // 9. Option 8: Reset Branch Dispatch: e.g. ".reset Middeniya" or ".delete Middeniya"
+  if (
+    cleanCmd === "8" ||
+    cleanCmd.startsWith("reset ") ||
+    (cleanCmd.startsWith("delete ") && cleanCmd.trim() !== "delete")
+  ) {
+    if (cleanCmd === "8") {
+      await sendBotReply(accountKey, incomingJid, "ℹ️ ශාඛාවක Dispatch Count ඉවත් කිරීමට:\n\n*උදාහරණ:*\n• `.reset Middeniya`\n• `.delete Middeniya`");
+      return;
+    }
+    const branchPart = cleanCmd.replace(/^(reset|delete)\s+/i, "").trim();
+    const branch = findBranchInLine(branchPart, config.targets || []);
+    if (branch) {
+      await resetManualBranchDispatch(accountKey, branch);
+      await sendBotReply(accountKey, incomingJid, `🗑️ *${branch}* ශාඛාවේ Dispatch Count එක සාර්ථකව ඉවත් කරන ලදී. ශාඛාව නැවත Pending ලැයිස්තුවට එක් විය.`);
+      return;
+    } else {
+      await sendBotReply(accountKey, incomingJid, `⚠️ "${branchPart}" නමින් ශාඛාවක් හමු නොවීය. කරුණාකර නිවැරදි ශාඛාවේ නම ලබා දෙන්න.`);
+      return;
+    }
+  }
+
+  // 10. Direct input in 1-on-1 private chat: e.g. manager just types "Middeniya 450"
+  if (!incomingJid.endsWith("@g.us")) {
+    const extracted = extractAllBranchDispatchesFromText(text, config.targets || []);
+    if (extracted.length > 0) {
+      for (const item of extracted) {
+        await setManualBranchDispatch(accountKey, item.branch, item.dispatch, "inbox");
+      }
+      const item = extracted[0];
+      const targetObj = (config.targets || []).find(t => (t.branch || t.branch_name) === item.branch);
+      const tgt = targetObj ? Number(targetObj.target) : 0;
+      const perc = tgt > 0 ? Math.round((item.dispatch / tgt) * 100) : 0;
+      await sendBotReply(accountKey, incomingJid, `✅ *${item.branch}* ශාඛාවේ Dispatch Count එක *${item.dispatch}* ලෙස සාර්ථකව සටහන් විය!\n\n🎯 Target: *${tgt}*\n📊 ප්‍රගතිය: *${perc}%*\n\n_(අද Live Status එකට සහ Report එකට මෙම අගය එකතු කර ඇත)_`);
+      return;
+    }
+  }
+
   // Handle specific date report query: e.g. ".report 2026-09-11" or "2026-09-11"
   const dateMatch = cleanCmd.match(/\b\d{4}-\d{2}-\d{2}\b/);
   if (dateMatch && (cleanCmd.includes("report") || cleanCmd.includes("saved") || cleanCmd === dateMatch[0])) {
@@ -667,43 +1172,100 @@ Group එකට අවසන් වරට යැවූ පණිවිඩය Del
 }
 
 // 1. Subscribe to messages from accountWhatsappService
-subscribeToAccountMessages(async (accountKey, { messages, type }) => {
+subscribeToAccountMessages(async (accountKey, { messages, updates, type }) => {
   const { config, configKey } = await resolveActiveConfig(accountKey);
   const targetGroupId = String(config.groupId || "").trim();
 
+  // Handle Baileys messages.update (revokes & edits)
+  if (type === "update" && Array.isArray(updates)) {
+    for (const upd of updates) {
+      const updKey = upd.key;
+      const updId = updKey?.id;
+      const updJid = updKey?.remoteJid;
+      if (!updId) continue;
+      if (targetGroupId && updJid !== targetGroupId) continue;
+
+      const updMsg = upd.update?.message;
+      const proto = updMsg?.protocolMessage;
+      
+      // 1. Revoke / Delete
+      if (
+        proto?.type === 0 ||
+        proto?.type === "REVOKE" ||
+        upd.update?.messageStubType === 1 ||
+        (upd.update && upd.update.message === null)
+      ) {
+        const targetId = proto?.key?.id || updId;
+        await handleMessageRevoke(configKey, { targetId, targetKey: proto?.key || updKey });
+      }
+      // 2. Edit
+      else if (proto?.type === 14 || proto?.type === "MESSAGE_EDIT") {
+        const targetId = proto?.key?.id || updId;
+        const editM = proto.editedMessage;
+        const editText = (
+          editM?.conversation ||
+          editM?.extendedTextMessage?.text ||
+          editM?.imageMessage?.caption ||
+          ""
+        ).trim();
+        if (editText) {
+          await handleMessageEdit(configKey, {
+            targetId,
+            targetKey: proto?.key || updKey,
+            newText: editText,
+            sender: updKey?.participant || updKey?.remoteJid,
+            fromMe: Boolean(updKey?.fromMe)
+          });
+        }
+      }
+    }
+    return;
+  }
+
   for (const msg of messages || []) {
-    if (!msg?.message) continue;
-    const msgId = msg.key?.id;
-    if (msgId && recentBotReplyIds.has(msgId)) continue;
+    const info = extractMessageInfo(msg);
+    if (!info) continue;
 
-    const incomingJid = String(msg.key?.remoteJid || "").trim();
-
-    let m = msg.message;
-    if (m?.ephemeralMessage?.message) m = m.ephemeralMessage.message;
-    if (m?.viewOnceMessage?.message) m = m.viewOnceMessage.message;
-    if (m?.viewOnceMessageV2?.message) m = m.viewOnceMessageV2.message;
-    if (m?.documentWithCaptionMessage?.message) m = m.documentWithCaptionMessage.message;
-
-    const text = (
-      m?.conversation ||
-      m?.extendedTextMessage?.text ||
-      m?.imageMessage?.caption ||
-      m?.videoMessage?.caption ||
-      m?.documentMessage?.caption ||
-      ""
-    ).trim();
-
-    if (!text) continue;
-
-    // Ignore messages sent by the bot's own automated replies
-    if (isAutomatedSystemMessage(text)) continue;
-
+    const incomingJid = String(info.remoteJid || "").trim();
     const isGroup = incomingJid.endsWith("@g.us");
 
-    // Check if message is a bot command (e.g. .menu, .status, .report, .reminder, .summary, .delete, .saved, or 1-6)
+    // Case A: Revoke message in group
+    if (info.type === "revoke") {
+      if (targetGroupId && incomingJid === targetGroupId) {
+        await handleMessageRevoke(configKey, {
+          targetId: info.targetId,
+          targetKey: info.targetKey || info.key
+        });
+      }
+      continue;
+    }
+
+    // Case B: Edited message in group
+    if (info.type === "edit") {
+      if (targetGroupId && incomingJid === targetGroupId) {
+        await handleMessageEdit(configKey, {
+          targetId: info.targetId,
+          targetKey: info.targetKey || info.key,
+          newText: info.text,
+          sender: info.participant || incomingJid,
+          fromMe: info.fromMe
+        });
+      }
+      continue;
+    }
+
+    // Case C: Normal message
+    const text = info.text;
+    const msgId = info.id;
+    if (!text) continue;
+    if (msgId && recentBotReplyIds.has(msgId)) continue;
+    if (isAutomatedSystemMessage(text)) continue;
+
+    // Check if message is a bot command
     const isBotCommand = isGroup
-      ? /^[./!#](menu|help|start|bot|බොට්|status|live|reminder|report|summary|delete|saved)\b/i.test(text.trim())
-      : /^[./!#]?(menu|help|start|bot|බොට්|status|live|reminder|report|summary|delete|saved|1|2|3|4|5|6)\b/i.test(text.trim());
+      ? /^[./!#](menu|help|start|bot|බොට්|status|live|reminder|report|summary|delete|saved|set|edit|reset)\b/i.test(text.trim())
+      : /^[./!#]?(menu|help|start|bot|බොට්|status|live|reminder|report|summary|delete|saved|set|edit|reset|1|2|3|4|5|6|7|8)\b/i.test(text.trim()) ||
+        Boolean(findBranchInLine(text, config.targets || []) && /\b\d{1,5}\b/.test(text));
 
     if (isBotCommand) {
       console.log(`[regional-dispatch:bot] 🤖 Bot command detected: "${text.slice(0, 30)}" from ${incomingJid}`);
@@ -711,7 +1273,7 @@ subscribeToAccountMessages(async (accountKey, { messages, type }) => {
       continue;
     }
 
-    // Case 1: Message in the target dispatch group
+    // Target dispatch group during check-in window
     if (isGroup && targetGroupId && incomingJid === targetGroupId) {
       const colomboNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Colombo" }));
       const { h: startH, m: startM } = parseTime(config.checkInStartTime, 16, 0);
@@ -719,32 +1281,42 @@ subscribeToAccountMessages(async (accountKey, { messages, type }) => {
       const startMinutes = startH * 60 + startM;
 
       if (currentMinutes >= startMinutes) {
-        console.log(`[regional-dispatch] 📥 Captured group message (fromMe: ${Boolean(msg.key?.fromMe)}) for ${configKey}: "${text.slice(0, 70)}"`);
-        await saveMessage(configKey, text);
-
-        // React with ✅ if the message contains a recognized branch dispatch or numbers!
         const targets = Array.isArray(config.targets) ? config.targets : [];
-        const matchedBranch = findBranchInLine(text, targets);
-        const hasNumbers = /\b\d{1,5}\b/.test(text);
-        if (matchedBranch || hasNumbers) {
+        const extracted = extractAllBranchDispatchesFromText(text, targets);
+
+        if (extracted.length > 0) {
+          console.log(`[regional-dispatch] 📥 Captured ${extracted.length} branch dispatch(es) from ${info.participant || incomingJid}: "${text.slice(0, 70)}"`);
+          for (const item of extracted) {
+            await recordBranchDispatch(configKey, {
+              messageId: msgId,
+              branch: item.branch,
+              dispatch: item.dispatch,
+              text,
+              sender: info.participant || incomingJid,
+              fromMe: info.fromMe,
+              source: "group"
+            });
+          }
+
+          // React ONLY when valid branch dispatch is captured!
           try {
             await reactToAccountMessage(accountKey, {
               remoteJid: incomingJid,
               key: msg.key,
               emoji: "✅"
             });
-            console.log(`[regional-dispatch] ✅ Reacted to message from ${msg.key?.participant || msg.key?.remoteJid} for branch ${matchedBranch || 'dispatch'}`);
+            console.log(`[regional-dispatch] ✅ Reacted to message from ${info.participant || incomingJid} for branch(es): ${extracted.map(e => e.branch).join(", ")}`);
           } catch (reactErr) {
             console.warn("[regional-dispatch] Reaction error:", reactErr.message || reactErr);
           }
-        }
 
-        checkAllAccountsEarlyCompletion().catch(() => {});
+          checkAllAccountsEarlyCompletion().catch(() => {});
+        }
       }
       continue;
     }
 
-    // Case 2: Interactive WhatsApp Bot (Direct Messages or Self-Chat / Note to Self)
+    // Direct Messages or Note to Self
     if (!isGroup) {
       await handleBotCommand(configKey, config, incomingJid, msg, text);
     }
@@ -760,64 +1332,6 @@ const FREE_OPENROUTER_MODELS = [
   "google/gemini-2.0-flash-exp:free",
   "google/gemini-2.0-flash-thinking-exp:free"
 ];
-
-function normalizeBranchStem(name) {
-  return String(name || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "")
-    .replace(/th/g, "t")
-    .replace(/[aeiou]+$/g, "");
-}
-
-function levenshteinDistance(a, b) {
-  if (a.length === 0) return b.length;
-  if (b.length === 0) return a.length;
-  const matrix = [];
-  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
-  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
-  for (let i = 1; i <= b.length; i++) {
-    for (let j = 1; j <= a.length; j++) {
-      if (b.charAt(i - 1) === a.charAt(j - 1)) matrix[i][j] = matrix[i - 1][j - 1];
-      else matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j] + 1);
-    }
-  }
-  return matrix[b.length][a.length];
-}
-
-function findBranchInLine(line, targetBranches) {
-  const cleanLine = String(line || "").toLowerCase().replace(/[^a-z0-9]/g, " ");
-  const lineWords = cleanLine.split(/\s+/).filter(Boolean);
-  const stemWords = lineWords.map(normalizeBranchStem);
-
-  for (const t of targetBranches) {
-    const orig = t.branch || t.branch_name || t;
-    const cleanT = String(orig).toLowerCase().replace(/[^a-z0-9]/g, "");
-    const stemT = normalizeBranchStem(orig);
-
-    if (cleanLine.includes(cleanT)) return orig;
-
-    if (stemT.length >= 4) {
-      for (let i = 0; i < stemWords.length; i++) {
-        const sw = stemWords[i];
-        if (sw.length >= 4 && (sw.includes(stemT) || stemT.includes(sw))) {
-          return orig;
-        }
-      }
-    }
-
-    if (cleanT.length >= 5) {
-      for (const w of lineWords) {
-        if (w.length >= 4 && Math.abs(w.length - cleanT.length) <= 2) {
-          if (levenshteinDistance(w, cleanT) <= (cleanT.length >= 7 ? 2 : 1)) {
-            return orig;
-          }
-        }
-      }
-    }
-  }
-
-  return null;
-}
 
 async function parseWithOpenRouter(apiKey, text, branchNames) {
   if (!text || !text.trim()) return [];
@@ -1153,23 +1667,44 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null,
       await saveRegionalConfig(activeKey, config);
     }
 
+    const dailyState = await getDailyState(activeKey);
+    const submittedMap = {};
+
+    // 1. From daily state dispatches (captured group messages, edits)
+    for (const [b, d] of Object.entries(dailyState.dispatches || {})) {
+      if (d?.dispatch != null) {
+        const canonical = findBranchInLine(b, targets) || b;
+        submittedMap[canonical] = Number(d.dispatch);
+      }
+    }
+
+    // 2. From daily state manual overrides (set via inbox or API)
+    for (const [b, d] of Object.entries(dailyState.manualOverrides || {})) {
+      if (d?.dispatch != null) {
+        const canonical = findBranchInLine(b, targets) || b;
+        submittedMap[canonical] = Number(d.dispatch);
+      }
+    }
+
     const rawText = await getTodayMessages(activeKey);
     const branchNames = targets.map(t => t.branch || t.branch_name).filter(Boolean);
+    const pendingBranchNames = branchNames.filter(b => submittedMap[b] == null);
 
     // Parse using OpenRouter
     let extractedData = [];
-    if (config.geminiApiKey && rawText.trim()) {
-      extractedData = await parseWithOpenRouter(config.geminiApiKey, rawText, branchNames);
+    if (config.geminiApiKey && rawText.trim() && pendingBranchNames.length > 0) {
+      extractedData = await parseWithOpenRouter(config.geminiApiKey, rawText, pendingBranchNames);
     }
 
-    const submittedMap = {};
     for (const item of extractedData) {
       if (item.branch && item.dispatch != null) {
         const val = Number(item.dispatch);
         if (!isNaN(val)) {
           // Find canonical target branch via fuzzy matcher
           const canonical = findBranchInLine(item.branch, targets) || item.branch;
-          submittedMap[canonical] = (submittedMap[canonical] || 0) + val;
+          if (submittedMap[canonical] == null) {
+            submittedMap[canonical] = val;
+          }
         }
       }
     }
@@ -1499,7 +2034,22 @@ export async function getRegionalLiveStatus(accountKey, customTargets = null) {
     await saveRegionalConfig(accountKey, config);
   }
 
+  const dailyState = await getDailyState(accountKey);
   const submittedMap = {};
+
+  for (const [b, d] of Object.entries(dailyState.dispatches || {})) {
+    if (d?.dispatch != null) {
+      const canonical = findBranchInLine(b, targets) || b;
+      submittedMap[canonical] = Number(d.dispatch);
+    }
+  }
+  for (const [b, d] of Object.entries(dailyState.manualOverrides || {})) {
+    if (d?.dispatch != null) {
+      const canonical = findBranchInLine(b, targets) || b;
+      submittedMap[canonical] = Number(d.dispatch);
+    }
+  }
+
   if (rawText && rawText.trim()) {
     for (const line of rawText.split("\n")) {
       const fuzzyBranch = findBranchInLine(line, targets);

@@ -13,7 +13,9 @@ import {
   Layers,
   MessageSquare,
   Send,
-  Trash2
+  Trash2,
+  Pencil,
+  X
 } from "lucide-react";
 import { getWhatsAppAccountKey } from "../../services/whatsappApi.js";
 
@@ -33,6 +35,37 @@ export default function LiveWhatsAppDispatchTracker({
   const [sendingReport, setSendingReport] = useState(false);
   const [sentMessages, setSentMessages] = useState([]);
   const [deletingId, setDeletingId] = useState(null);
+  const [editingBranch, setEditingBranch] = useState(null);
+  const [editValue, setEditValue] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  async function handleSaveBranchDispatch(branch, count) {
+    if (!branch) return;
+    setSavingEdit(true);
+    try {
+      const accountKey = getWhatsAppAccountKey(session);
+      const res = await fetch("/api/regional-dispatch/set-dispatch", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-whatsapp-account": accountKey
+        },
+        body: JSON.stringify({ branch, dispatch: Number(count) || 0 })
+      });
+      if (res.ok) {
+        setEditingBranch(null);
+        setEditValue("");
+        await fetchLiveStatus();
+      } else {
+        const data = await res.json();
+        alert("Failed to update: " + (data.error || "Unknown error"));
+      }
+    } catch (e) {
+      alert("Error: " + e.message);
+    } finally {
+      setSavingEdit(false);
+    }
+  }
 
   const fetchSentMessages = useCallback(async () => {
     try {
@@ -465,14 +498,61 @@ export default function LiveWhatsAppDispatchTracker({
                   </div>
                 </div>
 
-                <div className="text-right shrink-0">
-                  <span className="text-base font-black text-emerald-800">
-                    {b.dispatch.toLocaleString()}
-                  </span>
-                  <span className="block text-[9px] font-black uppercase tracking-wider text-emerald-600">
-                    Dispatched
-                  </span>
-                </div>
+                {editingBranch === b.branch ? (
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      className="w-16 rounded border border-emerald-400 bg-white px-1.5 py-0.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      autoFocus
+                      placeholder="Count"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleSaveBranchDispatch(b.branch, editValue);
+                        if (e.key === "Escape") setEditingBranch(null);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleSaveBranchDispatch(b.branch, editValue)}
+                      disabled={savingEdit}
+                      className="rounded bg-emerald-600 p-1 text-white hover:bg-emerald-700 transition"
+                      title="Save"
+                    >
+                      <Check className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingBranch(null)}
+                      className="rounded bg-slate-200 p-1 text-slate-600 hover:bg-slate-300 transition"
+                      title="Cancel"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <div className="text-right shrink-0">
+                      <span className="text-base font-black text-emerald-800">
+                        {b.dispatch.toLocaleString()}
+                      </span>
+                      <span className="block text-[9px] font-black uppercase tracking-wider text-emerald-600">
+                        Dispatched
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingBranch(b.branch);
+                        setEditValue(String(b.dispatch));
+                      }}
+                      className="rounded p-1 text-slate-400 hover:bg-emerald-100 hover:text-emerald-700 transition"
+                      title="Edit Dispatch Count"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
 
@@ -494,14 +574,61 @@ export default function LiveWhatsAppDispatchTracker({
                   </div>
                 </div>
 
-                <div className="text-right shrink-0">
-                  <span className="rounded-lg bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800">
-                    Pending
-                  </span>
-                  <span className="block text-[9px] font-bold text-slate-400 mt-0.5">
-                    Not sent yet
-                  </span>
-                </div>
+                {editingBranch === b.branch ? (
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      className="w-16 rounded border border-amber-400 bg-white px-1.5 py-0.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      autoFocus
+                      placeholder="Count"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleSaveBranchDispatch(b.branch, editValue);
+                        if (e.key === "Escape") setEditingBranch(null);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleSaveBranchDispatch(b.branch, editValue)}
+                      disabled={savingEdit}
+                      className="rounded bg-amber-600 p-1 text-white hover:bg-amber-700 transition"
+                      title="Save"
+                    >
+                      <Check className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingBranch(null)}
+                      className="rounded bg-slate-200 p-1 text-slate-600 hover:bg-slate-300 transition"
+                      title="Cancel"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <div className="text-right shrink-0">
+                      <span className="rounded-lg bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800">
+                        Pending
+                      </span>
+                      <span className="block text-[9px] font-bold text-slate-400 mt-0.5">
+                        Not sent yet
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingBranch(b.branch);
+                        setEditValue("");
+                      }}
+                      className="rounded p-1 text-slate-400 hover:bg-amber-100 hover:text-amber-700 transition"
+                      title="Enter Dispatch Count"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
         </div>

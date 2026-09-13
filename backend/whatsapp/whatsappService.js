@@ -225,6 +225,15 @@ export async function startWhatsAppClient(force = false) {
       }
     }
   });
+  activeSocket.ev.on("messages.update", (updates) => {
+    for (const listener of primaryMessageListeners) {
+      try {
+        listener({ messages: [], updates: updates || [], type: "update" });
+      } catch (error) {
+        console.error("[whatsapp-update-listener]", error.message || error);
+      }
+    }
+  });
   activeSocket.ev.on("messaging-history.set", ({ messages, chats, contacts }) => {
     trackContactNamesFromMessages(messages);
     trackContactNamesFromContacts(contacts);
