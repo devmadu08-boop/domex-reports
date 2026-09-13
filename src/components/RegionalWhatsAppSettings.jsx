@@ -54,7 +54,9 @@ export default function RegionalWhatsAppSettings({ accountKey, session }) {
       setStatus(data.status);
       if (data.status !== "connected") {
         const qrData = await getWhatsAppQr(accountKey);
-        setQrCode(qrData?.qrDataUrl || null);
+        if (qrData?.qrDataUrl) {
+          setQrCode(qrData.qrDataUrl);
+        }
       } else {
         setQrCode(null);
       }
@@ -92,23 +94,14 @@ export default function RegionalWhatsAppSettings({ accountKey, session }) {
 
   async function handleReconnect() {
     setIsLoading(true);
+    setQrCode(null);
     try {
       await reconnectWhatsApp(accountKey);
       setGroups([]);
       await fetchStatus();
-      for (let i = 0; i < 4; i++) {
-        await new Promise((r) => setTimeout(r, 1200));
-        const data = await getWhatsAppStatus(accountKey);
-        setStatus(data.status);
-        if (data.status !== "connected") {
-          const qrData = await getWhatsAppQr(accountKey);
-          if (qrData?.qrDataUrl) {
-            setQrCode(qrData.qrDataUrl);
-            break;
-          }
-        }
-      }
-    } finally { setIsLoading(false); }
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   async function handleLogout() {

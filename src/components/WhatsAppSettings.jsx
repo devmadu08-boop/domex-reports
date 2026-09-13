@@ -142,7 +142,9 @@ export default function WhatsAppSettings({ settings, onSaveSettings, accountLabe
 
       if (!nextStatus.connected) {
         const qr = await getWhatsAppQr();
-        setQrDataUrl(qr.qrDataUrl || "");
+        if (qr?.qrDataUrl) {
+          setQrDataUrl(qr.qrDataUrl);
+        }
       } else {
         setQrDataUrl("");
       }

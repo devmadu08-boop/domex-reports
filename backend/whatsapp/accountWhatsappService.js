@@ -273,6 +273,11 @@ export async function getAccountQr(accountKey) {
   if (isPrimary(accountKey)) return primary.getQrCode();
   const runtime = getRuntime(accountKey);
   if (!runtime.socket) await startAccountClient(runtime.key);
+  let retries = 0;
+  while (!runtime.qrDataUrl && runtime.status !== "connected" && retries < 25) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    retries++;
+  }
   return { qr: runtime.qr, qrDataUrl: runtime.qrDataUrl };
 }
 
@@ -288,6 +293,9 @@ export async function reconnectAccountWhatsApp(accountKey, options = {}) {
   runtime.reconnecting = false;
   try { previousSocket?.end(undefined); } catch { /* already closed */ }
 
+  // Allow Windows to release any open file locks from previous socket
+  await new Promise((resolve) => setTimeout(resolve, 400));
+
   if (options.forceClean || runtime.status !== "connected") {
     try {
       const credsFile = path.join(runtime.authDir, "creds.json");
@@ -299,10 +307,10 @@ export async function reconnectAccountWhatsApp(accountKey, options = {}) {
         registered = false;
       }
       if (!registered || options.forceClean) {
-        await fs.rm(runtime.authDir, { recursive: true, force: true });
+        await fs.rm(runtime.authDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
       }
     } catch {
-      await fs.rm(runtime.authDir, { recursive: true, force: true });
+      await fs.rm(runtime.authDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   }
 
@@ -311,6 +319,14 @@ export async function reconnectAccountWhatsApp(accountKey, options = {}) {
   runtime.status = "disconnected";
   runtime.connectedNumber = "";
   await startAccountClient(runtime.key, true);
+
+  // Wait for the new QR code so reconnect returns the actual status and QR data
+  let retries = 0;
+  while (!runtime.qrDataUrl && runtime.status !== "connected" && retries < 30) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    retries++;
+  }
+
   return getAccountWhatsAppStatus(runtime.key);
 }
 
@@ -517,31 +533,37 @@ export async function requestAccountPairingCode(accountKey, phoneNumber) {
         try { runtime.socket.end(undefined); } catch {}
         runtime.socket = null;
       }
-      await fs.rm(runtime.authDir, { recursive: true, force: true });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await fs.rm(runtime.authDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   } catch {
-    await fs.rm(runtime.authDir, { recursive: true, force: true });
+    await fs.rm(runtime.authDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
 
   runtime.qr = "";
   runtime.qrDataUrl = "";
   runtime.status = "disconnected";
   runtime.connectedNumber = "";
-  let socket = await startAccountClient(accountKey, true);
+  await startAccountClient(accountKey, true);
 
+  // Wait until socket has completed WebSocket/Noise handshake and emitted QR or status
   let retries = 0;
-  while ((!socket || !socket.authState?.creds) && retries < 25) {
+  while (!runtime.qr && runtime.status !== "connected" && retries < 40) {
     await new Promise((resolve) => setTimeout(resolve, 200));
-    socket = runtime.socket;
     retries++;
   }
 
-  if (!socket || typeof socket.requestPairingCode !== "function") {
-    throw new Error("Failed to initialize WhatsApp account. Please try reconnecting.");
+  if (runtime.status === "connected") {
+    throw new Error("WhatsApp is already connected for this account.");
   }
 
-  // Small delay to allow WebSocket connection handshake
-  await new Promise((resolve) => setTimeout(resolve, 600));
+  const socket = runtime.socket;
+  if (!socket || typeof socket.requestPairingCode !== "function") {
+    throw new Error("Failed to initialize WhatsApp connection. Please try reconnecting.");
+  }
+
+  // Small delay to ensure companion pairing request is cleanly registered
+  await new Promise((resolve) => setTimeout(resolve, 500));
 
   try {
     const rawCode = await socket.requestPairingCode(clean);

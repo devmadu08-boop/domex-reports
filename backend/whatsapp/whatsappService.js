@@ -353,6 +353,9 @@ export async function reconnectWhatsApp(options = {}) {
     }
   }
 
+  // Allow Windows to release any open file locks from previous socket
+  await new Promise((resolve) => setTimeout(resolve, 400));
+
   // If options.forceClean or if not currently connected, clean any unregistered/broken auth files
   if (options.forceClean || connectionState !== "connected") {
     try {
@@ -365,10 +368,10 @@ export async function reconnectWhatsApp(options = {}) {
         registered = false;
       }
       if (!registered || options.forceClean) {
-        await fs.rm(authDir, { recursive: true, force: true });
+        await fs.rm(authDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
       }
     } catch {
-      await fs.rm(authDir, { recursive: true, force: true });
+      await fs.rm(authDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   }
 
@@ -377,6 +380,14 @@ export async function reconnectWhatsApp(options = {}) {
   connectionState = "disconnected";
   connectedNumber = "";
   await startWhatsAppClient(true);
+
+  // Wait for the new QR code so reconnect returns the actual status and QR data
+  let retries = 0;
+  while (!currentQr && connectionState !== "connected" && retries < 30) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    retries++;
+  }
+
   return getWhatsAppStatus();
 }
 
@@ -831,10 +842,11 @@ export async function requestWhatsAppPairingCode(phoneNumber) {
         try { socket.end(undefined); } catch {}
         socket = null;
       }
-      await fs.rm(authDir, { recursive: true, force: true });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await fs.rm(authDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   } catch {
-    await fs.rm(authDir, { recursive: true, force: true });
+    await fs.rm(authDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
 
   currentQr = "";
@@ -843,18 +855,23 @@ export async function requestWhatsAppPairingCode(phoneNumber) {
   connectedNumber = "";
   await startWhatsAppClient(true);
 
+  // Wait until socket has completed WebSocket/Noise handshake and emitted QR or status
   let retries = 0;
-  while ((!socket || !socket.authState?.creds) && retries < 25) {
+  while (!currentQr && connectionState !== "connected" && retries < 40) {
     await new Promise((resolve) => setTimeout(resolve, 200));
     retries++;
+  }
+
+  if (connectionState === "connected") {
+    throw new Error("WhatsApp is already connected.");
   }
 
   if (!socket || typeof socket.requestPairingCode !== "function") {
     throw new Error("Failed to initialize WhatsApp connection. Please try reconnecting.");
   }
 
-  // Small delay to allow WebSocket connection handshake
-  await new Promise((resolve) => setTimeout(resolve, 600));
+  // Small delay to ensure companion pairing request is cleanly registered
+  await new Promise((resolve) => setTimeout(resolve, 500));
 
   try {
     const rawCode = await socket.requestPairingCode(clean);
