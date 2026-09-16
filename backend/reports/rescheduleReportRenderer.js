@@ -59,12 +59,19 @@ async function findBrowserExecutable() {
   const candidates = [
     process.env.DOMEX_BROWSER_PATH,
     process.env.CHROME_EXECUTABLE_PATH,
+    process.env.CHROME_PATH,
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/chromium",
+    "/snap/bin/chromium",
+    "/usr/bin/brave-browser",
+    "/usr/bin/microsoft-edge-stable",
+    "/usr/bin/microsoft-edge",
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
     "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
     "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
     "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-    "/usr/bin/google-chrome",
-    "/usr/bin/chromium",
   ].filter(Boolean);
 
   for (const candidate of candidates) {
