@@ -15,7 +15,8 @@ import {
   X,
   Sparkles,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Send
 } from "lucide-react";
 import { getWhatsAppAccountKey } from "../../services/whatsappApi.js";
 import {
@@ -36,8 +37,39 @@ export default function SavedDispatchReportsView({
   const [editingReport, setEditingReport] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState("");
+  const [resendingId, setResendingId] = useState(null);
 
   const accountKey = getWhatsAppAccountKey(session);
+
+  async function handleResendReportToGroup(report) {
+    if (!report || !report.date) return;
+    if (!window.confirm(`${report.date} දින වාර්තාව WhatsApp Group එකට නැවත (Resend) යවන්නද?`)) return;
+
+    setResendingId(report.id || report.date);
+    try {
+      const res = await fetch("/api/regional-dispatch/resend-report", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-whatsapp-account": accountKey
+        },
+        body: JSON.stringify({
+          reportId: report.id,
+          date: report.date
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        alert(`✅ ${report.date} දින Performance Report එක සාර්ථකව WhatsApp Group එකට නැවත යවන ලදී!`);
+      } else {
+        alert(`❌ Failed: ${data.error || "Could not resend report"}`);
+      }
+    } catch (err) {
+      alert("❌ Error: " + err.message);
+    } finally {
+      setResendingId(null);
+    }
+  }
 
   // Month filter options
   const months = useMemo(() => {
@@ -384,6 +416,17 @@ export default function SavedDispatchReportsView({
                   <div className="flex items-center gap-2 shrink-0 border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
                     <button
                       type="button"
+                      disabled={resendingId === (report.id || report.date)}
+                      onClick={() => handleResendReportToGroup(report)}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-black text-emerald-800 shadow-sm transition hover:bg-emerald-600 hover:text-white disabled:opacity-50"
+                      title="Resend this performance report card to WhatsApp Group"
+                    >
+                      <Send className={`h-3.5 w-3.5 ${resendingId === (report.id || report.date) ? "animate-spin" : ""}`} />
+                      <span>{resendingId === (report.id || report.date) ? "Resending..." : "Resend"}</span>
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={() => setViewingReport(report)}
                       className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-black text-slate-700 shadow-sm transition hover:bg-slate-50"
                       title="View full branch breakdown"
@@ -528,14 +571,27 @@ export default function SavedDispatchReportsView({
 
             {/* Modal Footer */}
             <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => handleStartEdit(viewingReport)}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 px-4 py-2 text-xs font-black text-white shadow-sm hover:bg-amber-600 transition"
-              >
-                <Edit3 className="h-3.5 w-3.5" />
-                <span>Edit This Report</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleStartEdit(viewingReport)}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 px-4 py-2 text-xs font-black text-white shadow-sm hover:bg-amber-600 transition"
+                >
+                  <Edit3 className="h-3.5 w-3.5" />
+                  <span>Edit This Report</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={resendingId === (viewingReport.id || viewingReport.date)}
+                  onClick={() => handleResendReportToGroup(viewingReport)}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-black text-white shadow-sm hover:bg-emerald-700 transition disabled:opacity-50"
+                  title="Resend this performance report card to WhatsApp Group"
+                >
+                  <Send className={`h-3.5 w-3.5 ${resendingId === (viewingReport.id || viewingReport.date) ? "animate-spin" : ""}`} />
+                  <span>{resendingId === (viewingReport.id || viewingReport.date) ? "Sending..." : "Resend to WhatsApp Group"}</span>
+                </button>
+              </div>
 
               <button
                 type="button"

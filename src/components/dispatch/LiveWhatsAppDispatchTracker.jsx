@@ -33,6 +33,7 @@ export default function LiveWhatsAppDispatchTracker({
   const [copiedReminder, setCopiedReminder] = useState(false);
   const [sendingReminder, setSendingReminder] = useState(false);
   const [sendingReport, setSendingReport] = useState(false);
+  const [sendingBranchReminder, setSendingBranchReminder] = useState(null);
   const [sentMessages, setSentMessages] = useState([]);
   const [deletingId, setDeletingId] = useState(null);
   const [editingBranch, setEditingBranch] = useState(null);
@@ -205,8 +206,35 @@ export default function LiveWhatsAppDispatchTracker({
     }
   }
 
+  async function handleSendSingleBranchReminder(branchName) {
+    if (!window.confirm(`${branchName} ශාඛාවට (සහ අදාළ දුරකථන අංකයට) පුද්ගලික WhatsApp Reminder එකක් යවන්නද?`)) return;
+    setSendingBranchReminder(branchName);
+    try {
+      const accountKey = getWhatsAppAccountKey(session);
+      const res = await fetch("/api/regional-dispatch/send-branch-reminder", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-whatsapp-account": accountKey
+        },
+        body: JSON.stringify({ branch: branchName })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        alert(`✅ ${branchName} ශාඛාවට Reminder එක සාර්ථකව යවන ලදී! (${data.phone})`);
+        fetchSentMessages();
+      } else {
+        alert(`❌ Failed: ${data.error || "Could not send reminder"}`);
+      }
+    } catch (e) {
+      alert("❌ Error: " + e.message);
+    } finally {
+      setSendingBranchReminder(null);
+    }
+  }
+
   async function handleDeleteMessage(msg) {
-    if (!window.confirm(`Are you sure you want to Delete for Everyone "${msg.title}" from WhatsApp group? This cannot be undone.`)) {
+    if (!window.confirm(`Are you sure you want to Delete for Everyone "${msg.title}"? This will revoke the message for everyone.`)) {
       return;
     }
     setDeletingId(msg.id);
@@ -222,7 +250,8 @@ export default function LiveWhatsAppDispatchTracker({
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.ok) {
-        alert("🗑️ Message deleted for everyone in the WhatsApp group successfully!");
+        const extra = data.deletedPersonalCount > 0 ? ` (+${data.deletedPersonalCount} personal reminders also revoked)` : "";
+        alert(`🗑️ Message deleted for everyone successfully!${extra}`);
         fetchSentMessages();
       } else {
         alert(`❌ Delete failed: ${data.error || "Could not delete message"}`);
@@ -699,6 +728,15 @@ export default function LiveWhatsAppDispatchTracker({
                     </div>
                     <button
                       type="button"
+                      disabled={sendingBranchReminder === b.branch}
+                      onClick={() => handleSendSingleBranchReminder(b.branch)}
+                      className="rounded p-1 text-purple-600 hover:bg-purple-100 transition disabled:opacity-50"
+                      title={`Send WhatsApp Reminder to ${b.branch}`}
+                    >
+                      <Send className={`h-3.5 w-3.5 ${sendingBranchReminder === b.branch ? "animate-spin" : ""}`} />
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => {
                         setEditingBranch(b.branch);
                         setEditValue("");
@@ -751,7 +789,7 @@ export default function LiveWhatsAppDispatchTracker({
           </div>
         ) : (
           <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-            {sentMessages.slice(0, 15).map((msg) => (
+            {sentMessages.slice(0, 20).map((msg) => (
               <div
                 key={msg.id}
                 className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/80 p-2.5 transition hover:bg-slate-100"
@@ -759,13 +797,22 @@ export default function LiveWhatsAppDispatchTracker({
                 <div className="min-w-0 flex-1 pr-3">
                   <div className="flex items-center gap-2">
                     <span className={`rounded-md px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider ${
-                      msg.type === "reminder" ? "bg-amber-100 text-amber-800 border border-amber-200" : "bg-blue-100 text-blue-800 border border-blue-200"
+                      msg.type === "personal_reminder"
+                        ? "bg-purple-100 text-purple-800 border border-purple-200"
+                        : msg.type === "reminder"
+                        ? "bg-amber-100 text-amber-800 border border-amber-200"
+                        : "bg-blue-100 text-blue-800 border border-blue-200"
                     }`}>
-                      {msg.type}
+                      {msg.type === "personal_reminder" ? "Personal" : msg.type}
                     </span>
                     <h5 className="text-xs font-bold text-slate-900 truncate">
                       {msg.title}
                     </h5>
+                    {msg.recipientPhone && (
+                      <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100">
+                        to {msg.recipientPhone}
+                      </span>
+                    )}
                     <span className="text-[10px] text-slate-400">
                       {new Date(msg.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
@@ -780,7 +827,7 @@ export default function LiveWhatsAppDispatchTracker({
                 <div className="shrink-0 flex items-center gap-2">
                   {msg.status === "deleted" ? (
                     <span className="rounded-lg bg-rose-50 px-2.5 py-1 text-[10px] font-black text-rose-600 border border-rose-200">
-                      Deleted for Everyone
+                      Deleted for Everyone {msg.deletedPersonalCount > 0 ? `(+${msg.deletedPersonalCount} personal)` : ""}
                     </span>
                   ) : (
                     <button
@@ -788,7 +835,7 @@ export default function LiveWhatsAppDispatchTracker({
                       disabled={deletingId === msg.id}
                       onClick={() => handleDeleteMessage(msg)}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-bold text-rose-700 shadow-sm transition hover:bg-rose-600 hover:text-white disabled:opacity-50"
-                      title="Delete this message for everyone from the WhatsApp group"
+                      title={msg.type === "personal_reminder" ? "Delete personal reminder for everyone" : "Delete group reminder and all personal reminders for everyone"}
                     >
                       <Trash2 className={`h-3 w-3 ${deletingId === msg.id ? "animate-spin" : ""}`} />
                       <span>{deletingId === msg.id ? "Deleting..." : "Delete for Everyone"}</span>

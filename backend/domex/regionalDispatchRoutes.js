@@ -11,7 +11,9 @@ import {
   deleteSentMessage,
   setManualBranchDispatch,
   resetManualBranchDispatch,
-  resetAllBranchDispatches
+  resetAllBranchDispatches,
+  sendSingleBranchReminder,
+  resendRegionalDispatchReport
 } from "./regionalDispatchAutomationService.js";
 import { normalizeWhatsAppAccountKey, getAccountGroupMembers } from "../whatsapp/accountWhatsappService.js";
 
@@ -188,6 +190,37 @@ router.post("/reset-all", async (request, response) => {
   } catch (error) {
     console.error("[regional-dispatch] Reset all dispatches error:", error.message || error);
     response.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+router.post("/send-branch-reminder", async (request, response) => {
+  try {
+    const key = accountKey(request);
+    const { branch, customPhone } = request.body || {};
+    if (!branch) {
+      return response.status(400).json({ ok: false, error: "branch is required." });
+    }
+    const result = await sendSingleBranchReminder(key, { branch, customPhone });
+    response.json({ ok: true, ...result });
+  } catch (error) {
+    console.error("[regional-dispatch] Send branch reminder error:", error.message || error);
+    response.status(400).json({ ok: false, error: error.message });
+  }
+});
+
+router.post("/resend-report", async (request, response) => {
+  try {
+    const key = accountKey(request);
+    const { reportId, date, groupId } = request.body || {};
+    const dateOrId = reportId || date;
+    if (!dateOrId) {
+      return response.status(400).json({ ok: false, error: "reportId or date is required." });
+    }
+    const result = await resendRegionalDispatchReport(key, dateOrId, { groupId });
+    response.json({ ok: true, ...result });
+  } catch (error) {
+    console.error("[regional-dispatch] Resend report error:", error.message || error);
+    response.status(400).json({ ok: false, error: error.message });
   }
 });
 

@@ -145,16 +145,18 @@ export async function recordSentMessage(accountKey, entry) {
       type: entry.type || "text",
       title: entry.title || "Sent Message",
       groupId: entry.groupId || "",
+      recipientPhone: entry.recipientPhone || "",
       accountKey: accountKey || "default",
       messageKey: entry.messageKey || null,
       messageKeys: Array.isArray(entry.messageKeys) ? entry.messageKeys : (entry.messageKey ? [entry.messageKey] : []),
+      personalMessages: Array.isArray(entry.personalMessages) ? entry.personalMessages : [],
       sentAt: entry.sentAt || new Date().toISOString(),
       status: "sent",
       preview: entry.preview || ""
     };
 
     all.unshift(record);
-    if (all.length > 100) all = all.slice(0, 100);
+    if (all.length > 150) all = all.slice(0, 150);
 
     await fs.writeFile(sentMessagesFile, JSON.stringify(all, null, 2));
     return record;
@@ -181,28 +183,58 @@ export async function deleteSentMessage(accountKey, messageId) {
   const target = all[idx];
   const activeKey = accountKey || target.accountKey || "default";
 
+  // Target destination can be a group (target.groupId) or personal chat (target.recipientPhone)
+  const targetDestination = target.groupId || target.recipientPhone;
+
   const keysToDelete = Array.isArray(target.messageKeys) && target.messageKeys.length > 0
     ? target.messageKeys
     : (target.messageKey ? [target.messageKey] : []);
 
-  if (keysToDelete.length === 0) {
-    throw new Error("No message key found for revoking this message");
+  let mainResult = null;
+  if (targetDestination && keysToDelete.length > 0) {
+    try {
+      mainResult = await deleteAccountMessage(activeKey, {
+        phoneNumber: targetDestination,
+        messageKeys: keysToDelete,
+        messageKey: target.messageKey
+      });
+    } catch (err) {
+      console.warn(`[regional-dispatch] Main message revoke error:`, err.message || err);
+    }
   }
 
-  const res = await deleteAccountMessage(activeKey, {
-    phoneNumber: target.groupId,
-    messageKeys: keysToDelete,
-    messageKey: target.messageKey
-  });
+  // Also delete all linked personal messages from branch personal chats if present
+  let deletedPersonalCount = 0;
+  if (Array.isArray(target.personalMessages) && target.personalMessages.length > 0) {
+    for (const pMsg of target.personalMessages) {
+      const pPhone = pMsg.phone;
+      const pKeys = Array.isArray(pMsg.messageKeys) && pMsg.messageKeys.length > 0
+        ? pMsg.messageKeys
+        : (pMsg.messageKey ? [pMsg.messageKey] : []);
+      if (pPhone && pKeys.length > 0) {
+        try {
+          await deleteAccountMessage(activeKey, {
+            phoneNumber: pPhone,
+            messageKeys: pKeys,
+            messageKey: pMsg.messageKey
+          });
+          deletedPersonalCount++;
+        } catch (pErr) {
+          console.warn(`[regional-dispatch] Personal message revoke error for ${pPhone}:`, pErr.message || pErr);
+        }
+      }
+    }
+  }
 
   all[idx] = {
     ...target,
     status: "deleted",
-    deletedAt: new Date().toISOString()
+    deletedAt: new Date().toISOString(),
+    deletedPersonalCount
   };
 
   await fs.writeFile(sentMessagesFile, JSON.stringify(all, null, 2));
-  return { ok: true, result: res };
+  return { ok: true, result: mainResult, deletedPersonalCount };
 }
 
 
@@ -287,6 +319,45 @@ export function toInternationalPhone(raw) {
     return "94" + digits;
   }
   return digits;
+}
+
+export async function resolveConnectedActiveKey(accountKey) {
+  const cleanKey = String(accountKey || "default").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  const candidateKeys = [
+    cleanKey.startsWith("user-") ? cleanKey : `user-${cleanKey}`,
+    cleanKey.replace(/^user-/, ""),
+    accountKey,
+    "default"
+  ].filter(Boolean);
+
+  for (const ck of candidateKeys) {
+    try {
+      const st = await getAccountWhatsAppStatus(ck);
+      if (st && st.status === "connected") {
+        return ck;
+      }
+    } catch (e) {}
+  }
+  return null;
+}
+
+export async function resolveLidPhone(lidUser, activeKey = "default") {
+  const clean = String(lidUser || "").replace(/@.*$/, "").replace(/:\d+$/, "").replace(/\D/g, "");
+  if (!clean) return null;
+  const candidateDirs = [
+    path.resolve("backend", "data", "whatsapp-auth"),
+    path.resolve("backend", "data", "whatsapp-meter-auth"),
+    path.resolve("backend", "data", "whatsapp-accounts", activeKey || "default")
+  ];
+  for (const dir of candidateDirs) {
+    try {
+      const revFile = path.join(dir, `lid-mapping-${clean}_reverse.json`);
+      const raw = await fs.readFile(revFile, "utf8");
+      const phone = JSON.parse(raw);
+      if (phone && String(phone).length >= 9) return String(phone).replace(/\D/g, "");
+    } catch (e) {}
+  }
+  return null;
 }
 
 function normalizeBranchStem(name) {
@@ -2328,12 +2399,13 @@ ${submitted.length > 0 ? submitted.map(b => `✅ *${b}*: ${submittedMap[b]}`).jo
       seenGroupIds.add(config.groupId);
 
       // Send personalized WhatsApp reminder to each unsubmitted branch's assigned person
+      const sentPersonalMessages = [];
       for (const t of unsubmittedTargets) {
         const bName = t.branch || t.branch_name;
         const tgt = targetMap[bName] || 0;
         let targetPhone = t.assigned_phone || t.assignedPhone || t.assigned_jid || t.assignedJid;
         if (targetPhone && String(targetPhone).replace(/\D/g, "").length > 13) {
-          const resolved = await resolveLidPhone(targetPhone);
+          const resolved = await resolveLidPhone(targetPhone, activeKey);
           if (resolved) targetPhone = resolved;
         }
         const cleanPhone = toInternationalPhone(targetPhone);
@@ -2358,11 +2430,34 @@ ${submitted.length > 0 ? submitted.map(b => `✅ *${b}*: ${submittedMap[b]}`).jo
 — Regional Management (DOMEX Express)`;
 
           try {
-            await sendAccountRecipientText(activeKey, {
+            const pSendRes = await sendAccountRecipientText(activeKey, {
               phoneNumber: cleanPhone,
               message: personalMsg
             });
             console.log(`[regional-dispatch] 👤 Sent personal reminder to ${bName} (${cleanPhone} - ${assignedName || 'assigned'})`);
+            if (pSendRes) {
+              const pKey = pSendRes.primaryKey || pSendRes.messageKey;
+              const pKeys = pSendRes.messageKeys || (pKey ? [pKey] : []);
+              sentPersonalMessages.push({
+                branch: bName,
+                phone: cleanPhone,
+                name: assignedName,
+                messageKey: pKey,
+                messageKeys: pKeys
+              });
+
+              // Also record individual personal_reminder so user can revoke it separately if desired
+              await recordSentMessage(activeKey, {
+                type: "personal_reminder",
+                title: `Reminder - ${bName}`,
+                recipientPhone: cleanPhone,
+                branch: bName,
+                messageKey: pKey,
+                messageKeys: pKeys,
+                sentAt: new Date().toISOString(),
+                preview: personalMsg.slice(0, 140) + "..."
+              });
+            }
           } catch (pErr) {
             console.warn(`[regional-dispatch] Failed personal reminder to ${bName} (${cleanPhone}):`, pErr.message || pErr);
           }
@@ -2376,6 +2471,7 @@ ${submitted.length > 0 ? submitted.map(b => `✅ *${b}*: ${submittedMap[b]}`).jo
         groupId: config.groupId,
         messageKey: sendRes?.messageKey,
         messageKeys: sendRes?.messageKeys,
+        personalMessages: sentPersonalMessages,
         sentAt: new Date().toISOString(),
         preview: reminderMsg.slice(0, 140) + "..."
       });
@@ -2559,6 +2655,186 @@ export function startRegionalDispatchAutomation() {
 
 export async function manualTrigger(accountKey, mode, customTargets = null) {
   return await runRegionalAutomation(mode, accountKey, customTargets);
+}
+
+export async function sendSingleBranchReminder(accountKey, { branch, customPhone } = {}) {
+  const activeKey = (await resolveConnectedActiveKey(accountKey)) || accountKey || "default";
+  const st = await getAccountWhatsAppStatus(activeKey);
+  if (st?.status !== "connected") {
+    throw new Error("WhatsApp is disconnected. Please connect WhatsApp in Settings before sending reminders.");
+  }
+
+  const config = await getRegionalConfig(activeKey);
+  const targets = Array.isArray(config.targets) ? config.targets : [];
+
+  let matchedTarget = targets.find(t => {
+    const name = (t.branch || t.branch_name || "").toLowerCase().trim();
+    return name === String(branch || "").toLowerCase().trim();
+  });
+
+  if (!matchedTarget) {
+    const fuzzyName = findBranchInLine(branch, targets);
+    if (fuzzyName) {
+      matchedTarget = targets.find(t => (t.branch || t.branch_name) === fuzzyName);
+    }
+  }
+
+  const bName = matchedTarget ? (matchedTarget.branch || matchedTarget.branch_name) : String(branch || "").trim();
+  const tgt = matchedTarget ? (Number(matchedTarget.target) || 0) : 0;
+
+  let targetPhone = customPhone || (matchedTarget ? (matchedTarget.assigned_phone || matchedTarget.assignedPhone || matchedTarget.assigned_jid || matchedTarget.assignedJid) : null);
+  if (targetPhone && String(targetPhone).replace(/\D/g, "").length > 13) {
+    const resolved = await resolveLidPhone(targetPhone, activeKey);
+    if (resolved) targetPhone = resolved;
+  }
+
+  const cleanPhone = toInternationalPhone(targetPhone);
+  if (!cleanPhone) {
+    throw new Error(`No valid phone number assigned for branch "${bName}". Please assign a phone number in Branch Targets.`);
+  }
+
+  const assignedName = (matchedTarget?.assigned_name && matchedTarget.assigned_name !== matchedTarget.assigned_phone && matchedTarget.assigned_name !== cleanPhone)
+    ? String(matchedTarget.assigned_name).trim()
+    : "";
+
+  const reminderDeadline = config.reportSendTime ? `රාත්‍රී ${config.reportSendTime}` : "රාත්‍රී 11.30";
+
+  const personalMsg = 
+`🚨 *DOMEX Dispatch Reminder*
+
+සුභ සන්ධ්‍යාවක්${assignedName ? ` ${assignedName}` : ""}!
+ඔබ භාරව සිටින *${bName}* ශාඛාවේ අද දින Dispatch Count එක මෙතෙක් ලැබී නොමැත.
+
+🏢 *ශාඛාව:* ${bName}
+🎯 *දෛනික Target එක:* ${tgt}
+⏰ *අවසන් වේලාව:* ${reminderDeadline} ට පෙර
+
+කරුණාකර ඔබගේ Dispatch Count එක මෙම Chat එකට (උදා: *${bName} 80* හෝ *80*) Reply කරන්න, නැතහොත් Regional WhatsApp Group එකට යොමු කරන්න.
+
+ස්තූතියි!
+— Regional Management (DOMEX Express)`;
+
+  const sendRes = await sendAccountRecipientText(activeKey, {
+    phoneNumber: cleanPhone,
+    message: personalMsg
+  });
+
+  const record = await recordSentMessage(activeKey, {
+    type: "personal_reminder",
+    title: `Reminder - ${bName}`,
+    recipientPhone: cleanPhone,
+    branch: bName,
+    messageKey: sendRes?.primaryKey || sendRes?.messageKey,
+    messageKeys: sendRes?.messageKeys || (sendRes?.messageKey ? [sendRes.messageKey] : []),
+    sentAt: new Date().toISOString(),
+    preview: personalMsg.slice(0, 140) + "..."
+  });
+
+  console.log(`[regional-dispatch] 👤 Sent single branch reminder to ${bName} (${cleanPhone}) via ${activeKey}`);
+  return {
+    ok: true,
+    branch: bName,
+    phone: cleanPhone,
+    record,
+    sendResult: sendRes
+  };
+}
+
+export async function resendRegionalDispatchReport(accountKey, dateOrId, options = {}) {
+  const activeKey = (await resolveConnectedActiveKey(accountKey)) || accountKey || "default";
+  const st = await getAccountWhatsAppStatus(activeKey);
+  if (st?.status !== "connected") {
+    throw new Error("WhatsApp is disconnected. Please connect WhatsApp in Settings before sending reports.");
+  }
+
+  const reports = await getRegionalDispatchReports(activeKey);
+  const report = reports.find(r => r.id === dateOrId || r.date === dateOrId);
+  if (!report) {
+    throw new Error(`Report not found for identifier "${dateOrId}".`);
+  }
+
+  const config = await getRegionalConfig(activeKey);
+  const targetGroup = options.groupId || config.groupId;
+  if (!targetGroup) {
+    throw new Error("No WhatsApp Group ID configured in settings. Please set Regional Group ID.");
+  }
+
+  const dateStr = report.date || getTodayString();
+  const rows = Array.isArray(report.items) ? [...report.items] : [];
+  rows.sort((a, b) => (Number(b.percentage) || 0) - (Number(a.percentage) || 0));
+
+  let totalTarget = 0;
+  let totalDispatch = 0;
+  for (const r of rows) {
+    totalTarget += Number(r.target) || 0;
+    totalDispatch += Number(r.dispatch) || 0;
+  }
+  const overallPercentage = totalTarget > 0 ? Math.round((totalDispatch / totalTarget) * 100) : (report.summary?.overallPercentage || 0);
+
+  const summary = {
+    totalTarget: report.summary?.totalTarget || totalTarget,
+    totalDispatch: report.summary?.totalDispatch || totalDispatch,
+    overallPercentage: report.summary?.overallPercentage || overallPercentage,
+    topBranch: rows.length > 0 ? rows[0] : null,
+    lowestBranch: rows.length > 0 ? rows[rows.length - 1] : null
+  };
+
+  let base64Img = "";
+  try {
+    base64Img = await renderDispatchImage(
+      dateStr,
+      rows,
+      summary,
+      config.userName || "Regional Manager",
+      config.userRole || "Regional Manager"
+    );
+  } catch (e) {
+    console.error("[regional-dispatch] Playwright render failed on resend, falling back to text:", e);
+  }
+
+  const submitted = rows.filter(r => (Number(r.dispatch) || 0) > 0);
+  const unsubmitted = rows.filter(r => (Number(r.dispatch) || 0) <= 0);
+
+  let caption = `📊 *Regional Dispatch Performance (Resent)*\nDate: ${dateStr}\nTotal Dispatched: ${summary.totalDispatch}\nAchievement: ${summary.overallPercentage}%\n\n`;
+  caption += `*ලබා දී ඇති ශාඛාවන්:*\n${submitted.length > 0 ? submitted.map(b => `✅ ${b.branch || b.branch_name}: ${b.dispatch}`).join("\n") : "කිසිවක් නැත"}\n\n`;
+  if (unsubmitted.length > 0) {
+    caption += `*ලබා දී නොමැති ශාඛාවන්:*\n${unsubmitted.map(b => `❌ ${b.branch || b.branch_name} (Target: ${b.target || 0})`).join("\n")}`;
+  } else {
+    caption += `✅ *සියලුම ශාඛාවන් Dispatch Counts ලබා දී ඇත!*`;
+  }
+
+  let sendRes = null;
+  if (base64Img) {
+    sendRes = await sendAccountRecipientReport(activeKey, {
+      phoneNumber: targetGroup,
+      imageDataUrl: base64Img,
+      caption: caption
+    });
+  } else {
+    sendRes = await sendAccountRecipientText(activeKey, {
+      phoneNumber: targetGroup,
+      message: caption
+    });
+  }
+
+  const record = await recordSentMessage(activeKey, {
+    type: "report",
+    title: `Resent Report - ${dateStr} (${summary.overallPercentage}%)`,
+    groupId: targetGroup,
+    messageKey: sendRes?.primaryKey || sendRes?.messageKey,
+    messageKeys: sendRes?.messageKeys || (sendRes?.messageKey ? [sendRes.messageKey] : []),
+    sentAt: new Date().toISOString(),
+    preview: `Resent: Dispatched ${summary.totalDispatch}/${summary.totalTarget} (${summary.overallPercentage}%)`
+  });
+
+  console.log(`[regional-dispatch] 📊 Resent report for ${dateStr} to ${targetGroup} via ${activeKey}`);
+  return {
+    ok: true,
+    date: dateStr,
+    groupId: targetGroup,
+    record,
+    sendResult: sendRes
+  };
 }
 
 export async function getRegionalLiveStatus(accountKey, customTargets = null) {
