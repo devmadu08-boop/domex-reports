@@ -44,7 +44,7 @@ export default function BranchTargetModal({ targets, onTargetsChange, onClose, s
     async function loadMembers() {
       setLoadingMembers(true);
       try {
-        const accountKey = getWhatsAppAccountKey(session);
+        const accountKey = "default";
         const res = await fetch("/api/regional-dispatch/group-members", {
           headers: { "x-whatsapp-account": accountKey }
         });
@@ -93,7 +93,7 @@ export default function BranchTargetModal({ targets, onTargetsChange, onClose, s
 
   async function syncTargetsToBackend(updatedTargets) {
     try {
-      const accountKey = getWhatsAppAccountKey(session);
+      const accountKey = "default";
       const cfgRes = await fetch("/api/regional-dispatch/config", {
         headers: { "x-whatsapp-account": accountKey }
       });

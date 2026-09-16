@@ -181,7 +181,7 @@ export async function deleteSentMessage(accountKey, messageId) {
   }
 
   const target = all[idx];
-  const activeKey = accountKey || target.accountKey || "default";
+  const activeKey = await getRegionalManagerActiveKey();
 
   // Target destination can be a group (target.groupId) or personal chat (target.recipientPhone)
   const targetDestination = target.groupId || target.recipientPhone;
@@ -248,22 +248,65 @@ async function readAllConfigs() {
   }
 }
 
+export function isRegionalManagerAccount(accountKey) {
+  if (!accountKey) return true;
+  const clean = String(accountKey).trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  return (
+    clean === "default" ||
+    clean === "user-default" ||
+    clean === "admin" ||
+    clean === "user-admin" ||
+    clean === "regional" ||
+    clean === "user-regional" ||
+    clean === "regional-manager" ||
+    clean === "user-regional-manager"
+  );
+}
+
+export async function getRegionalManagerActiveKey() {
+  const candidates = [
+    "default",
+    "user-default",
+    "admin",
+    "user-admin",
+    "regional",
+    "user-regional",
+    "regional-manager",
+    "user-regional-manager"
+  ];
+  for (const k of candidates) {
+    try {
+      const st = await getAccountWhatsAppStatus(k);
+      if (st && st.status === "connected") {
+        return k;
+      }
+    } catch (e) {}
+  }
+  return "default";
+}
+
 export async function getRegionalConfig(accountKey) {
   const configs = await readAllConfigs();
-  const clean = String(accountKey || "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-  const candidates = [
-    clean,
-    clean.startsWith("user-") ? clean.replace(/^user-/, "") : `user-${clean}`,
-    accountKey,
-    "default"
-  ];
-  let cfg = null;
-  for (const k of candidates) {
-    if (configs[k]) {
-      cfg = configs[k];
-      break;
-    }
+  const clean = String(accountKey || "default").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+
+  // If a branch account queries regional config, strictly return disabled!
+  // Regional dispatch is exclusively controlled by the Regional Manager.
+  if (!isRegionalManagerAccount(clean)) {
+    return {
+      enabled: false,
+      groupId: "",
+      geminiApiKey: "",
+      targets: [],
+      checkInStartTime: "16:00",
+      reportSendTime: "23:30",
+      reminderTimes: ["23:00"],
+      userName: "",
+      userRole: "branch",
+      isBranchLogin: true
+    };
   }
+
+  const cfg = configs["default"] || configs[clean] || {};
   return {
     enabled: Boolean(cfg?.enabled),
     groupId: String(cfg?.groupId || "").trim(),
@@ -275,13 +318,12 @@ export async function getRegionalConfig(accountKey) {
       ? cfg.reminderTimes
       : (cfg?.reminderTime ? [String(cfg.reminderTime).trim()] : ["23:00"]),
     userName: cfg?.userName || "",
-    userRole: cfg?.userRole || ""
+    userRole: cfg?.userRole || "regional_manager"
   };
 }
 
 export async function saveRegionalConfig(accountKey, payload) {
   const configs = await readAllConfigs();
-  const clean = String(accountKey || "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
   const data = {
     enabled: Boolean(payload.enabled),
     groupId: String(payload.groupId || "").trim(),
@@ -293,16 +335,21 @@ export async function saveRegionalConfig(accountKey, payload) {
       ? payload.reminderTimes.map(t => String(t || "").trim()).filter(Boolean)
       : (payload.reminderTime ? [String(payload.reminderTime).trim()] : ["23:00"]),
     userName: payload.userName || "",
-    userRole: payload.userRole || ""
+    userRole: payload.userRole || "regional_manager"
   };
-  configs[clean] = data;
-  if (clean.startsWith("user-")) {
-    configs[clean.replace(/^user-/, "")] = data;
-  } else {
-    configs[`user-${clean}`] = data;
+
+  // Always store regional dispatch configuration under "default"
+  configs["default"] = data;
+
+  // Purge any branch configs that may have been saved previously so they never cause duplicate cron execution
+  for (const k of Object.keys(configs)) {
+    if (k !== "default" && !isRegionalManagerAccount(k)) {
+      delete configs[k];
+    }
   }
+
   await fs.writeFile(configFile, JSON.stringify(configs, null, 2));
-  return configs[clean];
+  return configs["default"];
 }
 
 function getTodayString() {
@@ -322,23 +369,9 @@ export function toInternationalPhone(raw) {
 }
 
 export async function resolveConnectedActiveKey(accountKey) {
-  const cleanKey = String(accountKey || "default").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-  const candidateKeys = [
-    cleanKey.startsWith("user-") ? cleanKey : `user-${cleanKey}`,
-    cleanKey.replace(/^user-/, ""),
-    accountKey,
-    "default"
-  ].filter(Boolean);
-
-  for (const ck of candidateKeys) {
-    try {
-      const st = await getAccountWhatsAppStatus(ck);
-      if (st && st.status === "connected") {
-        return ck;
-      }
-    } catch (e) {}
-  }
-  return null;
+  // STRICT: Regional Dispatch ONLY ever uses the Regional Manager WhatsApp socket!
+  // Branch sockets must NEVER be used for dispatch operations!
+  return await getRegionalManagerActiveKey();
 }
 
 export async function resolveLidPhone(lidUser, activeKey = "default") {
@@ -1224,50 +1257,29 @@ function isPersonalChatAuthorized(senderNumber, config) {
 }
 
 async function resolveActiveConfig(accountKey) {
-  const clean = String(accountKey || "default").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  // STRICT: Only Regional Manager account can activate regional dispatch
+  if (!isRegionalManagerAccount(accountKey)) {
+    return { config: null, configKey: null };
+  }
+
+  const clean = "default";
   const cfg = await getRegionalConfig(clean);
 
-  // If this specific account has regional dispatch enabled, return it
   if (cfg && cfg.enabled && cfg.groupId) {
     return { config: cfg, configKey: clean };
   }
 
-  // If clean is "default" (the primary RM account)
-  if (clean === "default") {
-    if (cfg && cfg.enabled) {
-      return { config: cfg, configKey: "default" };
-    }
-    // Check if there is an RM config stored with role regional_manager
-    const allConfigs = await readAllConfigs();
-    for (const [k, c] of Object.entries(allConfigs)) {
-      if (c && c.enabled && (c.userRole === "regional_manager" || c.userRole === "regional" || k === "default")) {
-        return { config: c, configKey: k };
-      }
-    }
-  }
-
-  // Any other account (e.g. branch account like "user-kurunegala"):
-  // STRICTLY DO NOT FALL BACK! Branch logins must NEVER run or borrow the RM's dispatch bot!
   return { config: null, configKey: clean };
 }
 
 async function sendBotReply(accountKey, recipientJid, messageText) {
   try {
-    const cleanKey = String(accountKey || "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-    const candidateKeys = [
-      accountKey,
-      cleanKey,
-      cleanKey.startsWith("user-") ? cleanKey.replace(/^user-/, "") : `user-${cleanKey}`,
-      "default"
-    ];
-
-    let activeKey = accountKey;
-    for (const ck of candidateKeys) {
-      const st = await getAccountWhatsAppStatus(ck);
-      if (st.status === "connected") {
-        activeKey = ck;
-        break;
-      }
+    // STRICT: Always send bot replies through the Regional Manager account!
+    const activeKey = await getRegionalManagerActiveKey();
+    const st = await getAccountWhatsAppStatus(activeKey);
+    if (st?.status !== "connected") {
+      console.warn(`[regional-dispatch:bot] Cannot send bot reply: Regional WhatsApp (${activeKey}) is not connected.`);
+      return;
     }
 
     console.log(`[regional-dispatch:bot] 📤 Sending bot reply to ${recipientJid} via ${activeKey}`);
@@ -1657,6 +1669,12 @@ _(උදා: *.reset Middeniya*)_
 
 // 1. Subscribe to messages from accountWhatsappService
 subscribeToAccountMessages(async (accountKey, { messages, updates, type }) => {
+  // STRICT: Only the Regional Manager WhatsApp account handles regional dispatch!
+  // Branch accounts must NEVER listen, react, or process messages for regional dispatch!
+  if (!isRegionalManagerAccount(accountKey)) {
+    return;
+  }
+
   const { config, configKey } = await resolveActiveConfig(accountKey);
   // Ensure this is an active RM account! If non-RM or not enabled, IGNORE completely!
   if (!config || !config.enabled || !config.groupId) {
@@ -2165,48 +2183,29 @@ async function renderDispatchImage(date, rows, summary, userName, userRole) {
 // 3. Cron Schedules
 async function runRegionalAutomation(mode = "reminder", manualAccountKey = null, customTargets = null) {
   await ensureDir(dataDir);
-  const configs = await readAllConfigs();
-  const keys = manualAccountKey ? [manualAccountKey] : Object.keys(configs);
+
+  // STRICT: Regional automation strictly operates for the Regional Manager account ("default")
+  const config = await getRegionalConfig("default");
+  if (!config || !config.enabled) {
+    if (manualAccountKey) throw new Error("Automation is disabled. Please check 'Enable Auto Report' and save settings.");
+    return { ok: false, message: "Automation disabled" };
+  }
+  if (!config.groupId) {
+    if (manualAccountKey) throw new Error("No WhatsApp Group selected. Please select a group and save settings.");
+    return { ok: false, message: "No group configured" };
+  }
+
+  // Resolve connected active key exclusively among Regional Manager sockets!
+  const activeKey = await getRegionalManagerActiveKey();
+  const st = await getAccountWhatsAppStatus(activeKey);
+  if (st?.status !== "connected") {
+    if (manualAccountKey) throw new Error("Regional Manager WhatsApp is disconnected. Please scan QR code in Regional Settings to connect.");
+    console.warn(`[regional-dispatch] Regional WhatsApp (${activeKey}) is disconnected. Skipping automation.`);
+    return { ok: false, message: "WhatsApp disconnected" };
+  }
+
   let totalSent = 0;
   const seenGroupIds = new Set();
-
-  for (const requestedKey of keys) {
-    const config = await getRegionalConfig(requestedKey);
-    if (!config || !config.enabled) {
-      if (manualAccountKey) throw new Error("Automation is disabled. Please check 'Enable Auto Report' and save settings.");
-      continue;
-    }
-    if (!config.groupId) {
-      if (manualAccountKey) throw new Error("No WhatsApp Group selected. Please select a group and save settings.");
-      continue;
-    }
-
-    if (!manualAccountKey && seenGroupIds.has(config.groupId)) {
-      console.log(`[regional-dispatch] Group ${config.groupId} already processed in this automation cycle. Skipping duplicate key ${requestedKey}.`);
-      continue;
-    }
-
-    // Resolve which runtime key is actually connected
-    const cleanKey = String(requestedKey).trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-    const candidateKeys = [
-      cleanKey.startsWith("user-") ? cleanKey : `user-${cleanKey}`,
-      cleanKey.replace(/^user-/, ""),
-      requestedKey
-    ];
-
-    let activeKey = null;
-    for (const ck of candidateKeys) {
-      const st = await getAccountWhatsAppStatus(ck);
-      if (st.status === "connected") {
-        activeKey = ck;
-        break;
-      }
-    }
-
-    if (!activeKey) {
-      if (manualAccountKey) throw new Error("WhatsApp is disconnected. Please scan QR code in Settings to connect.");
-      continue;
-    }
 
     let targets = (Array.isArray(customTargets) && customTargets.length > 0)
       ? customTargets
@@ -2304,10 +2303,7 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null,
     if (mode === "reminder") {
       if (unsubmitted.length === 0) {
         console.log(`[regional-dispatch] All branches already submitted (${submitted.length}). Skipping reminder for ${config.groupId}`);
-        if (manualAccountKey) {
-          return { ok: true, sent: 0, message: "All branches have already submitted their dispatch counts. No reminder needed." };
-        }
-        continue;
+        return { ok: true, sent: 0, message: "All branches have already submitted their dispatch counts. No reminder needed." };
       }
 
       // Helper to resolve LID to real phone number from reverse mapping files
@@ -2557,7 +2553,6 @@ ${submitted.length > 0 ? submitted.map(b => `✅ *${b}*: ${submittedMap[b]}`).jo
         console.error(`[regional-dispatch] Failed to auto-save report for ${dateStr}:`, saveErr);
       }
     }
-  }
 
   return { ok: true, sent: totalSent };
 }
@@ -2599,58 +2594,54 @@ export function startRegionalDispatchAutomation() {
         if (!rKey.startsWith(dateStr)) triggeredReports.delete(rKey);
       }
 
-      const allConfigs = await readAllConfigs();
-      const keys = Object.keys(allConfigs);
-      if (!keys.includes("default")) keys.push("default");
+      // STRICT: Regional dispatch automation strictly belongs to the Regional Manager account ("default")
+      const rmKey = "default";
+      const config = await getRegionalConfig(rmKey);
+      if (!config || !config.enabled || !config.groupId) return;
 
-      for (const key of keys) {
-        const config = await getRegionalConfig(key);
-        if (!config || !config.enabled || !config.groupId) continue;
+      const reportKey = `${dateStr}_${rmKey}_report`;
+      const { h: repH, m: repM } = parseTime(config.reportSendTime, 23, 30);
 
-        const reportKey = `${dateStr}_${key}_report`;
-        const { h: repH, m: repM } = parseTime(config.reportSendTime, 23, 30);
+      // 1. Check Multiple Reminder Times
+      const reminderTimes = Array.isArray(config.reminderTimes) && config.reminderTimes.length > 0
+        ? config.reminderTimes
+        : (config.reminderTime ? [config.reminderTime] : ["23:00"]);
 
-        // 1. Check Multiple Reminder Times
-        const reminderTimes = Array.isArray(config.reminderTimes) && config.reminderTimes.length > 0
-          ? config.reminderTimes
-          : (config.reminderTime ? [config.reminderTime] : ["23:00"]);
+      for (const rTime of reminderTimes) {
+        const { h: remH, m: remM } = parseTime(rTime, 23, 0);
+        const reminderKey = `${dateStr}_${rmKey}_reminder_${rTime}`;
 
-        for (const rTime of reminderTimes) {
-          const { h: remH, m: remM } = parseTime(rTime, 23, 0);
-          const reminderKey = `${dateStr}_${key}_reminder_${rTime}`;
-
-          if (isTimeMatch(colomboTime, remH, remM) && !triggeredReminders.has(reminderKey)) {
-            triggeredReminders.add(reminderKey);
-            if (triggeredReports.has(reportKey)) {
-              console.log(`[regional-dispatch] ⏰ Skipping reminder at ${rTime} for ${key} because final report has already been sent today.`);
-            } else {
-              console.log(`[regional-dispatch] ⏰ Triggering scheduled reminder (${rTime}) for ${key}`);
-              runRegionalAutomation("reminder", key).catch(e => console.error(`[regional-dispatch] Reminder error for ${key}:`, e));
-            }
+        if (isTimeMatch(colomboTime, remH, remM) && !triggeredReminders.has(reminderKey)) {
+          triggeredReminders.add(reminderKey);
+          if (triggeredReports.has(reportKey)) {
+            console.log(`[regional-dispatch] ⏰ Skipping reminder at ${rTime} because final report has already been sent today.`);
+          } else {
+            console.log(`[regional-dispatch] ⏰ Triggering scheduled reminder (${rTime}) via Regional WhatsApp`);
+            runRegionalAutomation("reminder", rmKey).catch(e => console.error(`[regional-dispatch] Reminder error:`, e));
           }
         }
+      }
 
-        // 2. Check Report Send Time
-        if (isTimeMatch(colomboTime, repH, repM) && !triggeredReports.has(reportKey)) {
-          triggeredReports.add(reportKey);
-          console.log(`[regional-dispatch] ⏰ Triggering scheduled report (${config.reportSendTime || '23:30'}) for ${key}`);
-          runRegionalAutomation("report", key).catch(e => console.error(`[regional-dispatch] Report error for ${key}:`, e));
-        }
+      // 2. Check Report Send Time
+      if (isTimeMatch(colomboTime, repH, repM) && !triggeredReports.has(reportKey)) {
+        triggeredReports.add(reportKey);
+        console.log(`[regional-dispatch] ⏰ Triggering scheduled report (${config.reportSendTime || '23:30'}) via Regional WhatsApp`);
+        runRegionalAutomation("report", rmKey).catch(e => console.error(`[regional-dispatch] Report error:`, e));
+      }
 
-        // 3. Auto-Send & Save Early if 100% of branches have submitted before report send time
-        const { h: startH, m: startM } = parseTime(config.checkInStartTime, 16, 0);
-        const currentMinutes = hours * 60 + minutes;
-        const startMinutes = startH * 60 + startM;
-        if (currentMinutes >= startMinutes && !triggeredReports.has(reportKey)) {
-          checkAllAccountsEarlyCompletion().catch(() => {});
-        }
+      // 3. Auto-Send & Save Early if 100% of branches have submitted before report send time
+      const { h: startH, m: startM } = parseTime(config.checkInStartTime, 16, 0);
+      const currentMinutes = hours * 60 + minutes;
+      const startMinutes = startH * 60 + startM;
+      if (currentMinutes >= startMinutes && !triggeredReports.has(reportKey)) {
+        checkAllAccountsEarlyCompletion().catch(() => {});
       }
     } catch (schedErr) {
       console.error("[regional-dispatch] Scheduler error:", schedErr.message || schedErr);
     }
   }, 10000).unref();
 
-  console.log("[regional-dispatch] Automation scheduler active with customizable check-in, report, and multiple reminder times");
+  console.log("[regional-dispatch] Automation scheduler active (Strictly bound to Regional WhatsApp account)");
 }
 
 export async function manualTrigger(accountKey, mode, customTargets = null) {
@@ -2838,8 +2829,9 @@ export async function resendRegionalDispatchReport(accountKey, dateOrId, options
 }
 
 export async function getRegionalLiveStatus(accountKey, customTargets = null) {
-  const config = await getRegionalConfig(accountKey);
-  const rawText = await getTodayMessages(accountKey);
+  const rmKey = "default";
+  const config = await getRegionalConfig(rmKey);
+  const rawText = await getTodayMessages(rmKey);
   const targets = (Array.isArray(customTargets) && customTargets.length > 0)
     ? customTargets
     : (Array.isArray(config.targets) ? config.targets : []);
@@ -2850,10 +2842,10 @@ export async function getRegionalLiveStatus(accountKey, customTargets = null) {
       branch: t.branch || t.branch_name,
       target: Number(t.target) || 0
     }));
-    await saveRegionalConfig(accountKey, config);
+    await saveRegionalConfig(rmKey, config);
   }
 
-  const dailyState = await getDailyState(accountKey);
+  const dailyState = await getDailyState(rmKey);
   const clearedSet = new Set(Array.isArray(dailyState.clearedBranches) ? dailyState.clearedBranches : []);
   const submittedMap = {};
 
@@ -2955,35 +2947,30 @@ export async function checkAllAccountsEarlyCompletion() {
 
   isEarlyChecking = true;
   try {
-    const allConfigs = await readAllConfigs();
-    const keys = Object.keys(allConfigs);
-    if (!keys.includes("default")) keys.push("default");
+    const rmKey = "default";
+    const reportKey = `${dateStr}_${rmKey}_report`;
+    if (triggeredReports.has(reportKey)) return;
 
-    for (const key of keys) {
-      const reportKey = `${dateStr}_${key}_report`;
-      if (triggeredReports.has(reportKey)) continue;
+    const cfg = await getRegionalConfig(rmKey);
+    if (!cfg || !cfg.enabled || !cfg.groupId || !Array.isArray(cfg.targets) || cfg.targets.length === 0) {
+      return;
+    }
 
-      const cfg = await getRegionalConfig(key);
-      if (!cfg || !cfg.enabled || !cfg.groupId || !Array.isArray(cfg.targets) || cfg.targets.length === 0) {
-        continue;
-      }
+    // Verify current time is during or after check-in start time
+    const { h: startH, m: startM } = parseTime(cfg.checkInStartTime, 16, 0);
+    const startMinutes = startH * 60 + startM;
+    if (currentMinutes < startMinutes) return;
 
-      // Verify current time is during or after check-in start time
-      const { h: startH, m: startM } = parseTime(cfg.checkInStartTime, 16, 0);
-      const startMinutes = startH * 60 + startM;
-      if (currentMinutes < startMinutes) continue;
-
-      const live = await getRegionalLiveStatus(key);
-      if (
-        live &&
-        live.totalBranches > 0 &&
-        live.unsubmittedCount === 0 &&
-        live.submittedCount >= live.totalBranches
-      ) {
-        triggeredReports.add(reportKey);
-        console.log(`[regional-dispatch] 🎯 100% Branches Submitted (${live.submittedCount}/${live.totalBranches}) during check-in window! Auto-sending and saving report early for ${key} without waiting for scheduled time...`);
-        await runRegionalAutomation("report", key);
-      }
+    const live = await getRegionalLiveStatus(rmKey);
+    if (
+      live &&
+      live.totalBranches > 0 &&
+      live.unsubmittedCount === 0 &&
+      live.submittedCount >= live.totalBranches
+    ) {
+      triggeredReports.add(reportKey);
+      console.log(`[regional-dispatch] 🎯 100% Branches Submitted (${live.submittedCount}/${live.totalBranches}) during check-in window! Auto-sending and saving report early via Regional WhatsApp...`);
+      await runRegionalAutomation("report", rmKey);
     }
   } catch (err) {
     console.error("[regional-dispatch] Early completion check error:", err);

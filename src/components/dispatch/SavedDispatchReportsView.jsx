@@ -39,7 +39,7 @@ export default function SavedDispatchReportsView({
   const [saveSuccessMsg, setSaveSuccessMsg] = useState("");
   const [resendingId, setResendingId] = useState(null);
 
-  const accountKey = getWhatsAppAccountKey(session);
+  const accountKey = "default";
 
   async function handleResendReportToGroup(report) {
     if (!report || !report.date) return;

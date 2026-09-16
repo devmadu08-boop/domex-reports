@@ -20,7 +20,8 @@ import { normalizeWhatsAppAccountKey, getAccountGroupMembers } from "../whatsapp
 const router = express.Router();
 
 function accountKey(request) {
-  return normalizeWhatsAppAccountKey(request.get("x-whatsapp-account") || "default");
+  // STRICT: Regional Dispatch routes always operate under the Regional Manager account ("default")
+  return "default";
 }
 
 router.get("/group-members", async (request, response) => {

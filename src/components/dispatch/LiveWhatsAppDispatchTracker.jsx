@@ -44,7 +44,7 @@ export default function LiveWhatsAppDispatchTracker({
     if (!branch) return;
     setSavingEdit(true);
     try {
-      const accountKey = getWhatsAppAccountKey(session);
+      const accountKey = "default";
       const res = await fetch("/api/regional-dispatch/set-dispatch", {
         method: "POST",
         headers: {
@@ -73,7 +73,7 @@ export default function LiveWhatsAppDispatchTracker({
       return;
     }
     try {
-      const accountKey = getWhatsAppAccountKey(session);
+      const accountKey = "default";
       const res = await fetch("/api/regional-dispatch/reset-dispatch", {
         method: "POST",
         headers: {
@@ -98,7 +98,7 @@ export default function LiveWhatsAppDispatchTracker({
       return;
     }
     try {
-      const accountKey = getWhatsAppAccountKey(session);
+      const accountKey = "default";
       const res = await fetch("/api/regional-dispatch/reset-all", {
         method: "POST",
         headers: {
@@ -119,7 +119,7 @@ export default function LiveWhatsAppDispatchTracker({
 
   const fetchSentMessages = useCallback(async () => {
     try {
-      const accountKey = getWhatsAppAccountKey(session);
+      const accountKey = "default";
       const res = await fetch("/api/regional-dispatch/sent-messages", {
         headers: { "x-whatsapp-account": accountKey }
       });
@@ -136,7 +136,7 @@ export default function LiveWhatsAppDispatchTracker({
     if (!window.confirm("Send dispatch count reminder to WhatsApp group now?")) return;
     setSendingReminder(true);
     try {
-      const accountKey = getWhatsAppAccountKey(session);
+      const accountKey = "default";
       const res = await fetch("/api/regional-dispatch/trigger", {
         method: "POST",
         headers: {
@@ -173,7 +173,7 @@ export default function LiveWhatsAppDispatchTracker({
     if (!window.confirm("Send 11:30 PM performance report image to WhatsApp group now?")) return;
     setSendingReport(true);
     try {
-      const accountKey = getWhatsAppAccountKey(session);
+      const accountKey = "default";
       const res = await fetch("/api/regional-dispatch/trigger", {
         method: "POST",
         headers: {
@@ -210,7 +210,7 @@ export default function LiveWhatsAppDispatchTracker({
     if (!window.confirm(`${branchName} ශාඛාවට (සහ අදාළ දුරකථන අංකයට) පුද්ගලික WhatsApp Reminder එකක් යවන්නද?`)) return;
     setSendingBranchReminder(branchName);
     try {
-      const accountKey = getWhatsAppAccountKey(session);
+      const accountKey = "default";
       const res = await fetch("/api/regional-dispatch/send-branch-reminder", {
         method: "POST",
         headers: {
@@ -239,7 +239,7 @@ export default function LiveWhatsAppDispatchTracker({
     }
     setDeletingId(msg.id);
     try {
-      const accountKey = getWhatsAppAccountKey(session);
+      const accountKey = "default";
       const res = await fetch("/api/regional-dispatch/delete-message", {
         method: "POST",
         headers: {
@@ -266,7 +266,7 @@ export default function LiveWhatsAppDispatchTracker({
   const fetchLiveStatus = useCallback(async () => {
     setLoading(true);
     try {
-      const accountKey = getWhatsAppAccountKey(session);
+      const accountKey = "default";
 
       const res = await fetch("/api/regional-dispatch/live", {
         method: "POST",
