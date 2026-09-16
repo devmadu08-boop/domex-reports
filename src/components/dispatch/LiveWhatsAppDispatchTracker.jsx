@@ -145,8 +145,12 @@ export default function LiveWhatsAppDispatchTracker({
         body: JSON.stringify({
           mode: "reminder",
           targets: targets.map(t => ({
-            branch: t.branch_name,
-            target: Number(t.target) || 0
+            branch: t.branch_name || t.branch,
+            target: Number(t.target) || 0,
+            assigned_name: t.assigned_name || "",
+            assigned_phone: t.assigned_phone || "",
+            assigned_jid: t.assigned_jid || "",
+            assigned_lid: t.assigned_lid || ""
           }))
         })
       });
@@ -178,8 +182,12 @@ export default function LiveWhatsAppDispatchTracker({
         body: JSON.stringify({
           mode: "report",
           targets: targets.map(t => ({
-            branch: t.branch_name,
-            target: Number(t.target) || 0
+            branch: t.branch_name || t.branch,
+            target: Number(t.target) || 0,
+            assigned_name: t.assigned_name || "",
+            assigned_phone: t.assigned_phone || "",
+            assigned_jid: t.assigned_jid || "",
+            assigned_lid: t.assigned_lid || ""
           }))
         })
       });
@@ -239,8 +247,12 @@ export default function LiveWhatsAppDispatchTracker({
         },
         body: JSON.stringify({
           targets: targets.map(t => ({
-            branch: t.branch_name,
-            target: Number(t.target) || 0
+            branch: t.branch_name || t.branch,
+            target: Number(t.target) || 0,
+            assigned_name: t.assigned_name || "",
+            assigned_phone: t.assigned_phone || "",
+            assigned_jid: t.assigned_jid || "",
+            assigned_lid: t.assigned_lid || ""
           }))
         })
       });

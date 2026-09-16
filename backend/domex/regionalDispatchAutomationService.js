@@ -277,6 +277,18 @@ function getTodayString() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Colombo" }).format(new Date());
 }
 
+export function toInternationalPhone(raw) {
+  const digits = String(raw || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length === 10 && digits.startsWith("0")) {
+    return "94" + digits.slice(1);
+  }
+  if (digits.length === 9) {
+    return "94" + digits;
+  }
+  return digits;
+}
+
 function normalizeBranchStem(name) {
   return String(name || "")
     .toLowerCase()
@@ -1729,7 +1741,34 @@ subscribeToAccountMessages(async (accountKey, { messages, updates, type }) => {
       // Check if this personal chat is submitting a direct dispatch
       const windowCheck = isMessageInsideCheckInWindow(msg, config);
       const targets = Array.isArray(config.targets) ? config.targets : [];
-      const extracted = extractAllBranchDispatchesFromText(text, targets);
+      let extracted = extractAllBranchDispatchesFromText(text, targets);
+
+      // If branch manager replied just with a number (e.g. "80", "120", "dispatch 80"):
+      // Automatically detect their assigned branch from their phone number!
+      if (extracted.length === 0 && !isFromMe) {
+        let assignedBranch = null;
+        let assignedTarget = 0;
+        const senderInt = toInternationalPhone(senderNumber);
+        for (const t of targets) {
+          const p = toInternationalPhone(t.assigned_phone || t.assignedPhone || t.assigned_jid || "");
+          if (p && senderInt && p === senderInt) {
+            assignedBranch = t.branch || t.branch_name;
+            assignedTarget = Number(t.target) || 0;
+            break;
+          }
+        }
+
+        if (assignedBranch) {
+          const cleanText = text.replace(/[*_~`]/g, " ").trim();
+          const numMatch = cleanText.match(/^\s*(?:(?:dispatch|count|dis|dp|qty|pcs|total|ada)\s*[:=-]?\s*)?(\d{1,5})(?:\s*(?:pcs|pkts|parcels|items)?\s*)?$/i);
+          if (numMatch && numMatch[1]) {
+            const count = parseInt(numMatch[1], 10);
+            if (!isNaN(count) && count >= 0) {
+              extracted = [{ branch: assignedBranch, dispatch: count }];
+            }
+          }
+        }
+      }
 
       if (windowCheck.ok && extracted.length > 0) {
         for (const item of extracted) {
@@ -1750,6 +1789,14 @@ subscribeToAccountMessages(async (accountKey, { messages, updates, type }) => {
             emoji: "✅"
           });
         } catch (e) {}
+
+        const item = extracted[0];
+        const targetObj = targets.find(t => (t.branch || t.branch_name) === item.branch);
+        const tgt = targetObj ? Number(targetObj.target) : 0;
+        const perc = tgt > 0 ? Math.round((item.dispatch / tgt) * 100) : 0;
+
+        await sendBotReply(configKey, incomingJid, `✅ *${item.branch}* ශාඛාවේ Dispatch Count එක *${item.dispatch}* ලෙස සාර්ථකව සටහන් විය!\n\n🎯 Target: *${tgt}*\n📊 ප්‍රගතිය: *${perc}%*\n\n_(ස්තූතියි! අද දින වාර්තාවට මෙම අගය එකතු කර ඇත)_`);
+
         checkAllAccountsEarlyCompletion().catch(() => {});
         continue;
       }
@@ -2096,10 +2143,19 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null,
 
     // Persist targets to config.targets if provided
     if (Array.isArray(customTargets) && customTargets.length > 0) {
-      config.targets = customTargets.map(t => ({
-        branch: t.branch || t.branch_name,
-        target: Number(t.target) || 0
-      }));
+      const existingMap = new Map((config.targets || []).map(t => [t.branch || t.branch_name, t]));
+      config.targets = customTargets.map(t => {
+        const bName = t.branch || t.branch_name;
+        const prev = existingMap.get(bName) || {};
+        return {
+          branch: bName,
+          target: Number(t.target) || 0,
+          assigned_name: t.assigned_name !== undefined ? t.assigned_name : (prev.assigned_name || ""),
+          assigned_phone: t.assigned_phone !== undefined ? t.assigned_phone : (prev.assigned_phone || ""),
+          assigned_jid: t.assigned_jid !== undefined ? t.assigned_jid : (prev.assigned_jid || ""),
+          assigned_lid: t.assigned_lid !== undefined ? t.assigned_lid : (prev.assigned_lid || "")
+        };
+      });
       await saveRegionalConfig(activeKey, config);
     }
 
@@ -2213,13 +2269,18 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null,
         let jid = t.assigned_jid || t.assignedJid;
         let lid = t.assigned_lid || t.assignedLid;
 
-        if (phone && phone.length > 13) {
+        if (phone && String(phone).replace(/\D/g, "").length > 13) {
           const resolved = await resolveLidPhone(phone);
           if (resolved) {
             if (!lid) lid = `${phone}@lid`;
             phone = resolved;
             jid = `${resolved}@s.whatsapp.net`;
           }
+        }
+
+        const cleanPhone = toInternationalPhone(phone);
+        if (cleanPhone && (!jid || !jid.endsWith("@s.whatsapp.net"))) {
+          jid = `${cleanPhone}@s.whatsapp.net`;
         }
 
         if (jid && !mentionJids.includes(jid)) {
@@ -2229,22 +2290,44 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null,
           mentionJids.push(lid);
         }
 
-        const tagStr = phone ? ` @${phone.replace(/\D/g, '')}` : (t.assigned_name ? ` (${t.assigned_name})` : "");
-        return `❌ ${bName} (Target: ${tgt})${tagStr}`;
+        const assignedName = (t.assigned_name && t.assigned_name !== t.assigned_phone && t.assigned_name !== cleanPhone)
+          ? String(t.assigned_name).trim()
+          : "";
+
+        let tagStr = "";
+        if (cleanPhone) {
+          tagStr = ` 👉 @${cleanPhone}${assignedName ? ` (${assignedName})` : ""}`;
+        } else if (assignedName) {
+          tagStr = ` 👉 (${assignedName})`;
+        }
+
+        return `❌ *${bName}* (Target: ${tgt})${tagStr}`;
       }));
 
-      const reminderMsg = `🚨 *DOMEX Dispatch Count Reminder*\n\nකරුණාකර පහත ශාඛාවන් රාත්‍රී 11.30 ට පෙර ඔබගේ Dispatch Counts ලබා දෙන්න:\n\n*ලබා දී නොමැති ශාඛාවන්:*\n${unsubmittedLines.join("\n")}\n\n*ලබා දී ඇති ශාඛාවන්:*\n${submitted.length > 0 ? submitted.map(b => `✅ ${b}: ${submittedMap[b]}`).join("\n") : "කිසිවක් නැත"}`;
+      const reminderDeadline = config.reportSendTime ? `රාත්‍රී ${config.reportSendTime}` : "රාත්‍රී 11.30";
+      const reminderMsg = 
+`🚨 *DOMEX Dispatch Count Reminder*
+
+සුභ සන්ධ්‍යාවක්! කරුණාකර පහත ශාඛාවන් ${reminderDeadline} ට පෙර ඔබගේ Dispatch Counts ලබා දෙන්න:
+
+*ලබා දී නොමැති ශාඛාවන් (${unsubmitted.length}):*
+${unsubmittedLines.join("\n")}
+
+*ලබා දී ඇති ශාඛාවන් (${submitted.length}/${targets.length}):*
+${submitted.length > 0 ? submitted.map(b => `✅ *${b}*: ${submittedMap[b]}`).join("\n") : "කිසිවක් නැත"}
+
+📌 Format: *[ශාඛාව] [ගණන]* (උදා: *Middeniya 80*)`;
       
       const sendRes = await sendAccountRecipientText(activeKey, { 
         phoneNumber: config.groupId, 
         message: reminderMsg,
         mentions: mentionJids
       });
-      console.log(`[regional-dispatch] Sent reminder to ${config.groupId} via ${activeKey} (mentions: ${mentionJids.length})`);
+      console.log(`[regional-dispatch] Sent group reminder to ${config.groupId} via ${activeKey} (mentions: ${mentionJids.length})`);
       totalSent++;
       seenGroupIds.add(config.groupId);
 
-      // Send personal WhatsApp reminder to each unsubmitted branch's assigned person
+      // Send personalized WhatsApp reminder to each unsubmitted branch's assigned person
       for (const t of unsubmittedTargets) {
         const bName = t.branch || t.branch_name;
         const tgt = targetMap[bName] || 0;
@@ -2253,16 +2336,35 @@ async function runRegionalAutomation(mode = "reminder", manualAccountKey = null,
           const resolved = await resolveLidPhone(targetPhone);
           if (resolved) targetPhone = resolved;
         }
-        if (targetPhone) {
-          const personalMsg = `🚨 *DOMEX Dispatch Reminder*\n\nසුභ සන්ධ්‍යාවක්! කරුණාකර ඔබගේ *${bName}* ශාඛාවේ අද දින Dispatch Count එක රාත්‍රී 11.30 ට පෙර ලබා දෙන්න.\n\n🎯 දෛනික Target එක: *${tgt}*\n\nස්තූතියි!`;
+        const cleanPhone = toInternationalPhone(targetPhone);
+        if (cleanPhone) {
+          const assignedName = (t.assigned_name && t.assigned_name !== t.assigned_phone && t.assigned_name !== cleanPhone)
+            ? String(t.assigned_name).trim()
+            : "";
+
+          const personalMsg = 
+`🚨 *DOMEX Dispatch Reminder*
+
+සුභ සන්ධ්‍යාවක්${assignedName ? ` ${assignedName}` : ""}!
+ඔබ භාරව සිටින *${bName}* ශාඛාවේ අද දින Dispatch Count එක මෙතෙක් ලැබී නොමැත.
+
+🏢 *ශාඛාව:* ${bName}
+🎯 *දෛනික Target එක:* ${tgt}
+⏰ *අවසන් වේලාව:* ${reminderDeadline} ට පෙර
+
+කරුණාකර ඔබගේ Dispatch Count එක මෙම Chat එකට (උදා: *${bName} 80* හෝ *80*) Reply කරන්න, නැතහොත් Regional WhatsApp Group එකට යොමු කරන්න.
+
+ස්තූතියි!
+— Regional Management (DOMEX Express)`;
+
           try {
             await sendAccountRecipientText(activeKey, {
-              phoneNumber: targetPhone,
+              phoneNumber: cleanPhone,
               message: personalMsg
             });
-            console.log(`[regional-dispatch] 👤 Sent personal reminder to ${bName} (${targetPhone})`);
+            console.log(`[regional-dispatch] 👤 Sent personal reminder to ${bName} (${cleanPhone} - ${assignedName || 'assigned'})`);
           } catch (pErr) {
-            console.warn(`[regional-dispatch] Failed personal reminder to ${bName} (${targetPhone}):`, pErr.message || pErr);
+            console.warn(`[regional-dispatch] Failed personal reminder to ${bName} (${cleanPhone}):`, pErr.message || pErr);
           }
         }
       }

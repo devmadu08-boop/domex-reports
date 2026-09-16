@@ -91,6 +91,39 @@ export default function BranchTargetModal({ targets, onTargetsChange, onClose, s
     }
   }, [members, targets]);
 
+  async function syncTargetsToBackend(updatedTargets) {
+    try {
+      const accountKey = getWhatsAppAccountKey(session);
+      const cfgRes = await fetch("/api/regional-dispatch/config", {
+        headers: { "x-whatsapp-account": accountKey }
+      });
+      if (cfgRes.ok) {
+        const cfg = await cfgRes.json();
+        const payload = {
+          ...cfg,
+          targets: (updatedTargets || []).map(t => ({
+            branch: t.branch_name || t.branch,
+            target: Number(t.target) || 0,
+            assigned_name: t.assigned_name || "",
+            assigned_phone: t.assigned_phone || "",
+            assigned_jid: t.assigned_jid || "",
+            assigned_lid: t.assigned_lid || ""
+          }))
+        };
+        await fetch("/api/regional-dispatch/config", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-whatsapp-account": accountKey
+          },
+          body: JSON.stringify(payload)
+        });
+      }
+    } catch (e) {
+      console.warn("Failed to sync targets to backend:", e);
+    }
+  }
+
   function handleAdd(e) {
     e.preventDefault();
     setError("");
@@ -123,6 +156,8 @@ export default function BranchTargetModal({ targets, onTargetsChange, onClose, s
       setNewTarget("");
       setNewAssignedPhone("");
       setNewAssignedName("");
+      const current = getDispatchTargets();
+      syncTargetsToBackend(current);
       onTargetsChange();
     } catch (err) {
       setError(err.message || "Failed to add target.");
@@ -156,6 +191,8 @@ export default function BranchTargetModal({ targets, onTargetsChange, onClose, s
         assigned_lid: found?.lidJid || ""
       });
       setEditingId(null);
+      const current = getDispatchTargets();
+      syncTargetsToBackend(current);
       onTargetsChange();
     } catch (err) {
       setError(err.message || "Failed to update target.");
@@ -165,12 +202,16 @@ export default function BranchTargetModal({ targets, onTargetsChange, onClose, s
   function handleDelete(id, name) {
     if (!confirm(`Are you sure you want to delete target for "${name}"?`)) return;
     deleteDispatchTarget(id);
+    const current = getDispatchTargets();
+    syncTargetsToBackend(current);
     onTargetsChange();
   }
 
   function handleReset() {
     if (!confirm("Reset all targets to DOMEX standard default branches?")) return;
     resetDefaultDispatchTargets();
+    const current = getDispatchTargets();
+    syncTargetsToBackend(current);
     onTargetsChange();
   }
 
