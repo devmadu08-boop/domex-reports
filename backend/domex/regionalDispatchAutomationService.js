@@ -335,6 +335,108 @@ export function findBranchInLine(line, targetBranches) {
   return null;
 }
 
+// Whitelist of words allowed in a dispatch line alongside the branch name
+const ALLOWED_DISPATCH_TOKENS = new Set([
+  "dispatch", "dispatches", "dispatched",
+  "count", "counts",
+  "dis", "dp",
+  "branch", "br",
+  "pcs", "pkts", "parcels", "packets", "items", "nos", "no", "qty",
+  "today", "ada",
+  "target", "tgt",
+  "total", "tot",
+  "d", "c", "p"
+]);
+
+export function parseStrictDispatchLine(rawLine, targetBranches) {
+  if (!rawLine || typeof rawLine !== "string") return null;
+  let line = rawLine.trim();
+  if (!line) return null;
+
+  // 1. Remove list / bullet prefixes at start: e.g. "1.", "1)", "1 -", "•", "-", "*", "#", ">"
+  line = line.replace(/^\s*(?:(?:\d{1,2}[.)\-\:]|[•*#\-–—>]|(?:\(\d{1,2}\)))\s*)+/, "").trim();
+
+  // 2. Remove whatsapp bold/italics/code markdown: *text*, _text_, ~text~, `text`
+  line = line.replace(/[*_~`]/g, " ").trim();
+
+  // 3. Find matching branch from target branches
+  const branch = findBranchInLine(line, targetBranches);
+  if (!branch) return null;
+
+  // 4. Remove the branch name words from the line to inspect the rest
+  const cleanBranch = String(branch).toLowerCase().replace(/[^a-z0-9]/g, "");
+  const branchStem = normalizeBranchStem(branch);
+  const branchWords = String(branch).toLowerCase().replace(/[^a-z0-9]/g, " ").split(/\s+/).filter(Boolean);
+
+  const normalizedLine = line.replace(/[:=\-\/\|\(\),]/g, " ");
+  const rawWords = normalizedLine.split(/\s+/).filter(Boolean);
+
+  const nonBranchWords = [];
+  let matchedBranchWord = false;
+
+  for (const word of rawWords) {
+    const cleanWord = word.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (!cleanWord) continue;
+
+    const wordStem = normalizeBranchStem(cleanWord);
+    const isBranchWord = branchWords.includes(cleanWord);
+    const isBranchMatch = 
+      isBranchWord ||
+      cleanWord === cleanBranch ||
+      (cleanBranch.includes(cleanWord) && cleanWord.length >= 3) ||
+      (cleanWord.includes(cleanBranch) && cleanBranch.length >= 3) ||
+      (branchStem.length >= 3 && (wordStem.includes(branchStem) || branchStem.includes(wordStem))) ||
+      (cleanBranch.length >= 5 && levenshteinDistance(cleanWord, cleanBranch) <= (cleanBranch.length >= 7 ? 2 : 1));
+
+    if (isBranchMatch && (!matchedBranchWord || isBranchWord)) {
+      matchedBranchWord = true;
+      continue;
+    }
+
+    nonBranchWords.push(cleanWord);
+  }
+
+  if (!matchedBranchWord) return null;
+
+  // 5. Inspect the remaining non-branch words
+  let foundNumbers = [];
+  for (const w of nonBranchWords) {
+    if (/^\d+$/.test(w)) {
+      const num = parseInt(w, 10);
+      if (w.length <= 5 && num >= 0 && num <= 99999) {
+        foundNumbers.push(num);
+      } else {
+        return null; // Reject long numbers (phone numbers, timestamps, etc.)
+      }
+    } else {
+      if (!ALLOWED_DISPATCH_TOKENS.has(w)) {
+        return null; // Reject casual/conversational words
+      }
+    }
+  }
+
+  if (foundNumbers.length === 0) return null;
+
+  let dispatchCount = foundNumbers[foundNumbers.length - 1];
+  if (foundNumbers.length === 2) {
+    const hasTargetWord = nonBranchWords.includes("target") || nonBranchWords.includes("tgt");
+    const hasDispatchWord = nonBranchWords.includes("dispatch") || nonBranchWords.includes("dis");
+    if (hasTargetWord && hasDispatchWord) {
+      const dispIdx = nonBranchWords.findIndex(w => w === "dispatch" || w === "dis");
+      const nextWord = nonBranchWords[dispIdx + 1];
+      if (nextWord && /^\d+$/.test(nextWord)) {
+        dispatchCount = parseInt(nextWord, 10);
+      }
+    } else {
+      dispatchCount = foundNumbers[0];
+    }
+  } else if (foundNumbers.length > 2) {
+    return null;
+  }
+
+  return { branch, dispatch: dispatchCount };
+}
+
 export function extractAllBranchDispatchesFromText(text, targets) {
   if (!text || !Array.isArray(targets) || targets.length === 0) return [];
   const lines = String(text).split("\n");
@@ -343,21 +445,10 @@ export function extractAllBranchDispatchesFromText(text, targets) {
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const branch = findBranchInLine(trimmed, targets);
-    if (branch && !seen.has(branch)) {
-      const cleanLine = trimmed
-        .replace(/\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b/g, "")
-        .replace(/\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b/g, "")
-        .replace(/\b\d{1,2}[-/.]\d{1,2}\b/g, "")
-        .replace(/\b\d{1,2}[:.]\d{2}(?::\d{2})?\s*(?:am|pm)?\b/gi, "");
-      const numbers = cleanLine.match(/\b\d{1,5}\b/g);
-      if (numbers && numbers.length > 0) {
-        const val = parseInt(numbers[numbers.length - 1], 10);
-        if (!isNaN(val) && val >= 0) {
-          results.push({ branch, dispatch: val });
-          seen.add(branch);
-        }
-      }
+    const parsed = parseStrictDispatchLine(trimmed, targets);
+    if (parsed && !seen.has(parsed.branch)) {
+      results.push(parsed);
+      seen.add(parsed.branch);
     }
   }
   return results;
@@ -960,23 +1051,121 @@ function isAutomatedSystemMessage(text) {
   );
 }
 
+export function getMessageColomboDateTime(msg) {
+  let unixSeconds = 0;
+  const raw = msg?.messageTimestamp;
+  if (typeof raw === "number") {
+    unixSeconds = raw;
+  } else if (raw && typeof raw === "object") {
+    unixSeconds = Number(raw.low || raw) || 0;
+  } else if (typeof raw === "string") {
+    unixSeconds = Number(raw) || 0;
+  }
+
+  const dateObj = unixSeconds > 1000000000 ? new Date(unixSeconds * 1000) : new Date();
+
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Colombo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
+  const parts = formatter.formatToParts(dateObj);
+  const partMap = {};
+  for (const p of parts) partMap[p.type] = p.value;
+
+  const dateStr = `${partMap.year}-${partMap.month}-${partMap.day}`;
+  const hour = parseInt(partMap.hour || "0", 10);
+  const minute = parseInt(partMap.minute || "0", 10);
+  const minutes = hour * 60 + minute;
+
+  return { dateStr, hour, minute, minutes, dateObj };
+}
+
+export function isMessageInsideCheckInWindow(msg, config) {
+  const msgDt = getMessageColomboDateTime(msg);
+  const todayStr = getTodayString();
+
+  // 1. Must be sent today in Colombo
+  if (msgDt.dateStr !== todayStr) {
+    return { ok: false, reason: `Message is from ${msgDt.dateStr}, not today (${todayStr})` };
+  }
+
+  // 2. Check window [checkInStartTime, reportSendTime]
+  const { h: startH, m: startM } = parseTime(config.checkInStartTime, 16, 0);
+  const { h: endH, m: endM } = parseTime(config.reportSendTime, 23, 30);
+  const startMinutes = startH * 60 + startM;
+  const endMinutes = endH * 60 + endM;
+
+  let inside = false;
+  if (startMinutes <= endMinutes) {
+    inside = msgDt.minutes >= startMinutes && msgDt.minutes <= endMinutes;
+  } else {
+    inside = msgDt.minutes >= startMinutes || msgDt.minutes <= endMinutes;
+  }
+
+  if (!inside) {
+    const timeFormatted = `${String(msgDt.hour).padStart(2, "0")}:${String(msgDt.minute).padStart(2, "0")}`;
+    return { ok: false, reason: `Message sent at ${timeFormatted} is outside check-in window [${config.checkInStartTime} - ${config.reportSendTime}]` };
+  }
+
+  return { ok: true, msgDt };
+}
+
+function isPersonalChatAuthorized(senderNumber, config) {
+  if (!senderNumber) return false;
+  const cleanNumber = String(senderNumber).replace(/\D/g, "");
+  if (!cleanNumber) return false;
+
+  // 1. In config.botAuthorizedNumbers
+  if (config.botAuthorizedNumbers) {
+    const list = String(config.botAuthorizedNumbers)
+      .split(",")
+      .map(n => n.replace(/\D/g, ""))
+      .filter(Boolean);
+    if (list.includes(cleanNumber)) return true;
+  }
+  // 2. In targets assigned phones
+  if (Array.isArray(config.targets)) {
+    for (const t of config.targets) {
+      const p = String(t.assigned_phone || t.assignedPhone || t.assigned_jid || "").replace(/\D/g, "");
+      if (p && (p === cleanNumber || (p.length === 10 && cleanNumber.endsWith(p.slice(1))) || (cleanNumber.length === 10 && p.endsWith(cleanNumber.slice(1))))) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 async function resolveActiveConfig(accountKey) {
-  let cfg = await getRegionalConfig(accountKey);
-  if (cfg && cfg.enabled) {
-    return { config: cfg, configKey: accountKey };
+  const clean = String(accountKey || "default").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  const cfg = await getRegionalConfig(clean);
+
+  // If this specific account has regional dispatch enabled, return it
+  if (cfg && cfg.enabled && cfg.groupId) {
+    return { config: cfg, configKey: clean };
   }
-  const allConfigs = await readAllConfigs();
-  for (const [key, c] of Object.entries(allConfigs)) {
-    if (c && c.enabled) {
-      return { config: c, configKey: key };
+
+  // If clean is "default" (the primary RM account)
+  if (clean === "default") {
+    if (cfg && cfg.enabled) {
+      return { config: cfg, configKey: "default" };
+    }
+    // Check if there is an RM config stored with role regional_manager
+    const allConfigs = await readAllConfigs();
+    for (const [k, c] of Object.entries(allConfigs)) {
+      if (c && c.enabled && (c.userRole === "regional_manager" || c.userRole === "regional" || k === "default")) {
+        return { config: c, configKey: k };
+      }
     }
   }
-  for (const [key, c] of Object.entries(allConfigs)) {
-    if (c && (c.groupId || (Array.isArray(c.targets) && c.targets.length > 0))) {
-      return { config: c, configKey: key };
-    }
-  }
-  return { config: cfg || { enabled: true }, configKey: accountKey };
+
+  // Any other account (e.g. branch account like "user-kurunegala"):
+  // STRICTLY DO NOT FALL BACK! Branch logins must NEVER run or borrow the RM's dispatch bot!
+  return { config: null, configKey: clean };
 }
 
 async function sendBotReply(accountKey, recipientJid, messageText) {
@@ -1386,6 +1575,10 @@ _(උදා: *.reset Middeniya*)_
 // 1. Subscribe to messages from accountWhatsappService
 subscribeToAccountMessages(async (accountKey, { messages, updates, type }) => {
   const { config, configKey } = await resolveActiveConfig(accountKey);
+  // Ensure this is an active RM account! If non-RM or not enabled, IGNORE completely!
+  if (!config || !config.enabled || !config.groupId) {
+    return;
+  }
   const targetGroupId = String(config.groupId || "").trim();
 
   // Handle Baileys messages.update (revokes & edits)
@@ -1439,13 +1632,16 @@ subscribeToAccountMessages(async (accountKey, { messages, updates, type }) => {
     // Case B: Edited message in group
     if (info.type === "edit") {
       if (targetGroupId && incomingJid === targetGroupId) {
-        await handleMessageEdit(configKey, {
-          targetId: info.targetId,
-          targetKey: info.targetKey || info.key,
-          newText: info.text,
-          sender: info.participant || incomingJid,
-          fromMe: info.fromMe
-        });
+        const windowCheck = isMessageInsideCheckInWindow(msg, config);
+        if (windowCheck.ok) {
+          await handleMessageEdit(configKey, {
+            targetId: info.targetId,
+            targetKey: info.targetKey || info.key,
+            newText: info.text,
+            sender: info.participant || incomingJid,
+            fromMe: info.fromMe
+          });
+        }
       }
       continue;
     }
@@ -1457,63 +1653,107 @@ subscribeToAccountMessages(async (accountKey, { messages, updates, type }) => {
     if (msgId && recentBotReplyIds.has(msgId)) continue;
     if (isAutomatedSystemMessage(text)) continue;
 
-    // Check if message is a bot command
-    const isBotCommand = isGroup
-      ? /^[./!#](menu|help|start|bot|බොට්|status|live|reminder|report|summary|delete|saved|set|edit|reset|clear)\b/i.test(text.trim())
-      : /^[./!#]?(menu|help|start|bot|බොට්|status|live|reminder|report|summary|delete|saved|set|edit|reset|clear|1|2|3|4|5|6|7|8)\b/i.test(text.trim()) ||
-        Boolean(findBranchInLine(text, config.targets || []) && /\b\d{1,5}\b/.test(text));
-
-    if (isBotCommand) {
-      console.log(`[regional-dispatch:bot] 🤖 Bot command detected: "${text.slice(0, 30)}" from ${incomingJid}`);
-      await handleBotCommand(configKey, config, incomingJid, msg, text);
-      continue;
-    }
-
-    // Target dispatch group during check-in window
-    if (isGroup && targetGroupId && incomingJid === targetGroupId) {
-      const colomboNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Colombo" }));
-      const { h: startH, m: startM } = parseTime(config.checkInStartTime, 16, 0);
-      const currentMinutes = colomboNow.getHours() * 60 + colomboNow.getMinutes();
-      const startMinutes = startH * 60 + startM;
-
-      if (currentMinutes >= startMinutes) {
-        const targets = Array.isArray(config.targets) ? config.targets : [];
-        const extracted = extractAllBranchDispatchesFromText(text, targets);
-
-        if (extracted.length > 0) {
-          console.log(`[regional-dispatch] 📥 Captured ${extracted.length} branch dispatch(es) from ${info.participant || incomingJid}: "${text.slice(0, 70)}"`);
-          for (const item of extracted) {
-            await recordBranchDispatch(configKey, {
-              messageId: msgId,
-              branch: item.branch,
-              dispatch: item.dispatch,
-              text,
-              sender: info.participant || incomingJid,
-              fromMe: info.fromMe,
-              source: "group"
-            });
-          }
-
-          // React ONLY when valid branch dispatch is captured!
-          try {
-            await reactToAccountMessage(accountKey, {
-              remoteJid: incomingJid,
-              key: msg.key,
-              emoji: "✅"
-            });
-            console.log(`[regional-dispatch] ✅ Reacted to message from ${info.participant || incomingJid} for branch(es): ${extracted.map(e => e.branch).join(", ")}`);
-          } catch (reactErr) {
-            console.warn("[regional-dispatch] Reaction error:", reactErr.message || reactErr);
-          }
-
-          checkAllAccountsEarlyCompletion().catch(() => {});
-        }
+    // IF GROUP MESSAGE:
+    if (isGroup) {
+      // ONLY process the selected group! Ignore all other groups!
+      if (incomingJid !== targetGroupId) {
+        continue;
       }
+
+      // Check if message is a bot command in target group
+      const isBotCommand = /^[./!#](menu|help|start|bot|බොට්|status|live|reminder|report|summary|delete|saved|set|edit|reset|clear)\b/i.test(text.trim());
+      if (isBotCommand) {
+        console.log(`[regional-dispatch:bot] 🤖 Bot command detected: "${text.slice(0, 30)}" from ${incomingJid}`);
+        await handleBotCommand(configKey, config, incomingJid, msg, text);
+        continue;
+      }
+
+      // STRICT TIME WINDOW CHECK:
+      // Verify message was sent today and during check-in window [checkInStartTime, reportSendTime]
+      const windowCheck = isMessageInsideCheckInWindow(msg, config);
+      if (!windowCheck.ok) {
+        // Outside time period -> completely ignore for dispatch collection & do NOT react!
+        continue;
+      }
+
+      // STRICT FORMAT PARSING:
+      const targets = Array.isArray(config.targets) ? config.targets : [];
+      const extracted = extractAllBranchDispatchesFromText(text, targets);
+
+      // ONLY react and collect if valid branch dispatches were captured!
+      if (extracted.length > 0) {
+        console.log(`[regional-dispatch] 📥 Captured ${extracted.length} branch dispatch(es) from ${info.participant || incomingJid}: "${text.slice(0, 70)}"`);
+        for (const item of extracted) {
+          await recordBranchDispatch(configKey, {
+            messageId: msgId,
+            branch: item.branch,
+            dispatch: item.dispatch,
+            text,
+            sender: info.participant || incomingJid,
+            fromMe: info.fromMe,
+            source: "group"
+          });
+        }
+
+        // React ONLY when valid branch dispatch is captured!
+        try {
+          await reactToAccountMessage(configKey, {
+            remoteJid: incomingJid,
+            key: msg.key,
+            emoji: "✅"
+          });
+          console.log(`[regional-dispatch] ✅ Reacted to message from ${info.participant || incomingJid} for branch(es): ${extracted.map(e => e.branch).join(", ")}`);
+        } catch (reactErr) {
+          console.warn("[regional-dispatch] Reaction error:", reactErr.message || reactErr);
+        }
+
+        checkAllAccountsEarlyCompletion().catch(() => {});
+      }
+      // If not a valid dispatch format, do nothing and DO NOT react!
       continue;
     }
 
-    // Direct Messages or Note to Self
+    // IF DIRECT MESSAGE (1-on-1 personal chat):
     if (!isGroup) {
+      const isFromMe = Boolean(info.fromMe);
+      const senderJid = info.participant || incomingJid;
+      const senderNumber = senderJid.split("@")[0].replace(/\D/g, "");
+
+      // Only allow if message is from the RM themselves, or from authorized personal numbers / branch phones!
+      const isAuthorized = isFromMe || isPersonalChatAuthorized(senderNumber, config);
+      if (!isAuthorized) {
+        // Do not respond to random personal chats
+        continue;
+      }
+
+      // Check if this personal chat is submitting a direct dispatch
+      const windowCheck = isMessageInsideCheckInWindow(msg, config);
+      const targets = Array.isArray(config.targets) ? config.targets : [];
+      const extracted = extractAllBranchDispatchesFromText(text, targets);
+
+      if (windowCheck.ok && extracted.length > 0) {
+        for (const item of extracted) {
+          await recordBranchDispatch(configKey, {
+            messageId: msgId,
+            branch: item.branch,
+            dispatch: item.dispatch,
+            text,
+            sender: senderJid,
+            fromMe: info.fromMe,
+            source: "dm"
+          });
+        }
+        try {
+          await reactToAccountMessage(configKey, {
+            remoteJid: incomingJid,
+            key: msg.key,
+            emoji: "✅"
+          });
+        } catch (e) {}
+        checkAllAccountsEarlyCompletion().catch(() => {});
+        continue;
+      }
+
       await handleBotCommand(configKey, config, incomingJid, msg, text);
     }
   }
