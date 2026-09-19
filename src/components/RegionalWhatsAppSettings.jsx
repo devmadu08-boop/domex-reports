@@ -1,7 +1,8 @@
 import { Bot, Check, Copy, KeyRound, Loader2, LogOut, MessageCircle, Plus, QrCode, RefreshCw, Save, Send, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getWhatsAppQr, getWhatsAppStatus, logoutWhatsApp, reconnectWhatsApp, fetchWhatsAppGroups, getWhatsAppPairingCode } from "../services/whatsappApi.js";
-import { getDispatchTargets } from "../services/dispatchStorage.js";
+import { getDispatchTargets, saveDispatchTargets } from "../services/dispatchStorage.js";
+import { saveSettings } from "../services/reportStorage.js";
 
 export default function RegionalWhatsAppSettings({ accountKey: propAccountKey, session }) {
   const accountKey = (session?.role === "admin" || session?.role === "superadmin" || session?.role === "regional_manager" || session?.role === "regional" || !propAccountKey)
@@ -70,6 +71,20 @@ export default function RegionalWhatsAppSettings({ accountKey: propAccountKey, s
               target: Number(t.target) || 0
             }));
           }
+        }
+        if (Array.isArray(targets) && targets.length > 0) {
+          saveDispatchTargets(targets.map((t, idx) => ({
+            id: t.id || `target-${(t.branch || t.branch_name || `b-${idx}`).toLowerCase().replace(/\s+/g, "-")}`,
+            branch_name: t.branch || t.branch_name,
+            target: Number(t.target) || 0,
+            assigned_name: t.assigned_name || "",
+            assigned_phone: t.assigned_phone || "",
+            assigned_jid: t.assigned_jid || "",
+            assigned_lid: t.assigned_lid || ""
+          })));
+        }
+        if (data.geminiApiKey) {
+          saveSettings({ geminiApiKey: data.geminiApiKey });
         }
         setConfig(prev => ({
           ...prev,
@@ -210,6 +225,20 @@ export default function RegionalWhatsAppSettings({ accountKey: propAccountKey, s
         },
         body: JSON.stringify(payload)
       });
+      if (Array.isArray(targetsToSave) && targetsToSave.length > 0) {
+        saveDispatchTargets(targetsToSave.map((t, idx) => ({
+          id: t.id || `target-${(t.branch || t.branch_name || `b-${idx}`).toLowerCase().replace(/\s+/g, "-")}`,
+          branch_name: t.branch || t.branch_name,
+          target: Number(t.target) || 0,
+          assigned_name: t.assigned_name || "",
+          assigned_phone: t.assigned_phone || "",
+          assigned_jid: t.assigned_jid || "",
+          assigned_lid: t.assigned_lid || ""
+        })));
+      }
+      if (config.geminiApiKey) {
+        saveSettings({ geminiApiKey: config.geminiApiKey });
+      }
       alert("Configuration saved successfully!");
     } catch (error) {
       alert("Error saving: " + error.message);

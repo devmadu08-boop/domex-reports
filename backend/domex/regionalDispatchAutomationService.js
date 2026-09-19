@@ -324,18 +324,20 @@ export async function getRegionalConfig(accountKey) {
 
 export async function saveRegionalConfig(accountKey, payload) {
   const configs = await readAllConfigs();
+  const existing = configs["default"] || configs[accountKey] || {};
   const data = {
-    enabled: Boolean(payload.enabled),
-    groupId: String(payload.groupId || "").trim(),
-    geminiApiKey: String(payload.geminiApiKey || "").trim(),
-    targets: Array.isArray(payload.targets) ? payload.targets : [],
-    checkInStartTime: String(payload.checkInStartTime || "16:00").trim(),
-    reportSendTime: String(payload.reportSendTime || "23:30").trim(),
+    enabled: payload.enabled !== undefined ? Boolean(payload.enabled) : Boolean(existing.enabled),
+    groupId: payload.groupId !== undefined ? String(payload.groupId || "").trim() : String(existing.groupId || "").trim(),
+    geminiApiKey: payload.geminiApiKey !== undefined ? String(payload.geminiApiKey || "").trim() : String(existing.geminiApiKey || "").trim(),
+    targets: Array.isArray(payload.targets) ? payload.targets : (Array.isArray(existing.targets) ? existing.targets : []),
+    checkInStartTime: payload.checkInStartTime !== undefined ? String(payload.checkInStartTime || "16:00").trim() : String(existing.checkInStartTime || "16:00").trim(),
+    reportSendTime: payload.reportSendTime !== undefined ? String(payload.reportSendTime || "23:30").trim() : String(existing.reportSendTime || "23:30").trim(),
     reminderTimes: Array.isArray(payload.reminderTimes) && payload.reminderTimes.length > 0
       ? payload.reminderTimes.map(t => String(t || "").trim()).filter(Boolean)
-      : (payload.reminderTime ? [String(payload.reminderTime).trim()] : ["23:00"]),
-    userName: payload.userName || "",
-    userRole: payload.userRole || "regional_manager"
+      : (payload.reminderTime ? [String(payload.reminderTime).trim()] : (existing.reminderTimes || ["23:00"])),
+    userName: payload.userName !== undefined ? payload.userName : (existing.userName || ""),
+    userRole: payload.userRole !== undefined ? payload.userRole : (existing.userRole || "regional_manager"),
+    botAuthorizedNumbers: payload.botAuthorizedNumbers !== undefined ? payload.botAuthorizedNumbers : (existing.botAuthorizedNumbers || "")
   };
 
   // Always store regional dispatch configuration under "default"
@@ -1231,24 +1233,44 @@ export function isMessageInsideCheckInWindow(msg, config) {
   return { ok: true, msgDt };
 }
 
-function isPersonalChatAuthorized(senderNumber, config) {
+function phonesMatch(p1, p2) {
+  const d1 = String(p1 || "").replace(/\D/g, "");
+  const d2 = String(p2 || "").replace(/\D/g, "");
+  if (!d1 || !d2) return false;
+  if (d1 === d2) return true;
+  const s1 = d1.startsWith("94") && d1.length === 11 ? "0" + d1.slice(2) : d1;
+  const s2 = d2.startsWith("94") && d2.length === 11 ? "0" + d2.slice(2) : d2;
+  return s1 === s2;
+}
+
+async function isPersonalChatAuthorized(senderNumber, config) {
   if (!senderNumber) return false;
-  const cleanNumber = String(senderNumber).replace(/\D/g, "");
+  let cleanNumber = String(senderNumber).replace(/\D/g, "");
   if (!cleanNumber) return false;
 
+  // Resolve LID if applicable
+  if (cleanNumber.length > 13) {
+    const resolved = await resolveLidPhone(cleanNumber);
+    if (resolved) cleanNumber = resolved;
+  }
+
   // 1. In config.botAuthorizedNumbers
-  if (config.botAuthorizedNumbers) {
+  if (config.botAuthorizedNumbers && String(config.botAuthorizedNumbers).trim()) {
     const list = String(config.botAuthorizedNumbers)
       .split(",")
       .map(n => n.replace(/\D/g, ""))
       .filter(Boolean);
-    if (list.includes(cleanNumber)) return true;
+    if (list.some(authPhone => phonesMatch(authPhone, cleanNumber))) return true;
+  } else {
+    // Whitelist is not restricted, allow personal chat
+    return true;
   }
+
   // 2. In targets assigned phones
   if (Array.isArray(config.targets)) {
     for (const t of config.targets) {
       const p = String(t.assigned_phone || t.assignedPhone || t.assigned_jid || "").replace(/\D/g, "");
-      if (p && (p === cleanNumber || (p.length === 10 && cleanNumber.endsWith(p.slice(1))) || (cleanNumber.length === 10 && p.endsWith(cleanNumber.slice(1))))) {
+      if (p && phonesMatch(p, cleanNumber)) {
         return true;
       }
     }
@@ -1265,11 +1287,21 @@ async function resolveActiveConfig(accountKey) {
   const clean = "default";
   const cfg = await getRegionalConfig(clean);
 
-  if (cfg && cfg.enabled && cfg.groupId) {
+  if (cfg) {
     return { config: cfg, configKey: clean };
   }
 
   return { config: null, configKey: clean };
+}
+
+// Active bot sessions: sessionKey -> expiresAt timestamp (valid for 5 minutes after .menu)
+export const activeBotSessions = new Map();
+const BOT_SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+export function getBotSessionKey(incomingJid, senderJidOrNumber) {
+  const isGroup = String(incomingJid || "").endsWith("@g.us");
+  const senderNumber = String(senderJidOrNumber || incomingJid || "").split("@")[0].replace(/\D/g, "");
+  return isGroup ? `${incomingJid}:${senderNumber}` : incomingJid;
 }
 
 async function sendBotReply(accountKey, recipientJid, messageText) {
@@ -1311,26 +1343,35 @@ async function handleBotCommand(accountKey, config, incomingJid, msg, rawText) {
   console.log(`[regional-dispatch:bot] 📩 Incoming command from ${incomingJid} (sender: ${senderNumber}, fromMe: ${isFromMe}): "${text}"`);
 
   // Authorization check:
-  // If config.botAuthorizedNumbers is explicitly set, check whitelist.
-  // Otherwise (by default), any user interacting with the bot in private chat is allowed!
   if (config.botAuthorizedNumbers && String(config.botAuthorizedNumbers).trim()) {
     const list = String(config.botAuthorizedNumbers)
       .split(",")
       .map(n => n.replace(/\D/g, ""))
       .filter(Boolean);
-    if (!isFromMe && !list.includes(senderNumber)) {
-      console.log(`[regional-dispatch:bot] Sender ${senderNumber} not in botAuthorizedNumbers whitelist. Ignoring.`);
+    const resolved = (senderNumber.length > 13 ? (await resolveLidPhone(senderNumber)) : senderNumber) || senderNumber;
+    if (!isFromMe && !list.some(authPhone => phonesMatch(authPhone, resolved))) {
+      console.log(`[regional-dispatch:bot] Sender ${senderNumber} (${resolved}) not in botAuthorizedNumbers whitelist. Ignoring.`);
       return;
     }
   }
 
+  const sessionKey = getBotSessionKey(incomingJid, senderJid);
+  const now = Date.now();
+  const sessionExpiry = activeBotSessions.get(sessionKey) || 0;
+  const isSessionActive = sessionExpiry > now;
+
   const lower = text.toLowerCase().trim();
   const cleanCmd = lower.replace(/^[./!#]/, "").trim();
 
+  // Status text for header
+  const statusNote = config.enabled ? "✅ Auto Report Enabled" : "⚠️ Auto Report Disabled";
+
   // Interactive Bot Menu
   const menuText = `🤖 *DOMEX Regional Dispatch Assistant*
+_${statusNote}_
 
-කරුණාකර ඔබට අවශ්‍ය අංකය හෝ Command එක Reply කරන්න:
+🟢 *Bot Session Activated (ක්‍රියාත්මකයි)*
+_(විනාඩි 5ක් ඇතුළත ඔබට අවශ්‍ය අංකය Reply කරන්න)_
 
 1️⃣ *Live Status* (.status)
 දැනට ලැබී ඇති සහ නොලැබී ඇති ශාඛා විස්තර බැලීම
@@ -1351,17 +1392,18 @@ Group එකට අවසන් වරට යැවූ පණිවිඩය Del
 පසුගිය සුරකින ලද වාර්තා ලැයිස්තුව බැලීම
 
 7️⃣ *Edit/Set Dispatch Count* (.set <ශාඛාව> <ගණන>)
-ශාඛාවක Dispatch එක Inbox එකෙන් වෙනස් කිරීම
-_(උදා: *.set Middeniya 450* හෝ *Middeniya 450*)_
+ශාඛාවක Dispatch එක වෙනස් කිරීම
+_(උදා: .set Middeniya 450)_
 
 8️⃣ *Reset Branch* (.reset <ශාඛාව>)
 ශාඛාවක Dispatch එක ඉවත් කර නැවත Pending කිරීම
-_(උදා: *.reset Middeniya*)_
+_(උදා: .reset Middeniya)_
 
-💡 _ඔබට අවශ්‍ය අංකය (1-8) හෝ Command එක ටයිප් කර එවන්න._`;
+🛑 *Session අවසන් කිරීමට:* *exit* හෝ *stop* ටයිප් කරන්න.
+💡 _ඔබට අවශ්‍ය අංකය (1-8) හෝ Command එක Reply කරන්න._`;
 
-  // 1. Menu triggers
-  if (
+  // 1. Menu & Start Triggers
+  const isMenuTrigger = (
     cleanCmd === "menu" ||
     cleanCmd === "help" ||
     cleanCmd === "start" ||
@@ -1372,10 +1414,34 @@ _(උදා: *.reset Middeniya*)_
     cleanCmd === "hey" ||
     cleanCmd.includes("menu") ||
     cleanCmd.includes("help")
-  ) {
+  );
+
+  if (isMenuTrigger) {
+    activeBotSessions.set(sessionKey, now + BOT_SESSION_TIMEOUT_MS);
     await sendBotReply(accountKey, incomingJid, menuText);
     return;
   }
+
+  // 2. Exit / Cancel Active Session
+  if (cleanCmd === "exit" || cleanCmd === "cancel" || cleanCmd === "stop") {
+    if (isSessionActive) {
+      activeBotSessions.delete(sessionKey);
+      await sendBotReply(accountKey, incomingJid, "🛑 *Bot Session අවසන් කරන ලදී.*\nනැවත අවශ්‍ය වූ විට *.menu* ටයිප් කර Start කරගන්න.");
+    }
+    return;
+  }
+
+  // 3. STRICT: If session is NOT active, bot commands only work after typing .menu
+  if (!isSessionActive) {
+    if (text.startsWith(".") || text.startsWith("/") || text.startsWith("!")) {
+      await sendBotReply(accountKey, incomingJid, "🤖 Bot Commands ක්‍රියාත්මක කිරීමට කරුණාකර පළමුව *.menu* ටයිප් කර Bot Session එක ආරම්භ කරගන්න.");
+    }
+    // If it was just a raw number (1-8) or chat without active session, ignore completely!
+    return;
+  }
+
+  // Session IS active: renew session timeout for 5 minutes
+  activeBotSessions.set(sessionKey, now + BOT_SESSION_TIMEOUT_MS);
 
   // 2. Option 1: Live Status
   if (
@@ -1676,8 +1742,8 @@ subscribeToAccountMessages(async (accountKey, { messages, updates, type }) => {
   }
 
   const { config, configKey } = await resolveActiveConfig(accountKey);
-  // Ensure this is an active RM account! If non-RM or not enabled, IGNORE completely!
-  if (!config || !config.enabled || !config.groupId) {
+  // Ensure this is an active RM account! If non-RM, IGNORE completely!
+  if (!config) {
     return;
   }
   const targetGroupId = String(config.groupId || "").trim();
@@ -1757,15 +1823,25 @@ subscribeToAccountMessages(async (accountKey, { messages, updates, type }) => {
     // IF GROUP MESSAGE:
     if (isGroup) {
       // ONLY process the selected group! Ignore all other groups!
-      if (incomingJid !== targetGroupId) {
+      if (!targetGroupId || incomingJid !== targetGroupId) {
         continue;
       }
 
       // Check if message is a bot command in target group
-      const isBotCommand = /^[./!#](menu|help|start|bot|බොට්|status|live|reminder|report|summary|delete|saved|set|edit|reset|clear)\b/i.test(text.trim());
-      if (isBotCommand) {
+      const sessionKey = getBotSessionKey(incomingJid, info.participant || incomingJid);
+      const isSessionActive = (activeBotSessions.get(sessionKey) || 0) > Date.now();
+      const isMenuCommand = /^[./!#]?(menu|help|start|bot|බොට්)\b/i.test(text.trim());
+      const isPrefixedCommand = /^[./!#](status|live|reminder|report|summary|delete|saved|set|edit|reset|clear)\b/i.test(text.trim());
+      const isSessionOption = isSessionActive && /^(?:[1-8]|exit|cancel|stop)\b/i.test(text.trim());
+
+      if (isMenuCommand || isPrefixedCommand || isSessionOption) {
         console.log(`[regional-dispatch:bot] 🤖 Bot command detected: "${text.slice(0, 30)}" from ${incomingJid}`);
         await handleBotCommand(configKey, config, incomingJid, msg, text);
+        continue;
+      }
+
+      // If auto report is disabled, don't collect dispatches or react in group
+      if (!config.enabled) {
         continue;
       }
 
@@ -1821,9 +1897,22 @@ subscribeToAccountMessages(async (accountKey, { messages, updates, type }) => {
       const senderNumber = senderJid.split("@")[0].replace(/\D/g, "");
 
       // Only allow if message is from the RM themselves, or from authorized personal numbers / branch phones!
-      const isAuthorized = isFromMe || isPersonalChatAuthorized(senderNumber, config);
+      const isAuthorized = isFromMe || await isPersonalChatAuthorized(senderNumber, config);
       if (!isAuthorized) {
         // Do not respond to random personal chats
+        continue;
+      }
+
+      // Check if this personal chat is a bot command or menu
+      const sessionKey = getBotSessionKey(incomingJid, senderNumber);
+      const isSessionActive = (activeBotSessions.get(sessionKey) || 0) > Date.now();
+      const isMenuCommand = /^[./!#]?(menu|help|start|bot|බොට්|hi|hello|hey)\b/i.test(text.trim());
+      const isPrefixedCommand = /^[./!#](status|live|reminder|report|summary|delete|saved|set|edit|reset|clear)\b/i.test(text.trim());
+      const isSessionOption = isSessionActive && /^(?:[1-8]|exit|cancel|stop)\b/i.test(text.trim());
+
+      if (isMenuCommand || isPrefixedCommand || isSessionOption) {
+        console.log(`[regional-dispatch:bot] 🤖 Bot command detected in DM: "${text.slice(0, 30)}" from ${incomingJid}`);
+        await handleBotCommand(configKey, config, incomingJid, msg, text);
         continue;
       }
 
@@ -1890,7 +1979,10 @@ subscribeToAccountMessages(async (accountKey, { messages, updates, type }) => {
         continue;
       }
 
-      await handleBotCommand(configKey, config, incomingJid, msg, text);
+      // If user typed a dot command or other non-dispatch text in DM:
+      if (text.startsWith(".") || text.startsWith("/") || text.startsWith("!")) {
+        await handleBotCommand(configKey, config, incomingJid, msg, text);
+      }
     }
   }
 });

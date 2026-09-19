@@ -1,6 +1,8 @@
+import { saveSettings } from "./reportStorage.js";
+
 /**
  * Storage service for Branch Dispatch Targets and Dispatch Reports
- * Stores in LocalStorage with optional Firebase Realtime DB synchronization.
+ * Stores in LocalStorage with automatic VPS backend synchronization.
  */
 
 const TARGETS_STORAGE_KEY = "daily-courier-report-dispatch-targets-v1";
@@ -37,6 +39,66 @@ function writeJson(key, value) {
 }
 
 /**
+ * Synchronize targets and Gemini API key from VPS backend config
+ */
+export async function syncDispatchTargetsAndSettingsFromBackend(accountKey = "default") {
+  try {
+    const res = await fetch("/api/regional-dispatch/config", {
+      headers: { "x-whatsapp-account": accountKey }
+    });
+    if (!res.ok) return { targets: getDispatchTargets(), geminiApiKey: "" };
+    const data = await res.json();
+    let targets = getDispatchTargets();
+    if (Array.isArray(data.targets) && data.targets.length > 0) {
+      targets = data.targets.map((t, idx) => ({
+        id: t.id || `target-${(t.branch || t.branch_name || `branch-${idx}`).toLowerCase().replace(/\s+/g, "-")}`,
+        branch_name: t.branch || t.branch_name,
+        target: Number(t.target) || 0,
+        assigned_name: t.assigned_name || "",
+        assigned_phone: t.assigned_phone || "",
+        assigned_jid: t.assigned_jid || "",
+        assigned_lid: t.assigned_lid || "",
+        created_at: t.created_at || new Date().toISOString()
+      }));
+      writeJson(TARGETS_STORAGE_KEY, targets);
+    }
+    if (data.geminiApiKey) {
+      saveSettings({ geminiApiKey: data.geminiApiKey });
+    }
+    return { targets, geminiApiKey: data.geminiApiKey || "" };
+  } catch (err) {
+    console.warn("Failed to sync dispatch targets from backend:", err);
+    return { targets: getDispatchTargets(), geminiApiKey: "" };
+  }
+}
+
+/**
+ * Save targets locally and sync to VPS backend in background
+ */
+export async function syncTargetsToBackend(targets, accountKey = "default") {
+  try {
+    const payloadTargets = (targets || []).map(t => ({
+      branch: t.branch_name || t.branch,
+      target: Number(t.target) || 0,
+      assigned_name: t.assigned_name || "",
+      assigned_phone: t.assigned_phone || "",
+      assigned_jid: t.assigned_jid || "",
+      assigned_lid: t.assigned_lid || ""
+    }));
+    await fetch("/api/regional-dispatch/config", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-whatsapp-account": accountKey
+      },
+      body: JSON.stringify({ targets: payloadTargets })
+    });
+  } catch (err) {
+    console.warn("Failed to sync targets to backend:", err);
+  }
+}
+
+/**
  * Get all configured branch targets
  */
 export function getDispatchTargets() {
@@ -49,11 +111,12 @@ export function getDispatchTargets() {
 }
 
 /**
- * Save entire targets list
+ * Save entire targets list and sync with VPS backend
  */
 export function saveDispatchTargets(targets) {
   const clean = Array.isArray(targets) ? targets : [];
   writeJson(TARGETS_STORAGE_KEY, clean);
+  syncTargetsToBackend(clean);
   return clean;
 }
 

@@ -29,7 +29,8 @@ import {
   deleteDispatchReport,
   syncDispatchReportsFromBackend,
   saveDispatchReportWithSync,
-  deleteDispatchReportWithSync
+  deleteDispatchReportWithSync,
+  syncDispatchTargetsAndSettingsFromBackend
 } from "../../services/dispatchStorage.js";
 import { getSettings, saveSettings } from "../../services/reportStorage.js";
 import { todayIso, displayDate } from "../../utils/date.js";
@@ -64,10 +65,18 @@ export default function AutoDispatchManager({ session, onBackToDashboard }) {
     loadSavedReports();
   }, [loadSavedReports]);
 
-  // Load targets
+  // Load targets & sync with VPS backend
   useEffect(() => {
     setTargets(getDispatchTargets());
-  }, []);
+    syncDispatchTargetsAndSettingsFromBackend(accountKey).then(({ targets: syncedTargets, geminiApiKey }) => {
+      if (syncedTargets && syncedTargets.length > 0) {
+        setTargets(syncedTargets);
+      }
+      if (geminiApiKey) {
+        setLocalSettings(s => ({ ...s, geminiApiKey }));
+      }
+    }).catch(console.warn);
+  }, [accountKey]);
 
   // Check if a saved report exists for the selected date
   useEffect(() => {
@@ -86,11 +95,21 @@ export default function AutoDispatchManager({ session, onBackToDashboard }) {
 
   function refreshTargets() {
     setTargets(getDispatchTargets());
+    syncDispatchTargetsAndSettingsFromBackend(accountKey).then(({ targets: syncedTargets }) => {
+      if (syncedTargets && syncedTargets.length > 0) {
+        setTargets(syncedTargets);
+      }
+    }).catch(console.warn);
   }
 
   function handleSaveApiKey(key) {
     const next = saveSettings({ geminiApiKey: key });
     setLocalSettings(next);
+    fetch("/api/regional-dispatch/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-whatsapp-account": accountKey || "default" },
+      body: JSON.stringify({ geminiApiKey: key })
+    }).catch(err => console.warn("Failed to sync geminiApiKey to backend:", err));
   }
 
   // Calculate Metrics whenever parsedItems or targets change

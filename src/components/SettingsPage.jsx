@@ -68,6 +68,16 @@ export default function SettingsPage({
 
   useEffect(() => {
     setDraftSettings(settings);
+    if (!settings.geminiApiKey) {
+      fetch("/api/regional-dispatch/config")
+        .then(res => res.json())
+        .then(cfg => {
+          if (cfg?.geminiApiKey) {
+            setDraftSettings(current => ({ ...current, geminiApiKey: cfg.geminiApiKey }));
+          }
+        })
+        .catch(() => {});
+    }
   }, [settings]);
 
   useEffect(() => {
@@ -85,6 +95,13 @@ export default function SettingsPage({
 
   function handleSaveSettings() {
     onSaveSettings(draftSettings);
+    if (draftSettings.geminiApiKey) {
+      fetch("/api/regional-dispatch/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-whatsapp-account": "default" },
+        body: JSON.stringify({ geminiApiKey: draftSettings.geminiApiKey })
+      }).catch(() => {});
+    }
   }
 
   function handleThemeChange(themeId) {
