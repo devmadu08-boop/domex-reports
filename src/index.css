@@ -1221,6 +1221,12 @@ textarea {
 .petty-ledger-action { display: inline-flex; min-height: 34px; align-items: center; gap: 6px; border-radius: 11px; padding: 0 10px; font-size: 10px; font-weight: 900; white-space: nowrap; }
 .petty-ledger-action.pass { color: #fff; background: #0c9569; }
 .petty-ledger-action.reopen { color: #5d4a84; background: #eee8f8; }
+.petty-ledger-actions { display: inline-flex; align-items: center; gap: 6px; }
+.petty-ledger-icon-btn { display: inline-flex; width: 34px; height: 34px; align-items: center; justify-content: center; border-radius: 11px; border: 1px solid #ded5ed; background: #fff; cursor: pointer; transition: all 0.15s ease; }
+.petty-ledger-icon-btn.edit { color: #2563eb; }
+.petty-ledger-icon-btn.edit:hover { background: #eff6ff; border-color: #bfdbfe; }
+.petty-ledger-icon-btn.delete { color: #dc2626; }
+.petty-ledger-icon-btn.delete:hover { background: #fef2f2; border-color: #fecaca; }
 
 .petty-cash-a4-report {
   box-sizing: border-box;
