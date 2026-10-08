@@ -4,6 +4,8 @@ A simple React + Vite web app for entering daily courier branch data and exporti
 
 ## Features
 
+- DOMEX islandwide dashboard with scenic artwork, cream cards, a grouped top menu, report-date search, and a 7/14-day performance chart based on saved reports
+- Responsive phone and tablet layouts; interface themes and regional branch switching are available from the profile menu
 - Dashboard with today's date, quick actions, and saved date history
 - Saved courier name list for faster daily entry
 - Branch Courier Performance report with automatic Delivery % calculation

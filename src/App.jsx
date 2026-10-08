@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
-  BarChart3,
   CalendarClock,
-  CalendarDays,
   ClipboardCheck,
   CheckCircle2,
   Download,
@@ -14,21 +12,14 @@ import {
   History,
   Home,
   Image,
-  KeyRound,
   ListChecks,
-  LogOut,
   MessagesSquare,
   Package,
   PackageCheck,
   Pencil,
   RotateCcw,
-  Search,
-  Send,
-  Server,
   Settings,
   ShieldCheck,
-  Sparkles,
-  Target,
   Trash2,
   TrendingUp,
   Truck,
@@ -49,7 +40,8 @@ import { CourierPerformanceReport, OperationReport } from "./components/ReportTa
 import SendToWhatsAppButton from "./components/SendToWhatsAppButton.jsx";
 import SettingsPage from "./components/SettingsPage.jsx";
 import MeterChatsDashboard from "./components/MeterChatsDashboard.jsx";
-import DailyWorkflowWizard from "./components/DailyWorkflowWizard.jsx";
+import DashboardHeader from "./components/DashboardHeader.jsx";
+import IslandwideDashboard from "./components/IslandwideDashboard.jsx";
 import SystemHealthPanel from "./components/SystemHealthPanel.jsx";
 import SystemRecoveryPanel from "./components/SystemRecoveryPanel.jsx";
 import TodayOperationsDashboard from "./components/TodayOperationsDashboard.jsx";
@@ -242,7 +234,6 @@ export default function App() {
   const [versionBusy, setVersionBusy] = useState(false);
   const [undoCount, setUndoCount] = useState(() => getUndoHistory().length);
   const [redoCount, setRedoCount] = useState(() => getRedoHistory().length);
-  const [isHeaderVisible, setIsHeaderVisible] = useState(true);
 
   const courierReportRef = useRef(null);
   const operationReportRef = useRef(null);
@@ -254,23 +245,6 @@ export default function App() {
   const backupSyncTimerRef = useRef(null);
   const syncClientIdRef = useRef(getSyncClientId());
   const versionBootstrapRef = useRef({ branchName: "", promise: null });
-  const lastScrollY = useRef(0);
-
-  useEffect(() => {
-    const handleScroll = () => {
-      const currentScrollY = window.scrollY;
-      
-      if (currentScrollY > 60) {
-        setIsHeaderVisible(false);
-      } else {
-        setIsHeaderVisible(true);
-      }
-    };
-
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
-
   const visibleTabs = useMemo(
     () => tabs.filter((tab) => (tab.adminOnly ? canManageUsers(session) : canAccessTab(session, tab.id))),
     [session],
@@ -583,14 +557,14 @@ export default function App() {
   }, [notice]);
 
   useEffect(() => {
-    if (!isSuperAdmin(session)) return undefined;
+    if (!session) return undefined;
 
     let cancelled = false;
     async function checkBackend() {
       try {
-        const health = await getSystemHealth();
+        const health = isSuperAdmin(session) ? await getSystemHealth() : await getBackendHealth();
         if (!cancelled) {
-          setSystemHealth(health);
+          if (isSuperAdmin(session)) setSystemHealth(health);
           setBackendStatus("Backend server running");
         }
       } catch {
@@ -609,7 +583,7 @@ export default function App() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [session?.role]);
+  }, [session?.role, session?.branchName]);
 
   function showNotice(message) {
     setNotice(message);
@@ -1293,120 +1267,25 @@ export default function App() {
   return (
     <div
       data-theme={normalizeThemeId(settings.uiTheme)}
-      className={`app-shell app-background theme-${normalizeThemeId(settings.uiTheme)} pb-24 text-[#15143b] xl:grid xl:grid-cols-[260px_1fr] xl:items-start xl:gap-5 xl:p-5 xl:pb-5`}
+      className={`app-shell app-background domex-app theme-${normalizeThemeId(settings.uiTheme)} ${effectiveActiveTab === "dashboard" ? "domex-dashboard-page" : "domex-workspace-page"}`}
     >
       {notice && (
         <div className="fixed right-4 top-4 z-50 max-w-sm rounded-[22px] border border-white/70 bg-violet-600 px-5 py-3 text-sm font-black text-white shadow-2xl shadow-violet-300/50">
           {notice}
         </div>
       )}
-      <aside className="glass-sidebar no-print hidden xl:flex">
-        <div className="sidebar-profile">
-          <div className="profile-avatar">
-            <span className="avatar-hair" />
-            <span className="avatar-face" />
-            <span className="avatar-body" />
-          </div>
-          <div>
-            <h2 className="text-2xl font-black leading-tight text-white drop-shadow">Hi, {settings.branchName || session.branchName || "Branch"}!</h2>
-            <p className="text-sm font-bold text-white/88">Welcome back</p>
-          </div>
-        </div>
-
-        {normalizeUserRole(session.role) === "regional_manager" && accessibleBranches.length > 0 ? (
-          <label className="regional-branch-switcher mt-5">
-            <span>Viewing branch</span>
-            <select value={session.branchName} onChange={handleWorkspaceBranchChange}>
-              {accessibleBranches.map((branch) => <option key={branch} value={branch}>{branch.toUpperCase()}</option>)}
-            </select>
-          </label>
-        ) : null}
-
-        <nav className="sidebar-nav mt-7 grid gap-3">
-          {visibleTabs.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = effectiveActiveTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={`sidebar-link ${isActive ? "sidebar-link-active" : ""}`}
-              >
-                <span className="sidebar-icon">
-                  <Icon className="h-5 w-5" />
-                </span>
-                {tab.label}
-                {tab.id === "users" && googleApprovals.filter((approval) => approval.status === "pending").length > 0 ? <span className="approval-count">{googleApprovals.filter((approval) => approval.status === "pending").length}</span> : null}
-              </button>
-            );
-          })}
-        </nav>
-
-        <button type="button" onClick={handleLogout} className="mt-auto inline-flex min-h-12 items-center justify-center gap-2 rounded-[20px] border border-[#d6c7f7] bg-[#fff8f4] text-sm font-black text-violet-700 shadow-[7px_8px_16px_rgba(92,68,166,0.18),-5px_-5px_14px_rgba(221,207,255,0.38)]">
-          <LogOut className="h-5 w-5" />
-          Logout
-        </button>
-      </aside>
-
+      <DashboardHeader
+        tabs={visibleTabs} activeTab={effectiveActiveTab} onOpen={setActiveTab}
+        session={session} branchName={settings.branchName || session.branchName}
+        branches={normalizeUserRole(session.role) === "regional_manager" ? accessibleBranches : []}
+        onBranchChange={handleWorkspaceBranchChange} onLogout={handleLogout}
+        theme={settings.uiTheme} onThemeChange={handleThemeChange}
+        summary={todayOperations} history={history} onHistoryView={handleHistoryView}
+        approvals={canManageUsers(session) ? googleApprovals.filter((approval) => approval.status === "pending").length : 0}
+      />
       <div className="main-dashboard-surface min-w-0">
-      {isSuperAdmin(session) && (
-        <div className="mb-4 grid gap-3 md:grid-cols-2">
-          <StatusPill icon={ShieldCheck} label="Firebase" value={firebaseStatus} ok={firebaseStatus.includes("connected")} />
-          <StatusPill icon={Server} label="Backend" value={backendStatus} ok={backendStatus.includes("running")} />
-        </div>
-      )}
-      <header className={`sticky top-0 z-30 border-b border-[#eadff2] bg-[#fff7f2] transition-transform duration-300 xl:static xl:border-0 xl:bg-transparent xl:translate-y-0 ${!isHeaderVisible ? "-translate-y-full" : "translate-y-0"}`}>
-        <div className="flex flex-col gap-4 px-4 py-4 xl:px-0 xl:py-0">
-          <div className="flex items-center justify-between gap-3 xl:hidden">
-            <div className="min-w-0">
-              <p className="text-xs font-black uppercase text-violet-500">Signed in branch</p>
-              <p className="truncate text-sm font-black text-[#15143b]">{settings.branchName || session.branchName || "Branch"}</p>
-            </div>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-[18px] border border-[#eadff2] bg-[#fff8f4] px-4 text-sm font-black text-violet-700 shadow-[7px_8px_16px_rgba(128,104,178,0.14),-5px_-5px_13px_rgba(255,255,255,0.9)]"
-            >
-              <LogOut className="h-4 w-4" />
-              Logout
-            </button>
-          </div>
-          <div className="grid gap-4 xl:grid-cols-[1fr_500px] xl:items-center">
-            <div>
-              <p className="text-sm font-black text-violet-600">{activeTabLabel}</p>
-              <h1 className="mt-2 text-3xl font-black tracking-tight text-[#101233] md:text-5xl">Daily Courier Report System</h1>
-              <p className="mt-2 text-sm font-semibold text-[#4d4b86] md:text-base">Fast daily entry, saved courier names, clean WhatsApp-ready exports.</p>
-            </div>
-            <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-              <label className="top-search-bar">
-                <Search className="h-6 w-6 text-violet-400" />
-                <input type="search" placeholder="Search reports, couriers..." className="min-w-0 flex-1 bg-transparent text-sm font-bold text-[#15143b] outline-none placeholder:text-[#8b7bb5]" />
-              </label>
-              <ThemeSwitcher value={settings.uiTheme} onChange={handleThemeChange} compact />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3 xl:hidden">
-            <TopMetric icon={CalendarDays} label="Today" value={displayDate(todayIso())} tone="red" />
-            <TopMetric icon={Target} label="Target" value={stableTarget || "Not set"} tone="green" />
-          </div>
-          {normalizeUserRole(session.role) === "regional_manager" && accessibleBranches.length > 0 ? (
-            <label className="regional-branch-switcher xl:hidden">
-              <span>Viewing branch</span>
-              <select value={session.branchName} onChange={handleWorkspaceBranchChange}>
-                {accessibleBranches.map((branch) => <option key={branch} value={branch}>{branch.toUpperCase()}</option>)}
-              </select>
-            </label>
-          ) : null}
-        </div>
-      </header>
-
-      <main className="grid gap-4 px-3 py-4 md:gap-5 md:px-4 xl:px-0 xl:py-6">
-        <div className="xl:hidden">
-          <p className="text-sm font-black text-[#15143b]">{activeTabLabel}</p>
-          <p className="text-xs font-semibold text-[#6f6597]">Mobile app mode</p>
-        </div>
-
+      <main className="domex-main">
+        {effectiveActiveTab !== "dashboard" ? <div className="workspace-page-heading"><span>DOMEX / {settings.branchName || session.branchName} Branch</span><h1>{activeTabLabel}</h1></div> : null}
         {!["deliveredConverter", "settings", "dashboard", "meterChats", "autoDispatch"].includes(effectiveActiveTab) && effectiveActiveTab !== "noAccess" && (
           <DateSelector
             selectedDate={selectedDate}
@@ -1418,55 +1297,24 @@ export default function App() {
         )}
 
         {effectiveActiveTab === "dashboard" && (
-          <section className="dashboard-layout">
-            <div className="dashboard-main-column">
-              <DateSelector
-                selectedDate={selectedDate}
-                onDateChange={setSelectedDate}
-                searchDate={searchDate}
-                onSearchDateChange={setSearchDate}
-                onSearch={handleSearch}
-              />
-
-              <TodayOperationsDashboard summary={todayOperations} onOpen={setActiveTab} />
-              <DailyWorkflowWizard date={selectedDate} steps={todayOperations.steps} onOpen={setActiveTab} />
-
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <SummaryCard label="Courier Rows" value={courierRows.length} helper="Total entries for this report" icon={Package} color="purple" />
-                <SummaryCard label="Saved Names" value={courierNames.length} helper="Unique courier names saved" icon={UserRound} color="pink" />
-                <SummaryCard label="Delivery %" value={`${stats.deliveryPercent}%`} helper="Successful deliveries" icon={Target} color="orange" />
-                <SummaryCard label="Outward Achievement" value={`${stats.achievement}%`} helper="Outward target achieved" icon={ArrowRight} color="blue" />
-              </div>
-
+          <>
+            <IslandwideDashboard session={session} branchName={settings.branchName || session.branchName}
+              summary={todayOperations} stats={stats} history={history} courierNames={courierNames}
+              selectedDate={selectedDate} onDateChange={setSelectedDate}
+              onOpen={(tab) => { if (visibleTabs.some((item) => item.id === tab)) setActiveTab(tab); else showNotice("This section is not assigned to your account."); }}
+              backendOnline={backendStatus.startsWith("Checking") ? null : backendStatus.includes("running")} />
+            <section className="dashboard-report-workspace">
+              <div className="workspace-section-heading"><div><span>YOUR DAILY WORKSPACE</span><h2>Reports & History</h2></div><p>Pick a date, continue a report, or export your saved work.</p></div>
+              <DateSelector selectedDate={selectedDate} onDateChange={setSelectedDate} searchDate={searchDate} onSearchDateChange={setSearchDate} onSearch={handleSearch} />
               <div className="action-dock">
-                <QuickButton label="Add Courier" icon={Truck} onClick={() => setActiveTab("courier")} tone="purple" />
-                <QuickButton label="Add Operation" icon={Package} onClick={() => setActiveTab("operation")} tone="pink" />
-                <QuickButton label="View Reports" icon={FileText} onClick={() => setActiveTab("exports")} tone="orange" />
-                <QuickButton label="Export PNG" icon={Image} onClick={() => setActiveTab("exports")} tone="blue" />
-                <QuickButton label="Export PDF" icon={FileDown} onClick={() => setActiveTab("exports")} tone="green" />
+                {visibleTabs.some((tab) => tab.id === "courier") ? <QuickButton label="Add Courier" icon={Truck} onClick={() => setActiveTab("courier")} tone="purple" /> : null}
+                {visibleTabs.some((tab) => tab.id === "operation") ? <QuickButton label="Add Operation" icon={Package} onClick={() => setActiveTab("operation")} tone="pink" /> : null}
+                {visibleTabs.some((tab) => tab.id === "exports") ? <><QuickButton label="View Reports" icon={FileText} onClick={() => setActiveTab("exports")} tone="orange" /><QuickButton label="Export PNG" icon={Image} onClick={() => setActiveTab("exports")} tone="blue" /><QuickButton label="Export PDF" icon={FileDown} onClick={() => setActiveTab("exports")} tone="green" /></> : null}
               </div>
-
               <HistoryList history={history} savedNamesCount={courierNames.length} onView={handleHistoryView} onDownload={handleHistoryDownload} onSelect={(date) => setSelectedDate(date)} onDeleteType={handleHistoryDeleteType} />
-              <BottomBanner onClick={() => setActiveTab("courier")} />
-            </div>
-
-            <aside className="dashboard-side-column">
-              {isSuperAdmin(session) && (
-                <SystemHealthPanel
-                  firebaseStatus={firebaseStatus}
-                  backendStatus={backendStatus}
-                  health={systemHealth}
-                  pendingCloudSync={pendingCloudSync}
-                  refreshing={healthRefreshing}
-                  onRefresh={refreshSystemHealth}
-                  onRetryQueue={handleRetryWhatsAppQueue}
-                />
-              )}
-              <CourierBanner />
-              <PerformanceOverview stats={stats} />
-              <QuickSummary history={history} stats={stats} courierNames={courierNames} />
-            </aside>
-          </section>
+              {isSuperAdmin(session) ? <SystemHealthPanel firebaseStatus={firebaseStatus} backendStatus={backendStatus} health={systemHealth} pendingCloudSync={pendingCloudSync} refreshing={healthRefreshing} onRefresh={refreshSystemHealth} onRetryQueue={handleRetryWhatsAppQueue} /> : null}
+            </section>
+          </>
         )}
 
         {effectiveActiveTab === "courier" && (
@@ -1637,72 +1485,7 @@ export default function App() {
       </main>
       </div>
 
-      <nav className="mobile-bottom-nav no-print fixed inset-x-0 bottom-0 z-40 border-t border-violet-100 bg-[#fff8f4] px-2 pt-2 shadow-[0_-8px_24px_rgba(128,104,178,0.14)] xl:hidden">
-        <div className="mobile-scrollbar flex gap-1 overflow-x-auto pb-1">
-          {visibleTabs.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = effectiveActiveTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex min-h-14 min-w-[76px] flex-col items-center justify-center gap-1 rounded-md px-1 text-[11px] font-black transition sm:min-w-[92px] ${
-                  isActive ? "bg-violet-600 text-white shadow-lg shadow-violet-200" : "text-[#6d6195] hover:bg-violet-50 hover:text-violet-700"
-                }`}
-              >
-                <Icon className="h-5 w-5" />
-                <span className="max-w-full truncate">{tab.mobileLabel || tab.label.split(" ")[0]}</span>
-                {tab.id === "users" && googleApprovals.filter((approval) => approval.status === "pending").length > 0 ? <span className="mobile-approval-count">{googleApprovals.filter((approval) => approval.status === "pending").length}</span> : null}
-              </button>
-            );
-          })}
-        </div>
-      </nav>
-    </div>
-  );
-}
 
-function TopMetric({ icon: Icon, label, value, tone }) {
-  const toneClass = tone === "red" ? "from-rose-100/90 to-pink-50/80 text-rose-600" : "from-emerald-100/90 to-emerald-50/80 text-emerald-700";
-  return (
-    <div className={`metric-card flex items-center gap-2 bg-gradient-to-br p-3 md:gap-3 md:p-4 ${toneClass}`}>
-      <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[18px] bg-[#fff8f4] shadow-[8px_8px_18px_rgba(128,104,178,0.16),-8px_-8px_18px_rgba(255,255,255,0.9)] md:h-14 md:w-14 md:rounded-[22px]">
-        <Icon className="h-6 w-6 md:h-7 md:w-7" />
-      </div>
-      <div className="min-w-0">
-        <p className="text-xs font-black uppercase text-[#15143b]">{label}</p>
-        <p className="whitespace-nowrap text-sm font-black leading-tight md:text-2xl">{value}</p>
-      </div>
-    </div>
-  );
-}
-
-function SummaryCard({ label, value, helper, icon: Icon, color }) {
-  const colorClass =
-    color === "pink"
-      ? "from-rose-50/95 to-pink-100/75 text-rose-500"
-    : color === "blue"
-        ? "from-blue-50/95 to-sky-100/75 text-blue-500"
-        : color === "orange"
-          ? "from-orange-50/95 to-amber-100/75 text-orange-500"
-          : "from-violet-50/95 to-purple-100/75 text-violet-600";
-  return (
-    <div className={`kpi-card relative overflow-hidden bg-gradient-to-br p-5 ${colorClass}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="kpi-icon">
-          <Icon className="h-7 w-7" />
-        </div>
-        <span className="grid h-8 w-8 place-items-center rounded-full bg-[#fff8f4] text-current shadow-[inset_3px_3px_7px_rgba(128,104,178,0.10),inset_-3px_-3px_7px_rgba(255,255,255,0.9)]">
-          <ListChecks className="h-4 w-4 opacity-55" />
-        </span>
-      </div>
-      <div className="mt-4">
-        <p className="text-[11px] font-black uppercase tracking-wide text-[#15143b] md:text-xs">{label}</p>
-        <p className="mt-1 text-3xl font-black text-[#101233] md:text-4xl">{value}</p>
-        <p className="mt-3 max-w-36 text-xs font-semibold text-[#464170] md:text-sm">{helper}</p>
-      </div>
-      <div className="mini-chart" />
     </div>
   );
 }
@@ -1723,133 +1506,6 @@ function QuickButton({ label, icon: Icon, onClick, tone, className = "" }) {
       <Icon className="h-5 w-5" />
       {label}
     </button>
-  );
-}
-
-function CourierBanner() {
-  return (
-    <div className="courier-banner">
-      <div className="relative z-10">
-        <p className="text-2xl font-black leading-tight text-[#15143b]">Deliver<br />Performance</p>
-        <p className="mt-2 text-sm font-semibold text-[#4f4779]">Track. Analyze. Deliver.</p>
-        <button type="button" className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 px-5 py-3 text-sm font-black text-white shadow-xl shadow-violet-300/60">
-          <BarChart3 className="h-5 w-5" />
-          View Insights
-        </button>
-      </div>
-      <div className="courier-illustration" aria-hidden="true">
-        <div className="cloud cloud-one" />
-        <div className="cloud cloud-two" />
-        <div className="truck-3d">
-          <div className="truck-box" />
-          <div className="truck-cab" />
-          <div className="truck-window" />
-          <div className="wheel wheel-left" />
-          <div className="wheel wheel-right" />
-        </div>
-        <div className="parcel-stack">
-          <span />
-          <span />
-          <span />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PerformanceOverview({ stats }) {
-  const delivered = Math.max(0, Math.min(100, Number(stats.deliveryPercent) || 0));
-  const pending = Math.max(0, 100 - delivered);
-  return (
-    <section className="side-card">
-      <div className="mb-5 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <span className="grid h-9 w-9 place-items-center rounded-2xl bg-violet-100 text-violet-600">
-            <BarChart3 className="h-5 w-5" />
-          </span>
-          <h2 className="font-black text-[#15143b]">Performance Overview</h2>
-        </div>
-        <span className="rounded-2xl bg-[#fff8f4] px-4 py-2 text-xs font-black text-violet-600 shadow-[inset_3px_3px_7px_rgba(128,104,178,0.10),inset_-3px_-3px_7px_rgba(255,255,255,0.9)]">This Week</span>
-      </div>
-      <div className="grid gap-5 sm:grid-cols-[150px_1fr] sm:items-center">
-        <div className="donut-chart" style={{ "--value": `${delivered}%` }}>
-          <div>
-            <strong>{delivered.toFixed(0)}%</strong>
-            <span>Overall</span>
-          </div>
-        </div>
-        <div className="grid gap-4 text-sm font-bold text-[#4b4771]">
-          <MetricLine color="bg-emerald-400" label="Delivered" value={`${delivered.toFixed(0)}% (${stats.totalDelivery})`} />
-          <MetricLine color="bg-rose-400" label="Pending" value={`${pending.toFixed(0)}% (${Math.max(0, stats.totalOnRoute - stats.totalDelivery)})`} />
-          <MetricLine color="bg-blue-400" label="Total" value={stats.totalOnRoute} />
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function MetricLine({ color, label, value }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="inline-flex items-center gap-2">
-        <span className={`h-3 w-3 rounded-full ${color}`} />
-        {label}
-      </span>
-      <span className="font-black text-[#15143b]">{value}</span>
-    </div>
-  );
-}
-
-function QuickSummary({ history, stats, courierNames }) {
-  const pendingItems = Math.max(0, stats.totalOnRoute - stats.totalDelivery);
-  const items = [
-    { label: "Total Reports", value: history.length, icon: CalendarDays, tone: "violet" },
-    { label: "Total Deliveries", value: stats.totalDelivery, icon: PackageCheck, tone: "blue" },
-    { label: "Pending Items", value: pendingItems, icon: Package, tone: "orange" },
-    { label: "Saved Couriers", value: courierNames.length, icon: UserRound, tone: "green" },
-  ];
-  return (
-    <section className="side-card">
-      <div className="mb-4 flex items-center gap-3">
-        <span className="grid h-9 w-9 place-items-center rounded-2xl bg-emerald-100 text-emerald-600">
-          <ListChecks className="h-5 w-5" />
-        </span>
-        <h2 className="font-black text-[#15143b]">Quick Summary</h2>
-      </div>
-      <div className="grid gap-1">
-        {items.map((item) => {
-          const Icon = item.icon;
-          return (
-            <div key={item.label} className="summary-line">
-              <span className={`summary-icon summary-${item.tone}`}>
-                <Icon className="h-5 w-5" />
-              </span>
-              <span className="flex-1 text-sm font-bold text-[#4b4771]">{item.label}</span>
-              <strong className="text-[#15143b]">{item.value}</strong>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-function BottomBanner({ onClick }) {
-  return (
-    <section className="bottom-banner">
-      <div className="banner-parcels" aria-hidden="true">
-        <Package className="h-14 w-14" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <h2 className="text-xl font-black text-white md:text-2xl">
-          Make reporting easier <Sparkles className="inline h-5 w-5 text-amber-200" />
-        </h2>
-        <p className="text-sm font-semibold text-white/86 md:text-base">Save time, stay organized, deliver more.</p>
-      </div>
-      <button type="button" onClick={onClick} className="rounded-[22px] border border-[#c8b0ff] bg-[#a984f1] px-8 py-3 text-sm font-black text-white shadow-[inset_4px_4px_9px_rgba(93,61,160,0.28),inset_-4px_-4px_9px_rgba(220,202,255,0.32),8px_9px_18px_rgba(84,53,155,0.22)] transition hover:bg-[#9d78e9]">
-        Get Started
-      </button>
-    </section>
   );
 }
 
@@ -1888,11 +1544,9 @@ function LoginScreen({ onLogin, onGoogleLogin }) {
   }
 
   return (
-    <main className="app-shell app-background grid place-items-center p-4 text-[#15143b]">
+    <main className="app-shell domex-login grid place-items-center p-4 text-[#15143b]">
       <form onSubmit={handleSubmit} className="login-card">
-        <div className="mx-auto mb-5 grid h-20 w-20 place-items-center rounded-[28px] bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-xl shadow-violet-300/50">
-          <KeyRound className="h-10 w-10" />
-        </div>
+        <img className="domex-login-logo" src="/report-assets/domex-logo.png" alt="DOMEX — We deliver islandwide" />
         <p className="text-sm font-black text-violet-600">Daily Courier Report System</p>
         <h1 className="mt-2 text-3xl font-black text-[#101233]">Branch Login</h1>
         <p className="mt-2 text-sm font-semibold text-[#625987]">Enter branch name and password to sync reports with Firebase.</p>
@@ -1920,16 +1574,6 @@ function LoginScreen({ onLogin, onGoogleLogin }) {
         </div>
       </form>
     </main>
-  );
-}
-
-function StatusPill({ icon: Icon, label, value, ok }) {
-  return (
-    <div className={`status-pill ${ok ? "status-pill-ok" : "status-pill-warn"}`}>
-      <Icon className="h-5 w-5" />
-      <span className="font-black">{label}</span>
-      <span className="text-sm font-bold">{value}</span>
-    </div>
   );
 }
 

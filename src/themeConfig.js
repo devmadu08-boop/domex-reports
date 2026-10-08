@@ -3,10 +3,10 @@ export const DEFAULT_THEME_ID = "default";
 export const UI_THEMES = [
   {
     id: "default",
-    name: "Current Default",
+    name: "DOMEX Islandwide",
     shortName: "Default",
-    description: "The current pastel 3D dashboard, unchanged.",
-    colors: ["#fff7f1", "#b79af6", "#ffdce5", "#dcecff"],
+    description: "Warm cream, DOMEX red, and a scenic islandwide delivery dashboard.",
+    colors: ["#fff7ef", "#a50825", "#e5b647", "#1dc28b"],
   },
   {
     id: "pastel",
