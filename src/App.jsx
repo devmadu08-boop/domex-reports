@@ -1020,6 +1020,7 @@ export default function App() {
   async function syncBackupSnapshotToBackend() {
     const savedSettings = getSettings();
     if (!savedSettings.backupWhatsappNumber) return;
+    if (!savedSettings.backupWhatsappNumber) return;
     try {
       await syncWhatsAppBackupSnapshot({
         phoneNumber: savedSettings.backupWhatsappNumber,
