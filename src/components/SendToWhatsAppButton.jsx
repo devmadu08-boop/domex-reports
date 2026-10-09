@@ -1,3 +1,4 @@
+import { formatReportCaption } from "../../shared/whatsappCaptions.js";
 import { MessageCircle } from "lucide-react";
 import { useState } from "react";
 import { getSettings } from "../services/reportStorage.js";
@@ -58,5 +59,5 @@ export default function SendToWhatsAppButton({ reportRef, reportRefs, reportTitl
 function buildCaption(reportType, reportTitle, reportDate) {
   const templates = getSettings().whatsappCaptionTemplates || {};
   const template = templates[reportType] || "{title} - {date}\nSent automatically from Daily Report System";
-  return template.replaceAll("{title}", reportTitle).replaceAll("{date}", reportDate);
+  return formatReportCaption(template, { title: reportTitle, date: reportDate, branch: getSettings().branchName });
 }

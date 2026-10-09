@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CloudDownload, FileDown, Image, Plus, RotateCcw, Trash2, Upload } from "lucide-react";
 import { todayIso } from "../utils/date.js";
-import { captureElementAsPngDataUrl, exportElementAsPng, exportElementsAsPortraitPdf } from "../utils/exportReports.js";
+import { captureElementAsPngDataUrl, exportElementAsPng, exportElementsAsPortraitPdf, printReportImages } from "../utils/exportReports.js";
 import { deleteDeliveredReport, getAllDeliveredRiderNames, getDeliveredReport, getDeliveredRiderNames, getReportByDate, getSettings, saveCourierName, saveDeliveredReport as saveDeliveredReportByRider, saveReportType, saveRescheduleRows, saveSettings } from "../services/reportStorage.js";
-import { sendConvertReportToWhatsApp, sendReportToWhatsAppRecipient, sendTextToWhatsAppRecipient } from "../services/whatsappApi.js";
+import { getCurrentWhatsAppAccountKey, sendConvertReportToWhatsApp, sendReportToWhatsAppRecipient, sendTextToWhatsAppRecipient } from "../services/whatsappApi.js";
 import { fetchDomexDeliveredCsv } from "../services/domexAutomationApi.js";
 import { detectRiderReportCsvType, normalizeRiderName, normalizeTrackingNo, parseDeliveredCsv, parseRescheduleCsv, reconcileDeliveredTracking } from "../utils/deliveredReconciliation.js";
 import {
@@ -693,17 +693,18 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
 
   async function handlePdfExport() {
     const pageElements = reportPageRefs.current.filter(Boolean);
-    await exportElementsAsPortraitPdf(pageElements, "Delivered_Collection_Report", reportDate);
+    return exportElementsAsPortraitPdf(pageElements, "Delivered_Collection_Report", reportDate);
   }
 
   function openExportPrompt(type) {
     const settings = getSettings();
-    const riderPhone = settings.deliveredRiderWhatsAppNumbers?.[riderName] || "";
+    const riderPhone = findRiderPhone(settings.deliveredRiderWhatsAppNumbers, riderName);
     setSendToRiderWhatsApp(Boolean(settings.deliveredExportAutoWhatsApp && riderPhone));
     setRememberSendChoice(Boolean(settings.deliveredExportAutoWhatsApp));
     setExportStatus("");
     setExportPrompt({
       type,
+      accountKey: getCurrentWhatsAppAccountKey(),
       riderPhone,
       pageCount,
     });
@@ -717,59 +718,48 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
   }
 
   async function confirmExport() {
-    if (!exportPrompt) return;
-
+    if (!exportPrompt || exportingDelivered) return;
+    if (sendToRiderWhatsApp && !exportPrompt.riderPhone) {
+      setExportStatus("Add this rider's WhatsApp number in Settings, or turn off WhatsApp sending.");
+      return;
+    }
+    const prompt = exportPrompt;
+    const sendSelected = sendToRiderWhatsApp;
+    const currentSettings = getSettings();
+    const nextAutoWhatsApp = Boolean(rememberSendChoice && sendSelected);
     setExportingDelivered(true);
-    setExportStatus("");
+    setExportStatus("Preparing your A4 report…");
     try {
-      if (exportPrompt.type === "pdf") {
-        await handlePdfExport();
+      let imageDataUrls;
+      if (prompt.type === "pdf") {
+        const exported = await handlePdfExport();
+        imageDataUrls = exported.imageDataUrls;
       } else {
         await exportElementAsPng(reportRef.current, "Delivered_Collection_Report", reportDate);
+        if (sendSelected) imageDataUrls = await Promise.all(reportPageRefs.current.filter(Boolean).map((element) => captureElementAsPngDataUrl(element, { whatsappBranded: true })));
       }
-
-      if (sendToRiderWhatsApp) {
-        if (!exportPrompt.riderPhone) {
-          throw new Error("This rider has no saved WhatsApp number. Add it in Settings first.");
-        }
-        const currentSettings = getSettings();
-        const riderCaption = buildDeliveredRiderWhatsAppCaption({
-          settings: currentSettings,
-          riderName,
-          reportDate,
-          branchName: branchName || defaultBranchName,
+      if (nextAutoWhatsApp !== Boolean(currentSettings.deliveredExportAutoWhatsApp)) saveSettings({ deliveredExportAutoWhatsApp: nextAutoWhatsApp });
+      setExportPrompt(null);
+      setExportStatus(prompt.type === "pdf" ? "A4 PDF downloaded. Print preview is opening in this tab." : "PNG downloaded.");
+      if (sendSelected) {
+        const caption = buildDeliveredRiderWhatsAppCaption({
+          settings: currentSettings, riderName, reportDate, branchName: branchName || defaultBranchName,
           outForDeliveryCount: reconciliation?.outForDeliveryCount ?? sources.outForDelivery?.count ?? 0,
           deliveredCount: reconciliation?.deliveredCount ?? sources.delivered?.count ?? entries.length,
-          rescheduleCount: reviewStatus.effectiveRescheduledCount,
-          missrouteCount: reviewStatus.missrouteCount,
-          returnCount: reviewStatus.returnCount,
-          amount: formatMoney(totalValue),
+          rescheduleCount: reviewStatus.effectiveRescheduledCount, missrouteCount: reviewStatus.missrouteCount,
+          returnCount: reviewStatus.returnCount, amount: formatMoney(totalValue),
         });
-        const pageElements = reportPageRefs.current.filter(Boolean);
-        const imageDataUrls = await Promise.all(
-          pageElements.map((element) => captureElementAsPngDataUrl(element, { whatsappBranded: true })),
-        );
-        const riderSendResult = await sendReportToWhatsAppRecipient({
-          phoneNumber: exportPrompt.riderPhone,
-          imageDataUrls,
-          caption: riderCaption,
+        const sends = [sendReportToWhatsAppRecipient({ phoneNumber: prompt.riderPhone, imageDataUrls, caption, accountKey: prompt.accountKey })];
+        if (currentSettings.convertDefaultGroupJids?.length) sends.push(sendConvertReportToWhatsApp({ imageDataUrls, caption, accountKey: prompt.accountKey }));
+        // Requests are submitted immediately; neither local export nor printing waits for WhatsApp delivery.
+        void Promise.allSettled(sends).then((results) => {
+          const failed = results.filter((result) => result.status === "rejected");
+          setExportStatus(failed.length
+            ? "Report exported. A WhatsApp request could not be queued: " + failed.map((result) => result.reason.message).join("; ")
+            : "Report exported. WhatsApp messages are in your Outbox and will send in the background.");
         });
-        const groupSendResult = await sendConvertReportToWhatsApp({
-          imageDataUrls,
-          caption: `${riderCaption}\n\nDefault group copy for rider: ${riderName || "-"}`,
-        });
-        if (riderSendResult.queued || groupSendResult.queued) {
-          setExportStatus("Export complete. WhatsApp delivery is queued and will retry automatically.");
-        }
       }
-
-      const nextAutoWhatsApp = Boolean(rememberSendChoice && sendToRiderWhatsApp);
-      if (nextAutoWhatsApp !== Boolean(getSettings().deliveredExportAutoWhatsApp)) {
-        saveSettings({ deliveredExportAutoWhatsApp: nextAutoWhatsApp });
-      }
-
-      setExportStatus((current) => current || (sendToRiderWhatsApp ? "Export complete and sent to rider WhatsApp + Delivered Report default group." : "Export complete."));
-      window.setTimeout(() => setExportPrompt(null), 900);
+      if (prompt.type === "pdf") printReportImages(imageDataUrls);
     } catch (error) {
       setExportStatus(error.message || "Export failed.");
     } finally {
@@ -1045,7 +1035,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           <ActionButton label="Delete Saved" icon={Trash2} onClick={deleteSavedDeliveredReport} disabled={!reportDate} tone="red" />
           <ActionButton label="Export A4 PNG" icon={Image} onClick={() => openExportPrompt("png")} disabled={!canFinalizeReport} tone="green" />
           <ActionButton
-            label={`Export A4 PDF${hasMultiplePdfPages ? ` (${pageCount} pages)` : ""}`}
+            label={`Export A4 PDF & Print${hasMultiplePdfPages ? ` (${pageCount} pages)` : ""}`}
             icon={FileDown}
             onClick={() => openExportPrompt("pdf")}
             disabled={!canFinalizeReport}
@@ -1067,6 +1057,8 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           </div>
         )}
       </div>
+
+      {exportStatus ? <p className="delivered-export-status" role="status">{exportStatus}</p> : null}
 
       {canFinalizeReport ? (
         <div className="delivered-preview-card rounded-3xl border border-white/70 bg-white/55 p-2 shadow-xl md:overflow-x-auto md:p-0">
@@ -1124,7 +1116,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
 
 function DeliveredCollectionReportPage({ reportRef, reportDate, riderName, branchName, companyName, entries, startIndex, totalValue, includeSpecialTracking, specialValue, pageNumber, pageCount, isFinalPage }) {
   return (
-    <div ref={reportRef} className={`report-paper a4-portrait-report delivered-report-page ${isFinalPage ? "delivered-final-page" : "delivered-continuation-page"}`}>
+    <div ref={reportRef} className={`report-paper a4-portrait-report branded-report delivered-report-page ${isFinalPage ? "delivered-final-page" : "delivered-continuation-page"}`}>
       <BrandedReportHeader branchName={branchName} companyName={companyName} accent="Delivered" title="Collection Report" date={reportDate} pageNumber={pageNumber} pageCount={pageCount} />
       <div className="report-print-only">
         <p className="report-company">{companyName}</p>
@@ -1147,7 +1139,7 @@ function DeliveredCollectionReportPage({ reportRef, reportDate, riderName, branc
           <tr>
             <th style={{ width: "56px" }}>No</th>
             <th>Tracking No</th>
-            <th style={{ width: "160px" }}>Value</th>
+            <th style={{ width: "160px" }}>Value (LKR)</th>
           </tr>
         </thead>
         <tbody>
@@ -1198,7 +1190,7 @@ function DeliveredCollectionReportPage({ reportRef, reportDate, riderName, branc
 }
 
 function paginateDeliveredEntries(entries) {
-  const rowsPerPage = 20;
+  const rowsPerPage = 16;
 
   if (!entries.length) {
     return [{ entries: [], startIndex: 0, isFinalPage: true }];
@@ -1368,6 +1360,7 @@ function RiderSelect({ riderName, riderOptions, onChange, savedCount }) {
     <label className="grid gap-2">
       <span className="text-sm font-black text-[#071537]">Rider Name</span>
       <select
+        aria-label="Rider Name"
         value={riderName}
         onChange={(event) => onChange(event.target.value)}
         className="h-12 rounded-2xl border border-white/80 bg-white/70 px-4 text-base font-bold outline-none focus:border-green-500 focus:ring-4 focus:ring-green-100"
@@ -1453,7 +1446,7 @@ function ExportPromptModal({
             Cancel
           </button>
           <button type="button" onClick={onConfirm} disabled={exporting} className="primary-action primary-action-green">
-            {exporting ? "Exporting..." : `Export ${isPdf ? "PDF" : "PNG"}`}
+            {exporting ? "Exporting..." : `Export ${isPdf ? "PDF & Print" : "PNG"}`}
           </button>
         </div>
       </div>

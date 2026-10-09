@@ -1,3 +1,5 @@
+import { formatReportCaption } from "../../shared/whatsappCaptions.js";
+import RescheduleAutomationStatus from "./RescheduleAutomationStatus.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarClock, FileDown, Image, MessageCircle } from "lucide-react";
 import { addDataChangeListener, getRescheduleRows, getSettings } from "../services/reportStorage.js";
@@ -47,9 +49,7 @@ export default function RescheduleReport({ selectedDate, branchName = "Middeniya
       const settings = getSettings();
       const template = settings.whatsappCaptionTemplates?.reschedule
         || "Reschedule Report - {date}\nSent automatically from Daily Report System";
-      const caption = template
-        .replaceAll("{title}", "Reschedule Report")
-        .replaceAll("{date}", selectedDate);
+      const caption = formatReportCaption(template, { title: "Reschedule Report", date: selectedDate, branch: branchName });
 
       const imageDataUrls = await Promise.all(
         elements.map((element) => captureElementAsPngDataUrl(element, { whatsappBranded: true })),
@@ -71,6 +71,7 @@ export default function RescheduleReport({ selectedDate, branchName = "Middeniya
 
   return (
     <section className="grid min-w-0 gap-5">
+      <RescheduleAutomationStatus />
       <div className="min-w-0 overflow-hidden rounded-[28px] border border-[#eadff2] bg-[#fff8f4] p-4 shadow-[12px_14px_30px_rgba(128,104,178,0.15)] md:p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 items-start gap-3">

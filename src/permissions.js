@@ -92,6 +92,7 @@ export function isSpecialDispatchUser(session) {
 }
 
 export function canAccessTab(session, tabId) {
+  if (tabId === "whatsappQueue") return Boolean(session?.branchName);
   if (tabId === "autoDispatch") {
     return isSpecialDispatchUser(session);
   }

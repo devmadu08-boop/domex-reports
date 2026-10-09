@@ -18,6 +18,10 @@ import {
   requestAccountPairingCode,
 } from "./accountWhatsappService.js";
 import {
+  clearWhatsAppQueue,
+  deleteWhatsAppQueueJob,
+  getWhatsAppQueueJob,
+  updateWhatsAppQueueJob,
   configureWhatsAppQueue,
   getWhatsAppQueueStatus,
   retryFailedWhatsAppJobs,
@@ -50,7 +54,7 @@ configureWhatsAppQueue(async (type, payload) => {
 
 function sendError(response, error) {
   console.error("[whatsapp-api]", error);
-  response.status(500).json({ error: error.message || "WhatsApp API error." });
+  response.status(error.statusCode || 500).json({ error: error.message || "WhatsApp API error." });
 }
 
 router.get("/status", async (request, response) => {
@@ -143,6 +147,19 @@ router.post("/queue/retry-failed", async (request, response) => {
 
 router.post("/queue/:jobId/retry", async (request, response) => {
   try { response.json(await retryWhatsAppJob(request.params.jobId, accountKey(request))); } catch (error) { sendError(response, error); }
+});
+
+router.get("/queue/:jobId", async (request, response) => {
+  try { response.json(await getWhatsAppQueueJob(request.params.jobId, accountKey(request))); } catch (error) { sendError(response, error); }
+});
+router.patch("/queue/:jobId", async (request, response) => {
+  try { response.json(await updateWhatsAppQueueJob(request.params.jobId, request.body, accountKey(request))); } catch (error) { sendError(response, error); }
+});
+router.delete("/queue/:jobId", async (request, response) => {
+  try { response.json(await deleteWhatsAppQueueJob(request.params.jobId, accountKey(request))); } catch (error) { sendError(response, error); }
+});
+router.delete("/queue", async (request, response) => {
+  try { response.json(await clearWhatsAppQueue(accountKey(request))); } catch (error) { sendError(response, error); }
 });
 
 export default router;

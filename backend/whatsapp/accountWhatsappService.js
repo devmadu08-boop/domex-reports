@@ -1,3 +1,4 @@
+import { DEFAULT_REPORT_CAPTIONS, formatReportCaption, upgradeDefaultCaptions } from "../../shared/whatsappCaptions.js";
 import makeWASocket, {
   Browsers,
   DisconnectReason,
@@ -11,6 +12,8 @@ import Pino from "pino";
 import QRCode from "qrcode";
 import * as primary from "./whatsappService.js";
 import { renderRescheduleReportImages } from "../reports/rescheduleReportRenderer.js";
+
+import { getRescheduleReadiness, shouldRunDailyTask } from "./schedule.js";
 
 export const PRIMARY_WHATSAPP_ACCOUNT = "default";
 export const accountMessageListeners = new Set();
@@ -65,6 +68,7 @@ export function getRuntime(accountKey) {
       reconnecting: false,
       reconnectTimer: null,
       approvalSending: false,
+      approvalRequestRunning: false,
     });
   }
   return runtimes.get(key);
@@ -283,6 +287,8 @@ export async function getAccountWhatsAppStatus(accountKey) {
     auditDefaultGroupJids: config.auditDefaultGroupJids,
     backupWhatsappNumber: config.backupWhatsappNumber,
     rescheduleApprovalReaction: config.rescheduleApprovalReaction,
+    rescheduleSchedule: getRescheduleReadiness(config),
+    rescheduleApproval: config.pendingRescheduleApproval ? { date: config.pendingRescheduleApproval.date, status: config.pendingRescheduleApproval.status, rowCount: config.pendingRescheduleApproval.rowCount, pageCount: config.pendingRescheduleApproval.pageCount, requestedAt: config.pendingRescheduleApproval.requestedAt, sentGroupCount: config.pendingRescheduleApproval.sentGroupCount || 0, approvalReaction: config.pendingRescheduleApproval.reaction, lastError: config.pendingRescheduleApproval.lastError || "" } : null,
     lastDailyBackupDate: config.lastDailyBackupDate,
     lastRescheduleApprovalDate: config.lastRescheduleApprovalDate,
     hasBackupSnapshot: Boolean(config.latestBackupSnapshot),
@@ -670,7 +676,7 @@ export async function sendAccountBackup(accountKey, { force = false } = {}) {
     fileName,
     caption: `Daily Courier Report System backup\nAccount: ${runtime.key}\nDate: ${date}`,
   });
-  await writeConfig(runtime, { ...config, lastDailyBackupDate: date });
+  await writeConfig(runtime, { ...(await readConfig(runtime)), lastDailyBackupDate: date });
   return { ok: true, fileName, recipientJid, sentAt: new Date().toISOString() };
 }
 
@@ -679,6 +685,15 @@ function comparableReaction(value) {
 }
 
 export async function sendAccountRescheduleApproval(accountKey, { force = false } = {}) {
+  if (isPrimary(accountKey)) return primary.sendRescheduleApprovalRequest({ force });
+  const runtime = getRuntime(accountKey);
+  if (runtime.approvalRequestRunning) return { ok: true, skipped: true, reason: "An approval request is already being prepared." };
+  runtime.approvalRequestRunning = true;
+  try { return await createAccountRescheduleApproval(accountKey, { force }); }
+  finally { runtime.approvalRequestRunning = false; }
+}
+
+async function createAccountRescheduleApproval(accountKey, { force = false } = {}) {
   if (isPrimary(accountKey)) return primary.sendRescheduleApprovalRequest({ force });
   const runtime = getRuntime(accountKey);
   const socket = await ensureConnected(runtime);
@@ -694,9 +709,8 @@ export async function sendAccountRescheduleApproval(accountKey, { force = false 
   const rows = config.latestBackupSnapshot?.reports?.[date]?.rescheduleRows || [];
   if (!rows.length) return { ok: true, skipped: true, reason: `No Reschedule Report rows are saved for ${date}.` };
   const branchName = config.latestBackupSnapshot?.settings?.branchName || runtime.key;
-  const captionTemplate = config.latestBackupSnapshot?.settings?.whatsappCaptionTemplates?.reschedule
-    || "📋 *{title}*\n📅 Date: *{date}*\n\nPlease check the attached rescheduled parcel list.";
-  const groupCaption = captionTemplate.replaceAll("{title}", "Reschedule Report").replaceAll("{date}", date);
+  const captionTemplate = upgradeDefaultCaptions(config.latestBackupSnapshot?.settings?.whatsappCaptionTemplates).reschedule || DEFAULT_REPORT_CAPTIONS.reschedule;
+  const groupCaption = formatReportCaption(captionTemplate, { title: "Reschedule Report", date, branch: branchName });
   const imagePaths = await renderRescheduleReportImages({ rows, reportDate: date, branchName });
   const buffers = await Promise.all(imagePaths.map((imagePath) => fs.readFile(imagePath)));
   const reaction = config.rescheduleApprovalReaction || "✅";
@@ -708,7 +722,7 @@ export async function sendAccountRescheduleApproval(accountKey, { force = false 
     groupCaption, reaction, requestMessageIds, rowCount: rows.length, pageCount: imagePaths.length,
     requestedAt: new Date().toISOString(),
   };
-  await writeConfig(runtime, { ...config, lastRescheduleApprovalDate: date, pendingRescheduleApproval: pending });
+  await writeConfig(runtime, { ...(await readConfig(runtime)), lastRescheduleApprovalDate: date, pendingRescheduleApproval: pending });
   return { ok: true, sentDate: date, rowCount: rows.length, pageCount: imagePaths.length, groupCount: groupJids.length };
 }
 
@@ -752,17 +766,29 @@ export async function startSavedAccountClients() {
   for (const key of await listAccountKeys()) startAccountClient(key).catch(console.error);
 }
 
+let accountSchedulerStarted = false;
+let accountSchedulerRunning = false;
 export function startAccountBackupScheduler() {
-  setInterval(async () => {
-    const parts = new Intl.DateTimeFormat("en-GB", {
-      timeZone: "Asia/Colombo", hour: "2-digit", minute: "2-digit", hour12: false,
-    }).formatToParts(new Date()).reduce((result, part) => ({ ...result, [part.type]: part.value }), {});
-    const hour = Number(parts.hour);
-    const minute = Number(parts.minute);
-    if (minute !== 0 || (hour !== 8 && hour !== 20)) return;
-    for (const key of await listAccountKeys()) {
-      const action = hour === 8 ? sendAccountBackup(key, { force: false }) : sendAccountRescheduleApproval(key, { force: false });
-      action.catch((error) => console.error(`[whatsapp-scheduler:${key}]`, error.message || error));
-    }
-  }, 60_000);
+  if (accountSchedulerStarted) return;
+  accountSchedulerStarted = true;
+  const tick = async () => {
+    if (accountSchedulerRunning) return;
+    accountSchedulerRunning = true;
+    try {
+      for (const key of await listAccountKeys()) {
+        const runtime = getRuntime(key);
+        if (runtime.status !== "connected") continue;
+        const config = await readConfig(runtime);
+        const now = new Date();
+        if (config.backupWhatsappNumber && config.latestBackupSnapshot && shouldRunDailyTask(now, 8, config.lastDailyBackupDate)) {
+          await sendAccountBackup(key).catch((error) => console.error(`[whatsapp-backup:${key}]`, error.message));
+        }
+        if (getRescheduleReadiness(config, now).ready && shouldRunDailyTask(now, 20, config.lastRescheduleApprovalDate)) {
+          await sendAccountRescheduleApproval(key).catch((error) => console.error(`[reschedule-approval:${key}]`, error.message));
+        }
+      }
+    } finally { accountSchedulerRunning = false; }
+  };
+  tick().catch(console.error);
+  setInterval(() => tick().catch(console.error), 60_000);
 }

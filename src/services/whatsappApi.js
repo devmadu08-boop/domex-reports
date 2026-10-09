@@ -15,6 +15,8 @@ export function getWhatsAppAccountKey(session) {
   return `user-${identity}`.replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-").slice(0, 80);
 }
 
+export function getCurrentWhatsAppAccountKey() { return whatsappAccountKey; }
+
 export function setWhatsAppAccountContext(session) {
   whatsappAccountKey = getWhatsAppAccountKey(session);
   return whatsappAccountKey;
@@ -66,6 +68,7 @@ async function requestJson(path, options = {}) {
     }
     throw new Error(data.error || "WhatsApp API request failed.");
   }
+  if (options.method && options.method !== "GET" && (path.startsWith("/queue") || path.startsWith("/send"))) window.dispatchEvent(new Event("whatsapp-queue-changed"));
   return data;
 }
 
@@ -181,9 +184,10 @@ export function sendReportToWhatsApp({ imageDataUrl, imageDataUrls, caption }) {
   });
 }
 
-export function sendConvertReportToWhatsApp({ imageDataUrl, imageDataUrls, caption }) {
+export function sendConvertReportToWhatsApp({ imageDataUrl, imageDataUrls, caption, accountKey }) {
   return requestJson("/send-convert-report", {
     method: "POST",
+    headers: accountKey ? { "X-WhatsApp-Account": accountKey } : {},
     body: JSON.stringify({ imageDataUrl, imageDataUrls, caption }),
   });
 }
@@ -202,9 +206,10 @@ export function sendAuditReportToWhatsApp({ imageDataUrl, imageDataUrls, caption
   });
 }
 
-export function sendReportToWhatsAppRecipient({ phoneNumber, imageDataUrl, imageDataUrls, caption }) {
+export function sendReportToWhatsAppRecipient({ phoneNumber, imageDataUrl, imageDataUrls, caption, accountKey }) {
   return requestJson("/send-report-to-recipient", {
     method: "POST",
+    headers: accountKey ? { "X-WhatsApp-Account": accountKey } : {},
     body: JSON.stringify({ phoneNumber, imageDataUrl, imageDataUrls, caption }),
   });
 }
@@ -237,3 +242,8 @@ export function sendWhatsAppBackupNow() {
 export function sendRescheduleApprovalNow() {
   return requestJson("/send-reschedule-approval-now", { method: "POST" });
 }
+
+export function getWhatsAppQueueJob(id) { return requestJson(`/queue/${encodeURIComponent(id)}`); }
+export function updateWhatsAppQueueJob(id, patch) { return requestJson(`/queue/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) }); }
+export function deleteWhatsAppQueueJob(id) { return requestJson(`/queue/${encodeURIComponent(id)}`, { method: "DELETE" }); }
+export function clearWhatsAppQueue() { return requestJson("/queue", { method: "DELETE" }); }

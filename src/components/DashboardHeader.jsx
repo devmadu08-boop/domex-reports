@@ -9,7 +9,7 @@ const groups = [
   { label: "Reports", icon: FileText, tabs: ["exports", "allReports", "audit"] },
   { label: "Deliveries", icon: PackageCheck, tabs: ["deliveredConverter", "reschedule"] },
   { label: "Finance", icon: WalletCards, tabs: ["pettyCash", "receipt"] },
-  { label: "Settings", icon: Settings, tabs: ["settings", "meterChats", "users"] },
+  { label: "Settings", icon: Settings, tabs: ["whatsappQueue", "settings", "meterChats", "users"] },
 ];
 
 function closeMenu(event) {
@@ -124,7 +124,7 @@ export default function DashboardHeader({
             <p className="dropdown-title">Branch notifications</p>
             <p>{summary.ready ? "All daily reports are complete." : `${summary.reportsRemaining} daily reports remaining.`}</p>
             {summary.exceptions ? <p>{summary.exceptions} delivery exceptions to review.</p> : null}
-            {summary.whatsappPending ? <p>{summary.whatsappPending} WhatsApp sends need attention.</p> : null}
+            {summary.whatsappPending ? <button type="button" onClick={(event) => { onOpen("whatsappQueue"); closeMenu(event); }}>{summary.whatsappPending} WhatsApp sends need attention →</button> : null}
             {approvals ? (
               <button type="button" onClick={(event) => { onOpen("users"); closeMenu(event); }}>
                 {approvals} accounts waiting for approval

@@ -121,16 +121,18 @@ export async function exportElementsAsPortraitPdf(elements, reportName, date) {
     throw new Error("Report area is not available for export.");
   }
 
+  const imageDataUrls = [];
   const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
   for (let index = 0; index < pageElements.length; index += 1) {
     const canvas = await captureElement(pageElements[index]);
+    imageDataUrls.push(canvas.toDataURL("image/png", 1));
     if (index > 0) pdf.addPage("a4", "portrait");
     addCanvasToPdfPage(pdf, canvas);
   }
 
   pdf.save(`${safeFileName(reportName)}_${date}.pdf`);
-  return { pageCount: pageElements.length };
+  return { pageCount: pageElements.length, imageDataUrls };
 }
 
 export async function exportElementsAsLandscapePdf(elements, reportName, date, options = {}) {
@@ -175,4 +177,26 @@ function addCanvasToPdfPage(pdf, canvas, options = {}) {
   const y = margin;
 
   pdf.addImage(canvas.toDataURL("image/png", 1), "PNG", x, y, width, height, undefined, "FAST");
+}
+
+// Print the exact exported page images inside this tab, without replacing the report editor.
+export function printReportImages(imageDataUrls) {
+  const images = imageDataUrls.filter((url) => url.startsWith("data:image/png;base64,"));
+  if (!images.length) throw new Error("No report pages are available to print.");
+  const frame = document.createElement("iframe");
+  frame.title = "Print Delivered A4 report";
+  frame.className = "report-print-frame";
+  Object.assign(frame.style, { position: "fixed", width: "1px", height: "1px", right: "0", bottom: "0", opacity: "0", border: "0" });
+  const cleanup = () => frame.remove();
+  frame.onload = async () => {
+    const doc = frame.contentDocument;
+    await Promise.all(Array.from(doc.images).map((image) => image.decode().catch(() => {})));
+    frame.contentWindow.addEventListener("afterprint", cleanup, { once: true });
+    frame.contentWindow.focus();
+    frame.contentWindow.print();
+    // Keep the frame alive while a print preview is open; next export replaces abandoned frames.
+  };
+  document.querySelectorAll(".report-print-frame").forEach((previous) => previous.remove());
+  frame.srcdoc = '<!doctype html><html><head><title>DOMEX Delivered Collection Report</title><style>@page{size:A4 portrait;margin:8mm}html,body{margin:0;padding:0}.page{width:194mm;height:281mm;break-after:page}.page:last-child{break-after:auto}.page img{width:100%;height:100%;object-fit:contain;object-position:top center}</style></head><body>' + images.map((url) => '<section class="page"><img src="' + url + '" alt="Delivered collection report"></section>').join('') + '</body></html>';
+  document.body.appendChild(frame);
 }

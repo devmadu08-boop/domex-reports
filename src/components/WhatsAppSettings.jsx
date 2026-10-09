@@ -1,3 +1,4 @@
+import { DEFAULT_REPORT_CAPTIONS } from "../../shared/whatsappCaptions.js";
 import { Check, Clock3, Copy, KeyRound, Loader2, LogOut, MessageCircle, Plus, QrCode, RefreshCw, Save, Send, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getAllDeliveredRiderNames } from "../services/reportStorage.js";
@@ -18,6 +19,7 @@ import {
 
 const templatePresets = {
   courier: [
+    DEFAULT_REPORT_CAPTIONS.courier,
     "📊 *{title}*\n📅 Date: *{date}*\n\nSent automatically from _Daily Report System_",
     "🚚 *Daily Courier Performance Update*\n📅 *{date}*\n\nPlease check the attached report.",
     "✅ *{title}*\n🗓️ Report Date: *{date}*\n\n_For branch review and daily follow-up._",
@@ -25,6 +27,7 @@ const templatePresets = {
     "🏢 *Branch Courier Summary*\n📅 {date}\n\n• On route\n• Delivery\n• Resend\n• Pickup\n\nPlease review.",
   ],
   operation: [
+    DEFAULT_REPORT_CAPTIONS.operation,
     "📊 *{title}*\n📅 Date: *{date}*\n\nSent automatically from _Daily Report System_",
     "📦 *Daily Operation Report*\n🗓️ *{date}*\n\nPlease check the attached operation summary.",
     "🎯 *{title}*\nReport Date: *{date}*\n\n_Inward, outward, target and achievement details attached._",
@@ -32,6 +35,7 @@ const templatePresets = {
     "🏢 *Branch Operation Summary*\n📅 *{date}*\n\n• Delivery\n• Missed Route\n• Dispatch\n\nPlease review today's operation figures.",
   ],
   delivered: [
+    DEFAULT_REPORT_CAPTIONS.delivered,
     "💰 *{title}*\n📅 Date: *{date}*\n\nSent automatically from _Daily Report System_",
     "🚚 *Delivered Collection Report*\n🗓️ *{date}*\n\nPlease check the attached collection details.",
     "✅ *{title}*\nReport Date: *{date}*\n\n_Tracking numbers and values are attached._",
@@ -39,6 +43,7 @@ const templatePresets = {
     "👤 *Rider Delivered Collection Summary*\n📅 *{date}*\n\n• Tracking numbers\n• Values\n• Total collection\n\nPlease review.",
   ],
   reschedule: [
+    DEFAULT_REPORT_CAPTIONS.reschedule,
     "📋 *{title}*\n📅 Date: *{date}*\n\nSent automatically from _Daily Report System_",
     "🚚 *Daily Reschedule Report*\n🗓️ *{date}*\n\nPlease check the attached rescheduled parcel list.",
     "✅ *{title}*\nReport Date: *{date}*\n\n_Rider, tracking number and reason details are attached._",
@@ -631,6 +636,7 @@ export default function WhatsAppSettings({ settings, onSaveSettings, accountLabe
               </div>
             </div>
 
+            {status?.rescheduleSchedule?.missing?.length ? <div className="reschedule-setup-warning"><strong>Complete setup to enable auto-send</strong>{status.rescheduleSchedule.missing.map((reason) => <p key={reason}>{reason}</p>)}</div> : null}
             <div className="grid gap-2 rounded-2xl border border-violet-100 bg-violet-50/75 p-4 text-sm font-bold text-blue-950/75 sm:grid-cols-2">
               <p>Approval number: <strong>{status?.backupWhatsappNumber || settings.backupWhatsappNumber || "Not saved"}</strong></p>
               <p>Last scheduled date: <strong>{status?.lastRescheduleApprovalDate || "Not yet"}</strong></p>

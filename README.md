@@ -141,6 +141,16 @@ Each non-admin system login has its own WhatsApp QR session, connected number, r
 
 After deploying this version, each branch user opens `Settings > Report WhatsApp`, scans that login's QR, fetches its groups, and saves its own destinations. Back up the complete `backend/data/` directory when moving the VPS so every linked WhatsApp session is preserved.
 
+## WhatsApp Outbox and page links
+
+Each branch login has an Outbox at `/whatsapp-queue/`. Pending and failed messages can be viewed, edited, retried or deleted. Clear All removes that account's queue/history while messages already sending finish. Sent messages cannot be recalled from the queue.
+
+Sections have their own URLs, such as `/dashboard/`, `/courier/`, `/settings/` and `/delivered-report/`. Refreshing or using browser Back/Forward keeps the chosen section and still applies account permissions.
+
+Delivered Report's **Export A4 PDF & Print** downloads the PDF and opens the print dialog within the same tab. Selected rider/group WhatsApp copies are submitted in the background. Their delivery status appears in the Outbox.
+
+Reschedule automation requires a connected Report WhatsApp account, a Backup WhatsApp Number, at least one saved Reschedule Report group, and rows saved for that Sri Lanka date. Settings shows any missing requirements. The 20:00 scheduler retries later that day if a connection or report becomes available after the scheduled minute; groups still receive the report after the configured approval reaction.
+
 ## Storage
 
 The first version uses `localStorage`. The storage code is isolated in `src/services/reportStorage.js` so Firebase or Supabase can be added later without rewriting the UI.

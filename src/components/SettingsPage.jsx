@@ -24,6 +24,9 @@ import { useEffect, useRef, useState } from "react";
 import { downloadBackupFile, getAllDeliveredRiderNames, restoreBackupFile } from "../services/reportStorage.js";
 import { getDomexAutomationStatus, saveDomexAutomationConfig } from "../services/domexAutomationApi.js";
 import { testGeminiApiKey } from "../services/geminiDispatchService.js";
+import WhatsAppQueuePanel from "./WhatsAppQueuePanel.jsx";
+import RescheduleAutomationStatus from "./RescheduleAutomationStatus.jsx";
+import { canAccessTab } from "../permissions.js";
 import WhatsAppSettings from "./WhatsAppSettings.jsx";
 import RegionalWhatsAppSettings from "./RegionalWhatsAppSettings.jsx";
 import RiderMeterMonitorSettings from "./RiderMeterMonitorSettings.jsx";
@@ -61,6 +64,8 @@ export default function SettingsPage({
   const [newPettyVehicleNo, setNewPettyVehicleNo] = useState("");
   const [newPettyEmployeeName, setNewPettyEmployeeName] = useState("");
   const [restoreStatus, setRestoreStatus] = useState("");
+  const [saveStatus, setSaveStatus] = useState("");
+  const [saving, setSaving] = useState(false);
   const [domexConfig, setDomexConfig] = useState({ username: "", password: "", branchName: "Middeniya" });
   const [domexStatus, setDomexStatus] = useState("");
   const [activeSection, setActiveSection] = useState(session?.role === "regional_manager" ? "regionalDispatch" : "general");
@@ -68,7 +73,7 @@ export default function SettingsPage({
 
   useEffect(() => {
     setDraftSettings(settings);
-    if (!settings.geminiApiKey) {
+    if (!settings.geminiApiKey && canAccessTab(session, "autoDispatch")) {
       fetch("/api/regional-dispatch/config")
         .then(res => res.json())
         .then(cfg => {
@@ -93,9 +98,12 @@ export default function SettingsPage({
     setDraftSettings((current) => ({ ...current, [field]: value }));
   }
 
-  function handleSaveSettings() {
-    onSaveSettings(draftSettings);
-    if (draftSettings.geminiApiKey) {
+  async function handleSaveSettings() {
+    setSaving(true); setSaveStatus("");
+    try { await onSaveSettings(draftSettings); setSaveStatus("Branch settings saved."); }
+    catch (error) { setSaveStatus(error.message || "Could not save settings."); }
+    finally { setSaving(false); }
+    if (draftSettings.geminiApiKey && canAccessTab(session, "autoDispatch")) {
       fetch("/api/regional-dispatch/config", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-whatsapp-account": "default" },
@@ -208,15 +216,15 @@ export default function SettingsPage({
   }
 
   return (
-    <section className="grid gap-5">
+    <section className="settings-workspace grid gap-5">
       <div className="settings-hub glass-panel grid gap-4 p-4">
         <div className="flex items-center gap-3">
           <span className="grid h-12 w-12 place-items-center rounded-2xl bg-violet-100 text-violet-700 shadow-inner">
             <Settings className="h-6 w-6" />
           </span>
           <div>
-            <h2 className="text-xl font-black text-[#071537]">Settings Center</h2>
-            <p className="text-sm font-semibold text-blue-950/65">Choose a category and manage only what you need.</p>
+            <h2 className="text-xl font-black text-[#071537]">Your branch, your workspace</h2>
+            <p className="text-sm font-semibold text-blue-950/65">Connection, people, report styling and backups — all in one place.</p>
           </div>
         </div>
         <nav className="settings-category-nav" aria-label="Settings categories">
@@ -225,7 +233,8 @@ export default function SettingsPage({
             : 
               [
                 { id: 'general', label: 'General', helper: 'Branch & appearance', icon: SlidersHorizontal },
-                { id: 'whatsapp', label: 'Report WhatsApp', helper: 'Groups & templates', icon: MessageCircle },
+                { id: 'whatsapp', label: 'Report WhatsApp', helper: 'Connection, groups & messages', icon: MessageCircle },
+                { id: 'queue', label: 'WhatsApp Outbox', helper: 'View, edit & clear sends', icon: MessageCircle },
                 { id: 'meter', label: 'Meter Monitor', helper: 'Photos & reminders', icon: Camera },
                 { id: 'people', label: 'People', helper: 'Couriers & riders', icon: Users },
                 { id: 'pettyCash', label: 'Petty Cash', helper: 'Vehicle employees', icon: ReceiptText },
@@ -264,6 +273,8 @@ export default function SettingsPage({
             <p className="text-sm font-semibold text-blue-950/65">Report identity, branch defaults, theme, and scheduled approval.</p>
           </div>
         </div>
+
+        <RescheduleAutomationStatus onConfigure={() => setActiveSection("whatsapp")} />
 
         <ThemeSwitcher value={draftSettings.uiTheme} onChange={handleThemeChange} />
 
@@ -340,8 +351,9 @@ export default function SettingsPage({
         </div>
       </div>}
 
-      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="settings-content-grid grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {activeSection === "regionalDispatch" && <RegionalWhatsAppSettings accountKey={getWhatsAppAccountKey(session)} session={session} />}
+        {activeSection === "queue" && <WhatsAppQueuePanel accountLabel={settings.branchName || session?.branchName} />}
         {activeSection === "whatsapp" && <WhatsAppSettings settings={settings} onSaveSettings={onSaveSettings} accountLabel={whatsappAccountLabel} />}
         {activeSection === "meter" && <RiderMeterMonitorSettings />}
 
@@ -601,6 +613,7 @@ export default function SettingsPage({
         </div>}
         {activeSection === "data" && children && <div className="lg:col-span-2">{children}</div>}
       </div>
+      <div className="settings-save-bar"><span role="status">{saveStatus || (JSON.stringify(draftSettings) !== JSON.stringify(settings) ? "You have unsaved branch settings." : "Branch settings are up to date.")}</span><button type="button" className="secondary-action" onClick={() => { setDraftSettings(settings); setSaveStatus(""); }}>Reset changes</button><button type="button" className="domex-primary-button" disabled={saving} onClick={handleSaveSettings}><Save size={16} />{saving ? "Saving…" : "Save branch settings"}</button></div>
     </section>
   );
 }

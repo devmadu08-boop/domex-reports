@@ -1,4 +1,5 @@
-import { DEFAULT_DELIVERED_RIDER_TEMPLATE } from "../utils/deliveredRiderWhatsAppTemplates.js";
+import { upgradeDefaultCaptions } from "../../shared/whatsappCaptions.js";
+import { DEFAULT_DELIVERED_RIDER_TEMPLATE, DELIVERED_RIDER_TEMPLATE_PRESETS } from "../utils/deliveredRiderWhatsAppTemplates.js";
 import {
   LEGACY_BRANCH_ACCESS,
   REGIONAL_MANAGER_ACCESS,
@@ -21,12 +22,6 @@ const MAX_UNDO_HISTORY = 5;
 const MAX_PERSISTED_HISTORY_CHARS = 1_200_000;
 const DEFAULT_COMPANY_NAME = "Domestic Express (pvt) ltd";
 const ADMIN_USER = { id: "system-admin", branchName: "madu", password: "2006", role: "superadmin", permissions: LEGACY_BRANCH_ACCESS, createdAt: "system" };
-const DEFAULT_WHATSAPP_CAPTION_TEMPLATES = {
-  courier: "Branch Courier Performance Report - {date}\nSent automatically from Daily Report System",
-  operation: "Operation Report - {date}\nSent automatically from Daily Report System",
-  delivered: "Delivered Collection Report - {date}\nSent automatically from Daily Report System",
-  reschedule: "Reschedule Report - {date}\nSent automatically from Daily Report System",
-};
 const DATA_CHANGED_EVENT = "daily-courier-report-data-changed";
 let suppressChangeEvent = false;
 let suppressHistory = false;
@@ -721,10 +716,8 @@ export function getSettings() {
     rescheduleApprovalReaction: "✅",
     geminiApiKey: "",
     ...savedSettings,
-    whatsappCaptionTemplates: {
-      ...DEFAULT_WHATSAPP_CAPTION_TEMPLATES,
-      ...(savedSettings.whatsappCaptionTemplates || {}),
-    },
+    deliveredRiderDefaultCaptionTemplate: savedSettings.deliveredRiderDefaultCaptionTemplate === DELIVERED_RIDER_TEMPLATE_PRESETS[1] ? DEFAULT_DELIVERED_RIDER_TEMPLATE : (savedSettings.deliveredRiderDefaultCaptionTemplate || DEFAULT_DELIVERED_RIDER_TEMPLATE),
+    whatsappCaptionTemplates: upgradeDefaultCaptions(savedSettings.whatsappCaptionTemplates),
     whatsappCustomCaptionTemplates: {
       courier: [],
       operation: [],

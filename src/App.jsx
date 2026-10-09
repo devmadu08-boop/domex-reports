@@ -48,6 +48,8 @@ import TodayOperationsDashboard from "./components/TodayOperationsDashboard.jsx"
 import ThemeSwitcher from "./components/ThemeSwitcher.jsx";
 import ReceiptGenerator from "./components/ReceiptGenerator.jsx";
 import AutoDispatchManager from "./components/dispatch/AutoDispatchManager.jsx";
+import WhatsAppQueuePanel from "./components/WhatsAppQueuePanel.jsx";
+import { getTabFromPath, getTabPath } from "./navigation.js";
 import { normalizeThemeId } from "./themeConfig.js";
 import {
   clearReportByDate,
@@ -116,6 +118,7 @@ import {
   USER_ROLE_OPTIONS,
 } from "./permissions.js";
 import {
+  getWhatsAppQueue,
   getBackendHealth,
   getSystemHealth,
   retryFailedWhatsAppQueue,
@@ -140,6 +143,7 @@ const tabs = [
   { id: "audit", label: "Audit Report", mobileLabel: "Audit", icon: ClipboardCheck },
   { id: "autoDispatch", label: "Auto-Dispatch", mobileLabel: "Dispatch", icon: TrendingUp },
   { id: "meterChats", label: "Meter Chats", mobileLabel: "Chats", icon: MessagesSquare, adminOnly: true },
+  { id: "whatsappQueue", label: "WhatsApp Queue", mobileLabel: "Queue", icon: MessagesSquare },
   { id: "settings", label: "Settings", mobileLabel: "Settings", icon: Settings },
   { id: "users", label: "User Management", mobileLabel: "Users", icon: ShieldCheck, adminOnly: true },
 ];
@@ -211,7 +215,7 @@ export default function App() {
   const [backendStatus, setBackendStatus] = useState("Checking backend...");
   const [users, setUsers] = useState(getUsers);
   const [googleApprovals, setGoogleApprovals] = useState([]);
-  const [activeTab, setActiveTab] = useState("dashboard");
+  const [activeTab, setActiveTab] = useState(() => getTabFromPath(window.location.pathname));
   const [selectedDate, setSelectedDate] = useState(todayIso());
   const [searchDate, setSearchDate] = useState("");
   const [courierRows, setCourierRows] = useState([]);
@@ -228,6 +232,7 @@ export default function App() {
   const [notice, setNotice] = useState("");
   const [pendingHistoryDownload, setPendingHistoryDownload] = useState(null);
   const [systemHealth, setSystemHealth] = useState(null);
+  const [whatsappQueue, setWhatsAppQueue] = useState(null);
   const [healthRefreshing, setHealthRefreshing] = useState(false);
   const [pendingCloudSync, setPendingCloudSync] = useState(getPendingCloudSync);
   const [systemVersions, setSystemVersions] = useState([]);
@@ -250,6 +255,35 @@ export default function App() {
     [session],
   );
   const accessibleBranches = useMemo(() => getAccessibleBranches(session), [session]);
+
+  useEffect(() => {
+    const onPopState = () => setActiveTab(getTabFromPath(window.location.pathname));
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (!session) return;
+    const allowed = visibleTabs.some((tab) => tab.id === activeTab);
+    if (!allowed) return;
+    const path = getTabPath(activeTab);
+    if (window.location.pathname !== path) {
+      const initial = window.location.pathname === "/";
+      window.history[initial ? "replaceState" : "pushState"]({ tab: activeTab }, "", path);
+    }
+  }, [session, activeTab, visibleTabs]);
+
+  useEffect(() => {
+    if (!session) { setWhatsAppQueue(null); return; }
+    let cancelled = false;
+    setWhatsAppQueue(null);
+    const refresh = () => getWhatsAppQueue().then((queue) => { if (!cancelled) setWhatsAppQueue(queue); }).catch(() => {});
+    refresh();
+    const timer = window.setInterval(refresh, 10000);
+    window.addEventListener("whatsapp-queue-changed", refresh);
+    return () => { cancelled = true; window.clearInterval(timer); window.removeEventListener("whatsapp-queue-changed", refresh); };
+  }, [session?.userId, session?.branchName, session?.role]);
+
 
   useEffect(() => {
     setWhatsAppAccountContext(session);
@@ -457,8 +491,12 @@ export default function App() {
 
     scheduleBackupSync();
     const unsubscribe = addDataChangeListener(scheduleBackupSync);
+    const snapshotTimer = window.setInterval(scheduleBackupSync, 60000);
+    window.addEventListener("online", scheduleBackupSync);
     return () => {
       window.clearTimeout(backupSyncTimerRef.current);
+      window.clearInterval(snapshotTimer);
+      window.removeEventListener("online", scheduleBackupSync);
       unsubscribe();
     };
   }, [session?.branchName, settings.backupWhatsappNumber, settings.rescheduleApprovalReaction]);
@@ -694,7 +732,7 @@ export default function App() {
       const nextSession = loginWithBranch(branchName, password);
       setFirebaseBootstrapped(false);
       setSession(nextSession);
-      setActiveTab(getFirstAccessibleTab(nextSession, tabs));
+      setActiveTab(canAccessTab(nextSession, getTabFromPath(window.location.pathname)) ? getTabFromPath(window.location.pathname) : getFirstAccessibleTab(nextSession, tabs));
       bootstrappedCloudRef.current = false;
       showNotice(`Logged in as ${nextSession.branchName}.`);
     } catch (error) {
@@ -733,7 +771,7 @@ export default function App() {
     const nextSession = createSessionFromUser(account, { ...profile, authProvider: "google" });
     setFirebaseBootstrapped(false);
     setSession(nextSession);
-    setActiveTab(getFirstAccessibleTab(nextSession, tabs));
+    setActiveTab(canAccessTab(nextSession, getTabFromPath(window.location.pathname)) ? getTabFromPath(window.location.pathname) : getFirstAccessibleTab(nextSession, tabs));
     bootstrappedCloudRef.current = false;
     showNotice(`Google login successful: ${nextSession.branchName}.`);
     return { pending: false };
@@ -968,7 +1006,6 @@ export default function App() {
   }
 
   async function syncBackupConfigToBackend(savedSettings = getSettings()) {
-    if (!savedSettings.backupWhatsappNumber) return;
     try {
       await saveWhatsAppBackupConfig({
         phoneNumber: savedSettings.backupWhatsappNumber,
@@ -1205,9 +1242,9 @@ export default function App() {
     const hasCourier = (report.courierRows?.length || 0) > 0;
     const hasOperation = Boolean(report.operation);
     const whatsappPending =
-      Number(systemHealth?.queue?.counts?.pending || 0)
-      + Number(systemHealth?.queue?.counts?.sending || 0)
-      + Number(systemHealth?.queue?.counts?.failed || 0);
+      Number(whatsappQueue?.counts?.pending || 0)
+      + Number(whatsappQueue?.counts?.sending || 0)
+      + Number(whatsappQueue?.counts?.failed || 0);
     const deliveredComplete = deliveredReports.length > 0 && exceptions === 0;
     const reportsRemaining = Number(!hasCourier) + Number(!hasOperation);
 
@@ -1248,14 +1285,14 @@ export default function App() {
         },
         {
           id: "send",
-          tab: whatsappPending ? "settings" : "exports",
+          tab: whatsappPending ? "whatsappQueue" : "exports",
           label: "Complete exports and WhatsApp sends",
           helper: whatsappPending ? `${whatsappPending} send(s) pending or failed` : "WhatsApp queue is clear",
           complete: deliveredComplete && hasCourier && hasOperation && whatsappPending === 0,
         },
       ],
     };
-  }, [selectedDate, history, courierRows, operation, systemHealth]);
+  }, [selectedDate, history, courierRows, operation, systemHealth, whatsappQueue]);
 
   const effectiveActiveTab = visibleTabs.some((tab) => tab.id === activeTab) ? activeTab : getFirstAccessibleTab(session, tabs);
   const activeTabLabel = visibleTabs.find((tab) => tab.id === effectiveActiveTab)?.label || "Account Access";
@@ -1286,7 +1323,7 @@ export default function App() {
       <div className="main-dashboard-surface min-w-0">
       <main className="domex-main">
         {effectiveActiveTab !== "dashboard" ? <div className="workspace-page-heading"><span>DOMEX / {settings.branchName || session.branchName} Branch</span><h1>{activeTabLabel}</h1></div> : null}
-        {!["deliveredConverter", "settings", "dashboard", "meterChats", "autoDispatch"].includes(effectiveActiveTab) && effectiveActiveTab !== "noAccess" && (
+        {!["deliveredConverter", "settings", "dashboard", "meterChats", "autoDispatch", "whatsappQueue"].includes(effectiveActiveTab) && effectiveActiveTab !== "noAccess" && (
           <DateSelector
             selectedDate={selectedDate}
             onDateChange={setSelectedDate}
@@ -1316,6 +1353,8 @@ export default function App() {
             </section>
           </>
         )}
+
+        {effectiveActiveTab === "whatsappQueue" && <WhatsAppQueuePanel accountLabel={settings.branchName || session.branchName} />}
 
         {effectiveActiveTab === "courier" && (
           <CourierPerformanceForm

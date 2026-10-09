@@ -1,3 +1,4 @@
+import { DEFAULT_REPORT_CAPTIONS, formatReportCaption, upgradeDefaultCaptions } from "../../shared/whatsappCaptions.js";
 import makeWASocket, {
   Browsers,
   DisconnectReason,
@@ -10,6 +11,8 @@ import path from "node:path";
 import Pino from "pino";
 import QRCode from "qrcode";
 import { renderRescheduleReportImages } from "../reports/rescheduleReportRenderer.js";
+
+import { getRescheduleReadiness, shouldRunDailyTask } from "./schedule.js";
 
 const dataDir = path.resolve("backend", "data");
 const authDir = path.join(dataDir, "whatsapp-auth");
@@ -340,6 +343,7 @@ export async function getWhatsAppStatus() {
     lastDailyBackupDate: config.lastDailyBackupDate || "",
     lastRescheduleApprovalDate: config.lastRescheduleApprovalDate || "",
     rescheduleApproval: sanitizeRescheduleApproval(config.pendingRescheduleApproval),
+    rescheduleSchedule: getRescheduleReadiness(config),
   };
 }
 
@@ -1051,11 +1055,8 @@ async function createRescheduleApprovalRequest({ force = false } = {}) {
   }
 
   const branchName = snapshot?.settings?.branchName || "Middeniya";
-  const template = snapshot?.settings?.whatsappCaptionTemplates?.reschedule
-    || "📋 *{title}*\n📅 Date: *{date}*\n\nPlease check the attached rescheduled parcel list.";
-  const groupCaption = template
-    .replaceAll("{title}", "Reschedule Report")
-    .replaceAll("{date}", clock.date);
+  const template = upgradeDefaultCaptions(snapshot?.settings?.whatsappCaptionTemplates).reschedule || DEFAULT_REPORT_CAPTIONS.reschedule;
+  const groupCaption = formatReportCaption(template, { title: "Reschedule Report", date: clock.date, branch: branchName });
   const imagePaths = await renderRescheduleReportImages({
     rows,
     reportDate: clock.date,
@@ -1224,18 +1225,21 @@ function sanitizeRescheduleApproval(approval) {
 export function startDailyBackupScheduler() {
   if (backupSchedulerStarted) return;
   backupSchedulerStarted = true;
-
-  setInterval(() => {
-    const clock = getColomboClock();
-    if (clock.hour === 8 && clock.minute === 0) {
-      sendBackupToWhatsApp({ force: false }).catch((error) => {
-        console.error("[whatsapp-backup-scheduler]", error.message || error);
-      });
-    }
-    if (clock.hour === 20) {
-      sendRescheduleApprovalRequest({ force: false }).catch((error) => {
-        console.error("[reschedule-approval-scheduler]", error.message || error);
-      });
-    }
-  }, 60 * 1000);
+  let running = false;
+  const tick = async () => {
+    if (running || connectionState !== "connected") return;
+    running = true;
+    try {
+      const config = await readConfig();
+      const now = new Date();
+      if (config.backupWhatsappNumber && config.latestBackupSnapshot && shouldRunDailyTask(now, 8, config.lastDailyBackupDate)) {
+        await sendBackupToWhatsApp({ force: false }).catch((error) => console.error("[whatsapp-backup-scheduler]", error.message));
+      }
+      if (getRescheduleReadiness(config, now).ready && shouldRunDailyTask(now, 20, config.lastRescheduleApprovalDate)) {
+        await sendRescheduleApprovalRequest({ force: false }).catch((error) => console.error("[reschedule-approval-scheduler]", error.message));
+      }
+    } finally { running = false; }
+  };
+  tick().catch(console.error);
+  setInterval(() => tick().catch(console.error), 60_000);
 }
