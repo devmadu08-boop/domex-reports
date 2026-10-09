@@ -659,6 +659,7 @@ export function getAllReports() {
       operation: value.operation || null,
       delivered: normalizeDelivered(value.delivered),
       rescheduleRows: value.rescheduleRows || [],
+      riderDeliveryPerformance: value.riderDeliveryPerformance || {},
       pettyCash: value.pettyCash || null,
       updatedAt: value.updatedAt,
     }))

@@ -141,6 +141,14 @@ Each non-admin system login has its own WhatsApp QR session, connected number, r
 
 After deploying this version, each branch user opens `Settings > Report WhatsApp`, scans that login's QR, fetches its groups, and saves its own destinations. Back up the complete `backend/data/` directory when moving the VPS so every linked WhatsApp session is preserved.
 
+## Rider Delivery Performance
+
+Open **Reports → Rider Delivery Performance** (`/rider-delivery-performance/`) and upload a Rider Wise Delivery Count CSV. The importer reads date columns as day/month/year, uses actual daily-count totals, and leaves dates missing from the CSV marked as unavailable. Rider IDs are excluded from the derived report data.
+
+Choose the branch and full CSV/month/custom period, then export the DOMEX board as PNG or A4 landscape PDF. Larger datasets use multiple pages with up to six riders and 31 dates per page. Save Report stores the derived report in the current branch workspace without replacing courier or Delivered reports; the latest saved report reopens after reload.
+
+**Send to Default Group** queues report images to this login's existing default report groups. Configure those destinations in Settings → Report WhatsApp. Importing or saving a CSV does not send it to WhatsApp. Existing Courier Performance access includes the new report, and administrators can also assign its separate permission.
+
 ## WhatsApp Outbox and page links
 
 Each branch login has an Outbox at `/whatsapp-queue/`. Pending and failed messages can be viewed, edited, retried or deleted. Clear All removes that account's queue/history while messages already sending finish. Sent messages cannot be recalled from the queue.

@@ -1,5 +1,6 @@
 export const SYSTEM_ACCESS_OPTIONS = [
   { id: "dashboard", label: "Dashboard", group: "General" },
+  { id: "riderPerformance", label: "Rider Delivery Performance", group: "Reports" },
   { id: "courier", label: "Courier Performance", group: "Reports" },
   { id: "operation", label: "Operation Report", group: "Reports" },
   { id: "exports", label: "Export / History", group: "Reports" },
@@ -31,6 +32,7 @@ export const USER_ROLE_OPTIONS = [
 const TAB_ACCESS = {
   dashboard: ["dashboard"],
   courier: ["courier"],
+  riderPerformance: ["riderPerformance", "courier"],
   operation: ["operation"],
   exports: ["exports"],
   allReports: ["allReports"],

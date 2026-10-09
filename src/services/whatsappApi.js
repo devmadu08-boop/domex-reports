@@ -177,9 +177,10 @@ export function saveAuditWhatsAppGroup(groupJids) {
   });
 }
 
-export function sendReportToWhatsApp({ imageDataUrl, imageDataUrls, caption }) {
+export function sendReportToWhatsApp({ imageDataUrl, imageDataUrls, caption, accountKey }) {
   return requestJson("/send-report", {
     method: "POST",
+    headers: accountKey ? { "X-WhatsApp-Account": accountKey } : {},
     body: JSON.stringify({ imageDataUrl, imageDataUrls, caption }),
   });
 }

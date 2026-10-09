@@ -30,6 +30,7 @@ import {
 import CourierPerformanceForm, { emptyCourierForm } from "./components/CourierPerformanceForm.jsx";
 import DateSelector from "./components/DateSelector.jsx";
 import DeliveredReportConverter from "./components/DeliveredReportConverter.jsx";
+import RiderDeliveryPerformance from "./components/RiderDeliveryPerformance.jsx";
 import RescheduleReport from "./components/RescheduleReport.jsx";
 import PettyCashManagement from "./components/PettyCashManagement.jsx";
 import AuditReport from "./components/AuditReport.jsx";
@@ -133,6 +134,7 @@ import { getReconciliationReviewStatus } from "./utils/deliveredReconciliationRe
 const tabs = [
   { id: "dashboard", label: "Dashboard", mobileLabel: "Home", icon: Home },
   { id: "courier", label: "Courier Performance", mobileLabel: "Courier", icon: Truck },
+  { id: "riderPerformance", label: "Rider Delivery Performance", mobileLabel: "Rider Stats", icon: TrendingUp },
   { id: "operation", label: "Operation Report", mobileLabel: "Operation", icon: PackageCheck },
   { id: "exports", label: "Export / History", mobileLabel: "Export", icon: History },
   { id: "allReports", label: "All Reports", mobileLabel: "All", icon: FileSpreadsheet },
@@ -1324,7 +1326,7 @@ export default function App() {
       <div className="main-dashboard-surface min-w-0">
       <main className="domex-main">
         {effectiveActiveTab !== "dashboard" ? <div className="workspace-page-heading"><span>DOMEX / {settings.branchName || session.branchName} Branch</span><h1>{activeTabLabel}</h1></div> : null}
-        {!["deliveredConverter", "settings", "dashboard", "meterChats", "autoDispatch", "whatsappQueue"].includes(effectiveActiveTab) && effectiveActiveTab !== "noAccess" && (
+        {!["deliveredConverter", "settings", "dashboard", "meterChats", "autoDispatch", "whatsappQueue", "riderPerformance"].includes(effectiveActiveTab) && effectiveActiveTab !== "noAccess" && (
           <DateSelector
             selectedDate={selectedDate}
             onDateChange={setSelectedDate}
@@ -1356,6 +1358,8 @@ export default function App() {
         )}
 
         {effectiveActiveTab === "whatsappQueue" && <WhatsAppQueuePanel accountLabel={settings.branchName || session.branchName} />}
+
+        {effectiveActiveTab === "riderPerformance" && <RiderDeliveryPerformance key={session.branchName} branchName={settings.branchName || session.branchName} />}
 
         {effectiveActiveTab === "courier" && (
           <CourierPerformanceForm

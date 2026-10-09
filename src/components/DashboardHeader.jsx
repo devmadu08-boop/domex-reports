@@ -6,7 +6,7 @@ const groups = [
   { label: "Dashboard", icon: Home, tabs: ["dashboard"] },
   { label: "Courier", icon: Truck, tabs: ["courier"] },
   { label: "Operations", icon: PackageCheck, tabs: ["operation", "autoDispatch"] },
-  { label: "Reports", icon: FileText, tabs: ["exports", "allReports", "audit"] },
+  { label: "Reports", icon: FileText, tabs: ["riderPerformance", "exports", "allReports", "audit"] },
   { label: "Deliveries", icon: PackageCheck, tabs: ["deliveredConverter", "reschedule"] },
   { label: "Finance", icon: WalletCards, tabs: ["pettyCash", "receipt"] },
   { label: "Settings", icon: Settings, tabs: ["whatsappQueue", "settings", "meterChats", "users"] },
