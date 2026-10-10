@@ -2,7 +2,7 @@ import { formatReportCaption } from "../../shared/whatsappCaptions.js";
 import { MessageCircle } from "lucide-react";
 import { useState } from "react";
 import { getSettings } from "../services/reportStorage.js";
-import { sendConvertReportToWhatsApp, sendReportToWhatsApp } from "../services/whatsappApi.js";
+import { getCurrentWhatsAppAccountKey, sendConvertReportToWhatsApp, sendReportToWhatsApp } from "../services/whatsappApi.js";
 import { captureElementAsPngDataUrl } from "../utils/exportReports.js";
 
 export default function SendToWhatsAppButton({ reportRef, reportRefs, reportTitle, reportDate, reportType = "courier", disabled, compact = false }) {
@@ -10,6 +10,8 @@ export default function SendToWhatsAppButton({ reportRef, reportRefs, reportTitl
   const [message, setMessage] = useState("");
 
   async function handleSend() {
+    const accountKey = getCurrentWhatsAppAccountKey();
+    const caption = buildCaption(reportType, reportTitle, reportDate);
     setSending(true);
     setMessage("");
 
@@ -21,7 +23,7 @@ export default function SendToWhatsAppButton({ reportRef, reportRefs, reportTitl
       );
       const result = await sendAction({
         imageDataUrls,
-        caption: buildCaption(reportType, reportTitle, reportDate),
+        caption, accountKey,
       });
       if (result.queued) {
         setMessage(`${elements.length} page${elements.length === 1 ? "" : "s"} saved to the WhatsApp queue and will retry automatically.`);

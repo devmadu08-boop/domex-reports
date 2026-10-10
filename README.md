@@ -155,7 +155,7 @@ Each branch login has an Outbox at `/whatsapp-queue/`. Pending and failed messag
 
 Sections have their own URLs, such as `/dashboard/`, `/courier/`, `/settings/` and `/delivered-report/`. Refreshing or using browser Back/Forward keeps the chosen section and still applies account permissions.
 
-Delivered Report's **Export A4 PDF & Print** downloads the PDF and opens the print dialog within the same tab. Selected rider/group WhatsApp copies are submitted in the background. Their delivery status appears in the Outbox.
+Delivered Report's **Export A4 PDF & Print** downloads a monochrome PDF and opens the print dialog within the same tab. PNG downloads are also monochrome. WhatsApp copies use the separate color layout with rider, OFD, delivered and percentage cards. Reports use fixed chunks of twenty records per A4 page; remaining blank lines are display slots only. Selected rider/group copies are submitted in the background, and their delivery status appears in the Outbox.
 
 Reschedule automation requires a connected Report WhatsApp account, a Backup WhatsApp Number, at least one saved Reschedule Report group, and rows saved for that Sri Lanka date. Settings shows any missing requirements. The 20:00 scheduler retries later that day if a connection or report becomes available after the scheduled minute; groups still receive the report after the configured approval reaction.
 
@@ -186,3 +186,7 @@ To use Firebase Realtime Database sync:
 3. Configure Realtime Database security rules appropriate for your office deployment.
 4. Branch reports, settings, saved courier names, users, and weekly backups sync automatically after login.
 5. Settings also provides manual `Upload Local to Cloud` and `Download Cloud to Local` recovery actions.
+
+Report image captures use the browser’s native font and CSS layout, preserving number-badge alignment and table names. The navigation toolbar stays visible while scrolling.
+
+Export-layout regression check: start the local Vite server, then run `node tests/exportLayout.browser.mjs` (set `CHROME_PATH` if Chrome is installed elsewhere). The check uses synthetic records, intercepts WhatsApp requests, compares badge positions against browser screenshots, and verifies B&W/color output paths and sticky navigation.

@@ -1,4 +1,4 @@
-import html2canvas from "html2canvas";
+import { captureNativeReport } from "./captureNativeReport.js";
 import jsPDF from "jspdf";
 
 const scale = 3;
@@ -12,13 +12,9 @@ async function captureElement(element, options = {}) {
     throw new Error("Report area is not available for export.");
   }
 
-  if (document.fonts?.ready) {
-    await document.fonts.ready;
-  }
-
   const exportHost = document.createElement("div");
   const exportClone = element.cloneNode(true);
-  if (options.whatsappBranded) {
+  if (options.whatsappBranded && !exportClone.classList.contains("delivered-document")) {
     exportClone.classList.add("branded-report");
     if (!exportClone.classList.contains("a4-portrait-report")) {
       exportClone.classList.add("branded-report-landscape");
@@ -32,28 +28,26 @@ async function captureElement(element, options = {}) {
   exportHost.style.width = `${exportWidth}px`;
   exportHost.style.background = "#ffffff";
   exportHost.style.zIndex = "-1";
+  exportHost.style.padding = "0";
+  exportHost.style.margin = "0";
+  if (options.variant === "monochrome") exportClone.classList.add("delivered-monochrome");
+  if (options.variant === "color" || (options.whatsappBranded && exportClone.classList.contains("delivered-document"))) exportClone.classList.remove("delivered-monochrome");
 
   exportClone.style.width = `${exportWidth}px`;
   exportClone.style.maxWidth = "none";
   exportClone.style.overflow = "visible";
+  exportClone.style.zoom = "1";
 
   exportHost.appendChild(exportClone);
-  document.body.appendChild(exportHost);
+  const parent = element.parentElement || document.body;
+  parent.appendChild(exportHost);
 
   try {
+    if (document.fonts?.ready) await document.fonts.ready;
     await waitForImages(exportClone);
-    return await html2canvas(exportClone, {
-      backgroundColor: "#ffffff",
-      scale,
-      useCORS: true,
-      logging: false,
-      scrollX: 0,
-      scrollY: 0,
-      windowWidth: exportWidth,
-      windowHeight: exportClone.scrollHeight,
-    });
+    return await captureNativeReport(exportClone, { scale: options.scale || scale });
   } finally {
-    document.body.removeChild(exportHost);
+    exportHost.remove();
   }
 }
 
@@ -86,14 +80,14 @@ export async function exportElementAsPng(element, reportName, date) {
   link.click();
 }
 
-export async function exportElementsAsPng(elements, reportName, date) {
+export async function exportElementsAsPng(elements, reportName, date, options = {}) {
   const pageElements = elements.filter(Boolean);
   if (!pageElements.length) {
     throw new Error("Report area is not available for export.");
   }
 
   for (let index = 0; index < pageElements.length; index += 1) {
-    const canvas = await captureElement(pageElements[index]);
+    const canvas = await captureElement(pageElements[index], options);
     const link = document.createElement("a");
     const pageSuffix = pageElements.length > 1 ? `_Page_${index + 1}` : "";
     link.download = `${safeFileName(reportName)}_${date}${pageSuffix}.png`;
@@ -115,7 +109,7 @@ export async function exportElementAsPortraitPdf(element, reportName, date) {
   return exportElementAsPdf(element, reportName, date, "portrait");
 }
 
-export async function exportElementsAsPortraitPdf(elements, reportName, date) {
+export async function exportElementsAsPortraitPdf(elements, reportName, date, options = {}) {
   const pageElements = elements.filter(Boolean);
   if (!pageElements.length) {
     throw new Error("Report area is not available for export.");
@@ -125,10 +119,10 @@ export async function exportElementsAsPortraitPdf(elements, reportName, date) {
   const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
   for (let index = 0; index < pageElements.length; index += 1) {
-    const canvas = await captureElement(pageElements[index]);
+    const canvas = await captureElement(pageElements[index], options);
     imageDataUrls.push(canvas.toDataURL("image/png", 1));
     if (index > 0) pdf.addPage("a4", "portrait");
-    addCanvasToPdfPage(pdf, canvas);
+    addCanvasToPdfPage(pdf, canvas, options);
   }
 
   pdf.save(`${safeFileName(reportName)}_${date}.pdf`);
@@ -164,7 +158,9 @@ function addCanvasToPdfPage(pdf, canvas, options = {}) {
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
   if (options.fullBleed) {
-    pdf.addImage(canvas.toDataURL("image/png", 1), "PNG", 0, 0, pageWidth, pageHeight, undefined, "FAST");
+    const ratio = Math.min(pageWidth / canvas.width, pageHeight / canvas.height);
+    const width = canvas.width * ratio, height = canvas.height * ratio;
+    pdf.addImage(canvas.toDataURL("image/png", 1), "PNG", (pageWidth - width) / 2, (pageHeight - height) / 2, width, height, undefined, "FAST");
     return;
   }
   const margin = 8;

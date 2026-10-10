@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CloudDownload, FileDown, Image, Plus, RotateCcw, Trash2, Upload } from "lucide-react";
 import { todayIso } from "../utils/date.js";
-import { captureElementAsPngDataUrl, exportElementAsPng, exportElementsAsPortraitPdf, printReportImages } from "../utils/exportReports.js";
+import { captureElementAsPngDataUrl, exportElementsAsPng, exportElementsAsPortraitPdf, printReportImages } from "../utils/exportReports.js";
 import { deleteDeliveredReport, getAllDeliveredRiderNames, getDeliveredReport, getDeliveredRiderNames, getReportByDate, getSettings, saveCourierName, saveDeliveredReport as saveDeliveredReportByRider, saveReportType, saveRescheduleRows, saveSettings } from "../services/reportStorage.js";
 import { getCurrentWhatsAppAccountKey, sendConvertReportToWhatsApp, sendReportToWhatsAppRecipient, sendTextToWhatsAppRecipient } from "../services/whatsappApi.js";
 import { fetchDomexDeliveredCsv } from "../services/domexAutomationApi.js";
@@ -14,7 +14,8 @@ import {
 import { parseOutForDeliveryPdf } from "../utils/outForDeliveryPdf.js";
 import { buildDeliveredRiderWhatsAppCaption } from "../utils/deliveredRiderWhatsAppTemplates.js";
 import DeliveredReconciliationPanel from "./DeliveredReconciliationPanel.jsx";
-import { BrandedReportFooter, BrandedReportHeader } from "./ReportBranding.jsx";
+import DeliveredCollectionReportPage from "./DeliveredCollectionReportPage.jsx";
+import { paginateDeliveredEntries } from "../utils/deliveredReportLayout.js";
 import SendToWhatsAppButton from "./SendToWhatsAppButton.jsx";
 
 const emptyEntry = {
@@ -42,6 +43,13 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
   const [rememberSendChoice, setRememberSendChoice] = useState(false);
   const [exportStatus, setExportStatus] = useState("");
   const [exportingDelivered, setExportingDelivered] = useState(false);
+  const [previewMode, setPreviewMode] = useState("color");
+  const [previewScale, setPreviewScale] = useState(1);
+  useEffect(() => {
+    const resize = () => setPreviewScale(Math.min(1, Math.max(200, window.innerWidth - 46) / 794));
+    resize(); window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, []);
   const [domexLoading, setDomexLoading] = useState(false);
   const [domexStatus, setDomexStatus] = useState("");
   const [sources, setSources] = useState(emptySources);
@@ -83,7 +91,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
   const hasMultiplePdfPages = pageCount > 1;
   const reviewStatus = useMemo(() => getReconciliationReviewStatus(reconciliation), [reconciliation]);
   const hasValidPickupCount = pickupCount !== "" && Number.isInteger(Number(pickupCount)) && Number(pickupCount) >= 0;
-  const canGenerateReports = entries.length > 0 && Boolean(reconciliation?.checkedAt) && reviewStatus.ready && hasValidPickupCount;
+  const canGenerateReports = Boolean(reportDate) && entries.length > 0 && Boolean(reconciliation?.checkedAt) && reviewStatus.ready && hasValidPickupCount;
   const canFinalizeReport = canGenerateReports && reportsGenerated;
 
   async function handleSmartFileUpload(event) {
@@ -693,7 +701,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
 
   async function handlePdfExport() {
     const pageElements = reportPageRefs.current.filter(Boolean);
-    return exportElementsAsPortraitPdf(pageElements, "Delivered_Collection_Report", reportDate);
+    return exportElementsAsPortraitPdf(pageElements, "Delivered_Collection_Report", reportDate, { variant: "monochrome" });
   }
 
   function openExportPrompt(type) {
@@ -705,6 +713,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
     setExportPrompt({
       type,
       accountKey: getCurrentWhatsAppAccountKey(),
+      riderName, reportDate,
       riderPhone,
       pageCount,
     });
@@ -719,6 +728,10 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
 
   async function confirmExport() {
     if (!exportPrompt || exportingDelivered) return;
+    if (exportPrompt.riderName !== riderName || exportPrompt.reportDate !== reportDate || exportPrompt.accountKey !== getCurrentWhatsAppAccountKey()) {
+      setExportStatus("The rider, date or workspace changed. Reopen Export to use the current report.");
+      return;
+    }
     if (sendToRiderWhatsApp && !exportPrompt.riderPhone) {
       setExportStatus("Add this rider's WhatsApp number in Settings, or turn off WhatsApp sending.");
       return;
@@ -727,6 +740,7 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
     const sendSelected = sendToRiderWhatsApp;
     const currentSettings = getSettings();
     const nextAutoWhatsApp = Boolean(rememberSendChoice && sendSelected);
+    const colorCapture = sendSelected ? Promise.all(reportPageRefs.current.filter(Boolean).map(element => captureElementAsPngDataUrl(element, { variant: "color" }))).then(images => ({ images }), error => ({ error })) : null;
     setExportingDelivered(true);
     setExportStatus("Preparing your A4 report…");
     try {
@@ -735,13 +749,15 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
         const exported = await handlePdfExport();
         imageDataUrls = exported.imageDataUrls;
       } else {
-        await exportElementAsPng(reportRef.current, "Delivered_Collection_Report", reportDate);
-        if (sendSelected) imageDataUrls = await Promise.all(reportPageRefs.current.filter(Boolean).map((element) => captureElementAsPngDataUrl(element, { whatsappBranded: true })));
+        await exportElementsAsPng(reportPageRefs.current.filter(Boolean), "Delivered_Collection_Report", reportDate, { variant: "monochrome" });
+
       }
       if (nextAutoWhatsApp !== Boolean(currentSettings.deliveredExportAutoWhatsApp)) saveSettings({ deliveredExportAutoWhatsApp: nextAutoWhatsApp });
       setExportPrompt(null);
       setExportStatus(prompt.type === "pdf" ? "A4 PDF downloaded. Print preview is opening in this tab." : "PNG downloaded.");
       if (sendSelected) {
+        const preparedColor = await colorCapture;
+        const colorImages = preparedColor.error ? Promise.reject(preparedColor.error) : Promise.resolve(preparedColor.images);
         const caption = buildDeliveredRiderWhatsAppCaption({
           settings: currentSettings, riderName, reportDate, branchName: branchName || defaultBranchName,
           outForDeliveryCount: reconciliation?.outForDeliveryCount ?? sources.outForDelivery?.count ?? 0,
@@ -749,8 +765,8 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
           rescheduleCount: reviewStatus.effectiveRescheduledCount, missrouteCount: reviewStatus.missrouteCount,
           returnCount: reviewStatus.returnCount, amount: formatMoney(totalValue),
         });
-        const sends = [sendReportToWhatsAppRecipient({ phoneNumber: prompt.riderPhone, imageDataUrls, caption, accountKey: prompt.accountKey })];
-        if (currentSettings.convertDefaultGroupJids?.length) sends.push(sendConvertReportToWhatsApp({ imageDataUrls, caption, accountKey: prompt.accountKey }));
+        const sends = [colorImages.then(imageDataUrls => sendReportToWhatsAppRecipient({ phoneNumber: prompt.riderPhone, imageDataUrls, caption, accountKey: prompt.accountKey }))];
+        if (currentSettings.convertDefaultGroupJids?.length) sends.push(colorImages.then(imageDataUrls => sendConvertReportToWhatsApp({ imageDataUrls, caption, accountKey: prompt.accountKey })));
         // Requests are submitted immediately; neither local export nor printing waits for WhatsApp delivery.
         void Promise.allSettled(sends).then((results) => {
           const failed = results.filter((result) => result.status === "rejected");
@@ -1060,15 +1076,20 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
 
       {exportStatus ? <p className="delivered-export-status" role="status">{exportStatus}</p> : null}
 
+      {canFinalizeReport ? <div className="delivered-preview-options"><span>Report preview</span><button type="button" aria-pressed={previewMode === "color"} onClick={() => setPreviewMode("color")}>Color · WhatsApp</button><button type="button" aria-pressed={previewMode === "monochrome"} onClick={() => setPreviewMode("monochrome")}>B&W · Download / Print</button><small>20 rows per A4 page. Blank lines do not add deliveries.</small></div> : null}
+
       {canFinalizeReport ? (
         <div className="delivered-preview-card rounded-3xl border border-white/70 bg-white/55 p-2 shadow-xl md:overflow-x-auto md:p-0">
-          <div ref={reportRef} className="delivered-preview-stack mobile-a4-preview">
+          <div ref={reportRef} className="delivered-preview-stack mobile-a4-preview" style={{ "--delivered-preview-zoom": previewScale }}>
             {reportPages.map((page, pageIndex) => (
               <DeliveredCollectionReportPage
                 key={`delivered-page-${pageIndex}`}
                 reportRef={(node) => {
                   if (node) reportPageRefs.current[pageIndex] = node;
                 }}
+                previewMode={previewMode}
+                outForDeliveryCount={reconciliation?.outForDeliveryCount ?? sources.outForDelivery?.count ?? 0}
+                deliveredCount={validEntries.length}
                 reportDate={reportDate}
                 riderName={riderName}
                 branchName={branchName || defaultBranchName}
@@ -1112,109 +1133,6 @@ export default function DeliveredReportConverter({ onSaved, companyName = "Domes
       )}
     </section>
   );
-}
-
-function DeliveredCollectionReportPage({ reportRef, reportDate, riderName, branchName, companyName, entries, startIndex, totalValue, includeSpecialTracking, specialValue, pageNumber, pageCount, isFinalPage }) {
-  return (
-    <div ref={reportRef} className={`report-paper a4-portrait-report branded-report delivered-report-page ${isFinalPage ? "delivered-final-page" : "delivered-continuation-page"}`}>
-      <BrandedReportHeader branchName={branchName} companyName={companyName} accent="Delivered" title="Collection Report" date={reportDate} pageNumber={pageNumber} pageCount={pageCount} />
-      <div className="report-print-only">
-        <p className="report-company">{companyName}</p>
-        <h2 className="report-title text-2xl">Delivered Collection Report</h2>
-        <div className="delivered-report-meta">
-          <p>Date: {reportDate}</p>
-          <p className="text-right">Rider Name: {riderName || "-"}</p>
-          {branchName && <p>Branch: {branchName}</p>}
-          <p className="text-right">Page: {pageNumber} / {pageCount}</p>
-        </div>
-      </div>
-      <div className="report-branded-content">
-      <div className="report-whatsapp-only delivered-report-meta">
-        <p>Rider Name</p>
-        <p className="text-right">{riderName || "-"}</p>
-      </div>
-
-      <table className="report-table branded-data-table delivered-money-table numbered-report-table">
-        <thead>
-          <tr>
-            <th style={{ width: "56px" }}>No</th>
-            <th>Tracking No</th>
-            <th style={{ width: "160px" }}>Value (LKR)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entries.length === 0 ? (
-            <tr>
-              <td colSpan="3">Upload CSV file to generate report.</td>
-            </tr>
-          ) : (
-            entries.map((entry, index) => (
-              <tr key={`${entry.trackingNo}-${index}`} className={isSpecialTrackingNo(entry.trackingNo) ? "special-tracking-muted" : ""}>
-                <td><span className="report-row-number">{startIndex + index + 1}</span></td>
-                <td>{entry.trackingNo}</td>
-                <td className="money-cell">{formatMoney(parseMoney(entry.value))}</td>
-              </tr>
-            ))
-          )}
-          <tr className="delivered-total-row">
-            <td colSpan="2">
-              <strong>Total Value</strong>
-              {!includeSpecialTracking && specialValue > 0 && <span className="total-note"> CS40/CS80 excluded</span>}
-            </td>
-            <td className="money-cell">
-              <strong>{formatMoney(totalValue)}</strong>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-
-      <div className="paid-amount-row delivered-final-only">
-        <span>ලබාදුන් මුදල</span>
-        <div className="paid-amount-line" />
-      </div>
-
-      <div className="signature-row delivered-final-only">
-        <div>
-          <div className="signature-line" />
-          <p>මුදල් ලබා දුන් බවට අත්සන</p>
-        </div>
-        <div>
-          <div className="signature-line" />
-          <p>මුදල් ලබාගත් බවට අත්සන</p>
-        </div>
-      </div>
-      </div>
-      <BrandedReportFooter branchName={branchName} summaryLabel="Total Collection Value" summaryValue={formatMoney(totalValue)} />
-    </div>
-  );
-}
-
-function paginateDeliveredEntries(entries) {
-  const rowsPerPage = 16;
-
-  if (!entries.length) {
-    return [{ entries: [], startIndex: 0, isFinalPage: true }];
-  }
-
-  if (entries.length <= rowsPerPage) {
-    return [{ entries, startIndex: 0, isFinalPage: true }];
-  }
-
-  const pageCount = Math.ceil(entries.length / rowsPerPage);
-  const basePageSize = Math.floor(entries.length / pageCount);
-  const largerPageCount = entries.length % pageCount;
-  let startIndex = 0;
-
-  return Array.from({ length: pageCount }, (_, pageIndex) => {
-    const pageSize = basePageSize + (pageIndex < largerPageCount ? 1 : 0);
-    const page = {
-      entries: entries.slice(startIndex, startIndex + pageSize),
-      startIndex,
-      isFinalPage: pageIndex === pageCount - 1,
-    };
-    startIndex += pageSize;
-    return page;
-  });
 }
 
 function assertRiderMatches(outForDeliveryRider, deliveredRider) {

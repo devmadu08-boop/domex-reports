@@ -11,3 +11,5 @@ vite-dev.err.log
 .env.*.local
 
 backend/data/
+
+tmp/export-layout-artifacts/
