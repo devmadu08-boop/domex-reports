@@ -63,7 +63,7 @@ try{
  const dims=await page.locator('.delivered-document').evaluateAll(nodes=>nodes.map(n=>({height:n.getBoundingClientRect().height,scroll:n.scrollHeight,client:n.clientHeight})));
  assert(dims.every(d=>d.height===1123&&d.scroll<=d.client+1),'A4 pages must not clip content');
  await page.setViewportSize({width:390,height:844});await page.evaluate(()=>window.scrollTo(0,500));assert(Math.abs(await page.locator('.domex-header').evaluate(e=>e.getBoundingClientRect().top))<1);
- 
+
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Mobile overflow');
  assert((await page.locator('.delivered-document').first().boundingBox()).width < 390,'Mobile preview shows the complete A4 page');
  assert.deepEqual(errors,[]);console.log(JSON.stringify({status:'passed',checks:['native rider/petty/delivered capture','sticky toolbar desktop/mobile','20 rows and 21 records on 2 pages','B&W PDF and color WhatsApp payload','same-tab print','A4 no clipping','no runtime errors']}));
