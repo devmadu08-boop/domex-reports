@@ -57,3 +57,38 @@ test('clear all keeps in-flight messages and never discards another account’s 
   assert.equal((await q.getWhatsAppQueueStatus('branch-b')).jobs.length,120);
   await assert.rejects(q.deleteWhatsAppQueueJob('busy','branch-a'),{statusCode:409});
 });
+
+test('one worker run drains more than three reports without waiting for the interval', async t => {
+  const q = await fixture(t, Array.from({length: 7}, (_, i) => job('report-' + i)));
+  let sent = 0;
+  q.configureWhatsAppQueue(async () => { sent++; return {sentCount: 1}; });
+  await q.processDueWhatsAppJobs();
+  assert.equal(sent, 7);
+  assert.equal((await q.getWhatsAppQueueStatus('branch-a')).counts.sent, 7);
+});
+
+test('a report enqueued during an active send is picked up immediately and failures retain their retry delay', async t => {
+  const q = await fixture(t, [job('first')]);
+  let start;
+  let finish;
+  const started = new Promise(resolve => { start = resolve; });
+  const gate = new Promise(resolve => { finish = resolve; });
+  let attempts = 0;
+  q.configureWhatsAppQueue(async (_, payload) => {
+    attempts++;
+    if (payload.caption === 'Before') { start(); await gate; return {sentCount: 1}; }
+    throw new Error('Temporary disconnect');
+  });
+  const running = q.processDueWhatsAppJobs();
+  await started;
+  const added = await q.sendWithWhatsAppQueue('recipient-report', { caption: 'New report' }, 'branch-a');
+  finish();
+  await running;
+  const status = await q.getWhatsAppQueueStatus('branch-a');
+  assert.equal(status.counts.sent, 1);
+  assert.equal(status.counts.failed, 1);
+  const failed = status.jobs.find(item => item.id === added.job.id);
+  assert.equal(failed.lastError, 'Temporary disconnect');
+  assert.ok(new Date(failed.nextRetryAt).getTime() > Date.now());
+  assert.equal(attempts, 2);
+});

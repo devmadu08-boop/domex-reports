@@ -708,6 +708,7 @@ export function getSettings() {
     deliveredRiderDefaultCaptionTemplate: DEFAULT_DELIVERED_RIDER_TEMPLATE,
     deliveredRiderCaptionTemplates: {},
     deliveredExportAutoWhatsApp: false,
+    defaultGroupJids: [],
     convertDefaultGroupJids: [],
     rescheduleDefaultGroupJids: [],
     auditDefaultGroupJids: [],

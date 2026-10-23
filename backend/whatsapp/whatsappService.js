@@ -13,8 +13,9 @@ import QRCode from "qrcode";
 import { renderRescheduleReportImages } from "../reports/rescheduleReportRenderer.js";
 
 import { getRescheduleReadiness, shouldRunDailyTask } from "./schedule.js";
+import { createConfigStore, whatsappDataDir } from "./configStore.js";
 
-const dataDir = path.resolve("backend", "data");
+const dataDir = whatsappDataDir;
 const authDir = path.join(dataDir, "whatsapp-auth");
 const configPath = path.join(dataDir, "whatsapp-config.json");
 const DEFAULT_RESCHEDULE_APPROVAL_REACTION = "✅";
@@ -63,30 +64,9 @@ async function ensureDataDir() {
   await fs.mkdir(dataDir, { recursive: true });
 }
 
-async function readConfig() {
-  await ensureDataDir();
-  try {
-    const content = await fs.readFile(configPath, "utf8");
-    return normalizeConfig(JSON.parse(content));
-  } catch {
-    return {
-      defaultGroupJid: "",
-      defaultGroupJids: [],
-      convertDefaultGroupJid: "",
-      convertDefaultGroupJids: [],
-      rescheduleDefaultGroupJid: "",
-      rescheduleDefaultGroupJids: [],
-      auditDefaultGroupJid: "",
-      auditDefaultGroupJids: [],
-    };
-  }
-}
-
-async function writeConfig(config) {
-  await ensureDataDir();
-  await fs.writeFile(configPath, JSON.stringify(config, null, 2));
-  return config;
-}
+const configStore = createConfigStore(configPath, normalizeConfig);
+const readConfig = configStore.read;
+const updateConfig = configStore.update;
 
 function buildBackupFileName(date = new Date()) {
   const stamp = new Intl.DateTimeFormat("en-CA", {
@@ -484,33 +464,31 @@ export async function fetchPrimaryWhatsAppGroupMetadata(groupJid) {
 export async function saveDefaultGroupJids(groupJids) {
   const nextGroupJids = normalizeGroupJids(groupJids);
   if (!nextGroupJids.length) throw new Error("At least one group JID is required.");
-  return writeConfig(normalizeConfig({ ...(await readConfig()), defaultGroupJid: nextGroupJids[0], defaultGroupJids: nextGroupJids }));
+  return updateConfig({ defaultGroupJid: nextGroupJids[0], defaultGroupJids: nextGroupJids });
 }
 
 export async function saveConvertDefaultGroupJids(groupJids) {
   const nextGroupJids = normalizeGroupJids(groupJids);
   if (!nextGroupJids.length) throw new Error("At least one Delivered Report group JID is required.");
-  return writeConfig(normalizeConfig({ ...(await readConfig()), convertDefaultGroupJid: nextGroupJids[0], convertDefaultGroupJids: nextGroupJids }));
+  return updateConfig({ convertDefaultGroupJid: nextGroupJids[0], convertDefaultGroupJids: nextGroupJids });
 }
 
 export async function saveRescheduleDefaultGroupJids(groupJids) {
   const nextGroupJids = normalizeGroupJids(groupJids);
   if (!nextGroupJids.length) throw new Error("At least one Reschedule Report group JID is required.");
-  return writeConfig(normalizeConfig({
-    ...(await readConfig()),
+  return updateConfig({
     rescheduleDefaultGroupJid: nextGroupJids[0],
     rescheduleDefaultGroupJids: nextGroupJids,
-  }));
+  });
 }
 
 export async function saveAuditDefaultGroupJids(groupJids) {
   const nextGroupJids = normalizeGroupJids(groupJids);
   if (!nextGroupJids.length) throw new Error("At least one Audit Report group JID is required.");
-  return writeConfig(normalizeConfig({
-    ...(await readConfig()),
+  return updateConfig({
     auditDefaultGroupJid: nextGroupJids[0],
     auditDefaultGroupJids: nextGroupJids,
-  }));
+  });
 }
 
 function getReportImageBuffers({ imageDataUrl, imageDataUrls }) {
@@ -930,14 +908,11 @@ export async function deleteMessage({ phoneNumber, messageKeys, messageKey }) {
 }
 
 export async function saveBackupConfig({ phoneNumber, snapshot, approvalReaction }) {
-  const config = await readConfig();
-  const nextConfig = normalizeConfig({
-    ...config,
+  const nextConfig = await updateConfig((config) => ({
     backupWhatsappNumber: String(phoneNumber || config.backupWhatsappNumber || "").trim(),
     rescheduleApprovalReaction: approvalReaction || snapshot?.settings?.rescheduleApprovalReaction || config.rescheduleApprovalReaction,
     latestBackupSnapshot: snapshot || config.latestBackupSnapshot || null,
-  });
-  await writeConfig(nextConfig);
+  }));
   return {
     ok: true,
     backupWhatsappNumber: nextConfig.backupWhatsappNumber,
@@ -948,14 +923,11 @@ export async function saveBackupConfig({ phoneNumber, snapshot, approvalReaction
 }
 
 export async function saveLatestBackupSnapshot({ snapshot, phoneNumber, approvalReaction }) {
-  const config = await readConfig();
-  const nextConfig = normalizeConfig({
-    ...config,
+  const nextConfig = await updateConfig((config) => ({
     backupWhatsappNumber: String(phoneNumber || config.backupWhatsappNumber || "").trim(),
     rescheduleApprovalReaction: approvalReaction || snapshot?.settings?.rescheduleApprovalReaction || config.rescheduleApprovalReaction,
     latestBackupSnapshot: snapshot || config.latestBackupSnapshot || null,
-  });
-  await writeConfig(nextConfig);
+  }));
   return {
     ok: true,
     backupWhatsappNumber: nextConfig.backupWhatsappNumber,
@@ -999,7 +971,7 @@ export async function sendBackupToWhatsApp({ force = false } = {}) {
     caption: `Daily Courier Report System backup\nDate: ${clock.date}\nTime: 08:00\nReports: Courier Performance, Operation, Delivered Collection`,
   });
 
-  await writeConfig(normalizeConfig({ ...config, lastDailyBackupDate: clock.date }));
+  await updateConfig({ lastDailyBackupDate: clock.date });
   return { ok: true, sentAt: new Date().toISOString(), fileName, recipientJid };
 }
 
@@ -1087,7 +1059,6 @@ async function createRescheduleApprovalRequest({ force = false } = {}) {
     `${groupCaption}\n\n🔐 *Approval required*\nCheck the report and react with ${approvalReaction} to send it to ${groupJids.length} assigned group${groupJids.length === 1 ? "" : "s"}.\n\nOnly the ${approvalReaction} reaction confirms this report.`,
   );
 
-  const latestConfig = await readConfig();
   const requestMessageIds = approvalReportMessage.messageKeys
     .map((key) => key?.id || "")
     .filter(Boolean);
@@ -1097,11 +1068,10 @@ async function createRescheduleApprovalRequest({ force = false } = {}) {
     requestMessageId: approvalReportMessage.primaryKey?.id || requestMessageIds[0] || "",
     requestMessageIds,
   };
-  await writeConfig(normalizeConfig({
-    ...latestConfig,
+  await updateConfig({
     lastRescheduleApprovalDate: clock.date,
     pendingRescheduleApproval: finalApproval,
-  }));
+  });
 
   return {
     ok: true,
@@ -1158,7 +1128,7 @@ async function confirmPendingRescheduleReport(buttonId, responseJid) {
 
   rescheduleApprovalSending = true;
   const sendingApproval = { ...pending, status: "sending", sendingAt: new Date().toISOString(), lastError: "" };
-  await writeConfig(normalizeConfig({ ...config, pendingRescheduleApproval: sendingApproval }));
+  await updateConfig({ pendingRescheduleApproval: sendingApproval });
 
   try {
     const imageBuffers = await Promise.all(pending.imagePaths.map((imagePath) => fs.readFile(imagePath)));
@@ -1181,10 +1151,9 @@ async function confirmPendingRescheduleReport(buttonId, responseJid) {
       confirmedAt: new Date().toISOString(),
       sentGroupCount: groupJids.length,
     };
-    await writeConfig(normalizeConfig({
-      ...(await readConfig()),
+    await updateConfig({
       pendingRescheduleApproval: sentApproval,
-    }));
+    });
     await socket.sendMessage(responseJid || pending.recipientJid, {
       text: `✅ *Send confirmed*\n${pending.date} Reschedule Report was sent successfully to ${groupJids.length} assigned group${groupJids.length === 1 ? "" : "s"}.`,
     });
@@ -1194,10 +1163,9 @@ async function confirmPendingRescheduleReport(buttonId, responseJid) {
       status: "pending",
       lastError: error.message || "Group send failed.",
     };
-    await writeConfig(normalizeConfig({
-      ...(await readConfig()),
+    await updateConfig({
       pendingRescheduleApproval: failedApproval,
-    }));
+    });
     await socket.sendMessage(responseJid || pending.recipientJid, {
       text: `❌ Reschedule Report group send failed.\n${failedApproval.lastError}\n\nReact with ${pending.approvalReaction || DEFAULT_RESCHEDULE_APPROVAL_REACTION} again to retry.`,
     });

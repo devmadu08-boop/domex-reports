@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { whatsappDataDir } from "./configStore.js";
 
-const queuePath = path.resolve(process.env.WHATSAPP_QUEUE_PATH || "backend/data/whatsapp-send-queue.json");
+const queuePath = path.resolve(process.env.WHATSAPP_QUEUE_PATH || path.join(whatsappDataDir, "whatsapp-send-queue.json"));
 const MAX_HISTORY = 100;
 const RETRY_DELAYS = [30_000, 120_000, 300_000, 900_000];
 
@@ -126,19 +127,23 @@ export async function processDueWhatsAppJobs() {
   if (processing || !processor) return;
   processing = true;
   try {
-    const queue = await readQueue();
-    const now = Date.now();
-    const dueJobs = queue
-      .filter((job) => {
-        if (job.status === "pending" || job.status === "failed") {
-          return new Date(job.nextRetryAt || 0).getTime() <= now;
-        }
-        return job.status === "sending" && now - new Date(job.updatedAt || 0).getTime() >= 300_000;
-      })
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-      .slice(0, 3);
-    for (const job of dueJobs) {
-      await processJob(job.id);
+    // Drain newly queued reports too: enqueue can happen while a previous send is in flight.
+    // A fixed batch left these waiting for the next 15-second worker tick.
+    while (true) {
+      const queue = await withQueueLock(readQueue);
+      const now = Date.now();
+      const dueJobs = queue
+        .filter((job) => {
+          if (job.status === "pending" || job.status === "failed") {
+            return new Date(job.nextRetryAt || 0).getTime() <= now;
+          }
+          return job.status === "sending" && now - new Date(job.updatedAt || 0).getTime() >= 300_000;
+        })
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      if (!dueJobs.length) break;
+      for (const job of dueJobs) {
+        await processJob(job.id);
+      }
     }
   } finally {
     processing = false;

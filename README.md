@@ -54,6 +54,8 @@ Then open Settings in the app:
 
 WhatsApp auth/session files are stored in `backend/data/` and are ignored by Git.
 
+Report group selections are saved separately for each WhatsApp account and report type. Settings updates are serialized and written atomically, with a `.bak` recovery copy, so background backup sync and scheduled sends preserve the saved groups. The default data folder is resolved relative to the backend source, even when the server starts from another working directory. Set `WHATSAPP_DATA_DIR` to use a different persistent data folder; `WHATSAPP_QUEUE_PATH` can override the queue file separately.
+
 ### Rider Meter Photo Monitor
 
 Settings includes a selectable WhatsApp connection for daily rider meter-photo checks. It can share the already connected Primary Report WhatsApp account or use an independent monitor account without replacing or logging out the primary session.

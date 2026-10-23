@@ -14,6 +14,7 @@ import * as primary from "./whatsappService.js";
 import { renderRescheduleReportImages } from "../reports/rescheduleReportRenderer.js";
 
 import { getRescheduleReadiness, shouldRunDailyTask } from "./schedule.js";
+import { createConfigStore, whatsappDataDir } from "./configStore.js";
 
 export const PRIMARY_WHATSAPP_ACCOUNT = "default";
 export const accountMessageListeners = new Set();
@@ -34,7 +35,7 @@ primary.subscribeToPrimaryWhatsAppMessages(({ messages, updates, type }) => {
   }
 });
 
-const accountsDir = path.resolve("backend", "data", "whatsapp-accounts");
+const accountsDir = path.join(whatsappDataDir, "whatsapp-accounts");
 const runtimes = new Map();
 
 export function normalizeWhatsAppAccountKey(value) {
@@ -105,19 +106,16 @@ function normalizeConfig(config = {}) {
   return next;
 }
 
-async function readConfig(runtime) {
-  try {
-    return normalizeConfig(JSON.parse(await fs.readFile(runtime.configPath, "utf8")));
-  } catch {
-    return normalizeConfig();
-  }
+function configStore(runtime) {
+  return createConfigStore(runtime.configPath, normalizeConfig);
 }
 
-async function writeConfig(runtime, config) {
-  await fs.mkdir(runtime.rootDir, { recursive: true });
-  const normalized = normalizeConfig(config);
-  await fs.writeFile(runtime.configPath, JSON.stringify(normalized, null, 2));
-  return normalized;
+function readConfig(runtime) {
+  return configStore(runtime).read();
+}
+
+function updateConfig(runtime, patch) {
+  return configStore(runtime).update(patch);
 }
 
 function normalizePhone(jid) {
@@ -422,7 +420,7 @@ export async function saveAccountGroups(accountKey, type, groupJids) {
   const runtime = getRuntime(accountKey);
   const field = configFieldByType[type] || configFieldByType.default;
   const singular = field.replace(/s$/, "");
-  return writeConfig(runtime, { ...(await readConfig(runtime)), [field]: values, [singular]: values[0] });
+  return updateConfig(runtime, { [field]: values, [singular]: values[0] });
 }
 
 export async function sendAccountGroupReport(accountKey, type, payload) {
@@ -640,8 +638,7 @@ export async function deleteAccountMessage(accountKey, { phoneNumber, messageKey
 export async function saveAccountBackupConfig(accountKey, { phoneNumber, snapshot, approvalReaction }) {
   if (isPrimary(accountKey)) return primary.saveBackupConfig({ phoneNumber, snapshot, approvalReaction });
   const runtime = getRuntime(accountKey);
-  const config = await writeConfig(runtime, {
-    ...(await readConfig(runtime)),
+  const config = await updateConfig(runtime, {
     backupWhatsappNumber: String(phoneNumber || "").trim(),
     latestBackupSnapshot: snapshot || null,
     rescheduleApprovalReaction: approvalReaction || "✅",
@@ -652,12 +649,12 @@ export async function saveAccountBackupConfig(accountKey, { phoneNumber, snapsho
 export async function saveAccountBackupSnapshot(accountKey, payload) {
   if (isPrimary(accountKey)) return primary.saveLatestBackupSnapshot(payload);
   const runtime = getRuntime(accountKey);
-  const previous = await readConfig(runtime);
-  return saveAccountBackupConfig(runtime.key, {
-    phoneNumber: payload.phoneNumber || previous.backupWhatsappNumber,
-    snapshot: payload.snapshot || previous.latestBackupSnapshot,
-    approvalReaction: payload.approvalReaction || previous.rescheduleApprovalReaction,
-  });
+  const config = await updateConfig(runtime, (previous) => ({
+    backupWhatsappNumber: payload.phoneNumber || previous.backupWhatsappNumber,
+    latestBackupSnapshot: payload.snapshot || previous.latestBackupSnapshot,
+    rescheduleApprovalReaction: payload.approvalReaction || previous.rescheduleApprovalReaction,
+  }));
+  return { ok: true, backupWhatsappNumber: config.backupWhatsappNumber, hasBackupSnapshot: Boolean(config.latestBackupSnapshot) };
 }
 
 export async function sendAccountBackup(accountKey, { force = false } = {}) {
@@ -676,7 +673,7 @@ export async function sendAccountBackup(accountKey, { force = false } = {}) {
     fileName,
     caption: `Daily Courier Report System backup\nAccount: ${runtime.key}\nDate: ${date}`,
   });
-  await writeConfig(runtime, { ...(await readConfig(runtime)), lastDailyBackupDate: date });
+  await updateConfig(runtime, { lastDailyBackupDate: date });
   return { ok: true, fileName, recipientJid, sentAt: new Date().toISOString() };
 }
 
@@ -722,7 +719,7 @@ async function createAccountRescheduleApproval(accountKey, { force = false } = {
     groupCaption, reaction, requestMessageIds, rowCount: rows.length, pageCount: imagePaths.length,
     requestedAt: new Date().toISOString(),
   };
-  await writeConfig(runtime, { ...(await readConfig(runtime)), lastRescheduleApprovalDate: date, pendingRescheduleApproval: pending });
+  await updateConfig(runtime, { lastRescheduleApprovalDate: date, pendingRescheduleApproval: pending });
   return { ok: true, sentDate: date, rowCount: rows.length, pageCount: imagePaths.length, groupCount: groupJids.length };
 }
 
@@ -743,8 +740,7 @@ async function handleAccountApprovalReaction(accountKey, { key, reaction }) {
     const groupJids = normalizeGroupJids(latest.rescheduleDefaultGroupJids?.length
       ? latest.rescheduleDefaultGroupJids : pending.groupJids);
     for (const jid of groupJids) await sendImages(socket, jid, buffers, pending.groupCaption);
-    await writeConfig(runtime, {
-      ...latest,
+    await updateConfig(runtime, {
       pendingRescheduleApproval: { ...pending, status: "sent", confirmedAt: new Date().toISOString(), sentGroupCount: groupJids.length },
     });
     await socket.sendMessage(pending.recipientJid, { text: `✅ ${pending.date} Reschedule Report sent to ${groupJids.length} assigned group${groupJids.length === 1 ? "" : "s"}.` });

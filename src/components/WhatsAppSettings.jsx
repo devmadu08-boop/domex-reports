@@ -56,7 +56,7 @@ export default function WhatsAppSettings({ settings, onSaveSettings, accountLabe
   const [status, setStatus] = useState(null);
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [groups, setGroups] = useState([]);
-  const [selectedGroups, setSelectedGroups] = useState([]);
+  const [selectedGroups, setSelectedGroups] = useState(settings.defaultGroupJids || []);
   const [selectedConvertGroups, setSelectedConvertGroups] = useState(settings.convertDefaultGroupJids || []);
   const [selectedRescheduleGroups, setSelectedRescheduleGroups] = useState(settings.rescheduleDefaultGroupJids || []);
   const [selectedAuditGroups, setSelectedAuditGroups] = useState(settings.auditDefaultGroupJids || []);
@@ -196,6 +196,7 @@ export default function WhatsAppSettings({ settings, onSaveSettings, accountLabe
   async function handleSaveGroup() {
     await runAction(async () => {
       await saveDefaultWhatsAppGroup(selectedGroups);
+      await onSaveSettings({ ...settings, defaultGroupJids: selectedGroups });
     }, "Default WhatsApp groups saved.");
   }
 
