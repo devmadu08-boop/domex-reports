@@ -10,6 +10,8 @@ vite-dev.err.log
 .env.local
 .env.*.local
 
+/ubuntukey.pem
+
 backend/data/
 
 tmp/export-layout-artifacts/
