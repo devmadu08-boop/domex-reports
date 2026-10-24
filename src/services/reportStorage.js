@@ -709,6 +709,7 @@ export function getSettings() {
     deliveredRiderCaptionTemplates: {},
     deliveredExportAutoWhatsApp: false,
     defaultGroupJids: [],
+    courierAutoSendEnabled: true,
     convertDefaultGroupJids: [],
     rescheduleDefaultGroupJids: [],
     auditDefaultGroupJids: [],

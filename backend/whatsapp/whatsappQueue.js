@@ -282,7 +282,7 @@ function sanitizeJob(job) {
     sentAt: job.sentAt || "",
     nextRetryAt: job.nextRetryAt || "",
     lastError: job.lastError || "",
-    preview: String(job.payload?.caption || job.payload?.message || "Automated " + job.type).slice(0, 180),
+    preview: String(job.payload?.caption || job.payload?.message || (job.type === "courier-summary" ? `Modern Courier Summary · ${job.payload?.date || ""}` : "Automated " + job.type)).slice(0, 180),
     phoneNumber: job.payload?.phoneNumber || "",
   };
 }

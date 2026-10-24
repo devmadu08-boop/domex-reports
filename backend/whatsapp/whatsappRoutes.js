@@ -16,6 +16,9 @@ import {
   sendAccountRecipientText,
   sendAccountRescheduleApproval,
   requestAccountPairingCode,
+  getAccountCourierAutomationStatus,
+  sendAccountCourierSummary,
+  previewAccountCourierSummary,
 } from "./accountWhatsappService.js";
 import {
   clearWhatsAppQueue,
@@ -47,6 +50,7 @@ configureWhatsAppQueue(async (type, payload) => {
   if (type === "audit-report") return sendAccountGroupReport(key, "audit", payload);
   if (type === "recipient-report") return sendAccountRecipientReport(key, payload);
   if (type === "recipient-text") return sendAccountRecipientText(key, payload);
+  if (type === "courier-summary") return sendAccountCourierSummary(key, payload);
   if (type === "backup-now") return sendAccountBackup(key, { force: true });
   if (type === "reschedule-approval") return sendAccountRescheduleApproval(key, { force: true });
   throw new Error(`Unsupported WhatsApp queue job: ${type}`);
@@ -88,6 +92,20 @@ router.post("/logout", async (request, response) => {
 
 router.get("/groups", async (request, response) => {
   try { response.json({ groups: await fetchAccountGroups(accountKey(request)) }); } catch (error) { sendError(response, error); }
+});
+
+router.get("/courier-automation", async (request, response) => {
+  try { response.json(await getAccountCourierAutomationStatus(accountKey(request))); } catch (error) { sendError(response, error); }
+});
+router.get("/courier-summary-preview", async (request, response) => {
+  try { response.json(await previewAccountCourierSummary(accountKey(request), request.query.date)); } catch (error) { sendError(response, error); }
+});
+router.post("/send-courier-summary", async (request, response) => {
+  try {
+    const date = request.body?.date;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date))) return response.status(400).json({ error: "Choose a valid courier report date." });
+    response.json(await sendWithWhatsAppQueue("courier-summary", { date }, accountKey(request)));
+  } catch (error) { sendError(response, error); }
 });
 
 router.post("/default-group", async (request, response) => {

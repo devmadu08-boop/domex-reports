@@ -55,7 +55,7 @@ export async function renderRescheduleReportImages({ rows, reportDate, branchNam
   }
 }
 
-async function findBrowserExecutable() {
+export async function findBrowserExecutable() {
   const candidates = [
     process.env.DOMEX_BROWSER_PATH,
     process.env.CHROME_EXECUTABLE_PATH,
@@ -82,7 +82,7 @@ async function findBrowserExecutable() {
       // Try the next installed browser.
     }
   }
-  throw new Error("Chrome or Chromium was not found for the scheduled Reschedule Report.");
+  throw new Error("Chrome or Chromium was not found for server-rendered reports. Set DOMEX_BROWSER_PATH to an installed browser.");
 }
 
 async function imageFileToDataUrl(filePath) {

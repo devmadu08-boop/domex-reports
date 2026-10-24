@@ -10,7 +10,7 @@ import {
   startMeterMonitorScheduler,
 } from "./whatsapp/meterMonitorService.js";
 import whatsappRoutes from "./whatsapp/whatsappRoutes.js";
-import { startAccountBackupScheduler, startSavedAccountClients } from "./whatsapp/accountWhatsappService.js";
+import { startAccountBackupScheduler, startSavedAccountClients, startCourierReportScheduler } from "./whatsapp/accountWhatsappService.js";
 import { getWhatsAppStatus, startDailyBackupScheduler, startWhatsAppClient } from "./whatsapp/whatsappService.js";
 import { getWhatsAppQueueStatus, startWhatsAppQueueWorker } from "./whatsapp/whatsappQueue.js";
 import { startRegionalDispatchAutomation } from "./domex/regionalDispatchAutomationService.js";
@@ -102,6 +102,7 @@ startMeterMonitorClient().catch((error) => {
 });
 startDailyBackupScheduler();
 startAccountBackupScheduler();
+startCourierReportScheduler();
 startMeterMonitorScheduler();
 startWhatsAppQueueWorker();
 startRegionalDispatchAutomation();

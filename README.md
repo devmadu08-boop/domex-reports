@@ -56,6 +56,18 @@ WhatsApp auth/session files are stored in `backend/data/` and are ignored by Git
 
 Report group selections are saved separately for each WhatsApp account and report type. Settings updates are serialized and written atomically, with a `.bak` recovery copy, so background backup sync and scheduled sends preserve the saved groups. The default data folder is resolved relative to the backend source, even when the server starts from another working directory. Set `WHATSAPP_DATA_DIR` to use a different persistent data folder; `WHATSAPP_QUEUE_PATH` can override the queue file separately.
 
+### Automatic Courier Performance Summary
+
+The Reports page includes an **8 PM Courier Summary** with the modern DOMEX dashboard layout. Auto-send is enabled by default and uses that login's saved default WhatsApp groups.
+
+- Courier rows are saved when added, edited or deleted. The browser syncs saved data to the backend even when no Backup WhatsApp Number is configured.
+- Before 20:00 Asia/Colombo time, the summary sends as soon as every saved courier has complete On Route, Delivery, Resend and Pickup counts, with at least four distinct couriers. Explicit zero counts are valid; blank counts and duplicate names do not qualify for early sending.
+- At 20:00, the server sends the current day's available saved rows. It skips an empty day. The server checks every 15 seconds and immediately after a snapshot or default-group save; it continues when the browser is closed using the last synced data.
+- An automatic summary sends once per date. Delivery progress is persisted per group, so an interrupted send retries remaining groups that day. Yesterday's automatic report is never carried into the next day.
+- **Preview modern report** and **Send modern report now** use the selected report date, including historical dates. Manual modern sends do not consume the automatic send. Existing Courier Performance **Report Actions → WhatsApp**, PNG and PDF exports keep their original layout.
+
+Chrome/Chromium must be installed on the backend host (the existing `DOMEX_BROWSER_PATH` override is supported). The panel shows connection, group setup, completion and delivery errors. Turning off **Auto-send enabled** disables automatic courier summaries for that login's current branch settings.
+
 ### Rider Meter Photo Monitor
 
 Settings includes a selectable WhatsApp connection for daily rider meter-photo checks. It can share the already connected Primary Report WhatsApp account or use an independent monitor account without replacing or logging out the primary session.

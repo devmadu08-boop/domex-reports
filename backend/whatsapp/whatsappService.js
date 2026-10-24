@@ -14,6 +14,8 @@ import { renderRescheduleReportImages } from "../reports/rescheduleReportRendere
 
 import { getRescheduleReadiness, shouldRunDailyTask } from "./schedule.js";
 import { createConfigStore, whatsappDataDir } from "./configStore.js";
+import { createCourierAutomation } from "./courierAutomation.js";
+import { renderCourierSummaryImage } from "../reports/courierSummaryRenderer.js";
 
 const dataDir = whatsappDataDir;
 const authDir = path.join(dataDir, "whatsapp-auth");
@@ -67,6 +69,17 @@ async function ensureDataDir() {
 const configStore = createConfigStore(configPath, normalizeConfig);
 const readConfig = configStore.read;
 const updateConfig = configStore.update;
+const courierAutomation = createCourierAutomation({ readConfig, updateConfig,
+  connected: () => Boolean(socket && connectionState === "connected"),
+  sendImages: (jid, images, caption) => sendReportImages(jid, images, caption), render: renderCourierSummaryImage });
+
+export const getPrimaryCourierAutomationStatus = () => courierAutomation.status();
+export const sendPrimaryCourierSummary = (payload) => courierAutomation.manual(payload);
+export const previewPrimaryCourierSummary = (date) => courierAutomation.preview(date);
+export const runPrimaryCourierAutomation = () => courierAutomation.run();
+function notifyCourierAutomation() {
+  setImmediate(() => courierAutomation.run().catch((error) => console.error("[courier-auto:default]", error.message)));
+}
 
 function buildBackupFileName(date = new Date()) {
   const stamp = new Intl.DateTimeFormat("en-CA", {
@@ -464,7 +477,9 @@ export async function fetchPrimaryWhatsAppGroupMetadata(groupJid) {
 export async function saveDefaultGroupJids(groupJids) {
   const nextGroupJids = normalizeGroupJids(groupJids);
   if (!nextGroupJids.length) throw new Error("At least one group JID is required.");
-  return updateConfig({ defaultGroupJid: nextGroupJids[0], defaultGroupJids: nextGroupJids });
+  const config = await updateConfig({ defaultGroupJid: nextGroupJids[0], defaultGroupJids: nextGroupJids });
+  notifyCourierAutomation();
+  return config;
 }
 
 export async function saveConvertDefaultGroupJids(groupJids) {
@@ -913,6 +928,7 @@ export async function saveBackupConfig({ phoneNumber, snapshot, approvalReaction
     rescheduleApprovalReaction: approvalReaction || snapshot?.settings?.rescheduleApprovalReaction || config.rescheduleApprovalReaction,
     latestBackupSnapshot: snapshot || config.latestBackupSnapshot || null,
   }));
+  notifyCourierAutomation();
   return {
     ok: true,
     backupWhatsappNumber: nextConfig.backupWhatsappNumber,
@@ -928,6 +944,7 @@ export async function saveLatestBackupSnapshot({ snapshot, phoneNumber, approval
     rescheduleApprovalReaction: approvalReaction || snapshot?.settings?.rescheduleApprovalReaction || config.rescheduleApprovalReaction,
     latestBackupSnapshot: snapshot || config.latestBackupSnapshot || null,
   }));
+  notifyCourierAutomation();
   return {
     ok: true,
     backupWhatsappNumber: nextConfig.backupWhatsappNumber,

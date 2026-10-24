@@ -15,6 +15,8 @@ import { renderRescheduleReportImages } from "../reports/rescheduleReportRendere
 
 import { getRescheduleReadiness, shouldRunDailyTask } from "./schedule.js";
 import { createConfigStore, whatsappDataDir } from "./configStore.js";
+import { createCourierAutomation } from "./courierAutomation.js";
+import { renderCourierSummaryImage } from "../reports/courierSummaryRenderer.js";
 
 export const PRIMARY_WHATSAPP_ACCOUNT = "default";
 export const accountMessageListeners = new Set();
@@ -37,6 +39,50 @@ primary.subscribeToPrimaryWhatsAppMessages(({ messages, updates, type }) => {
 
 const accountsDir = path.join(whatsappDataDir, "whatsapp-accounts");
 const runtimes = new Map();
+const courierAutomations = new Map();
+
+function getCourierAutomation(accountKey) {
+  const runtime = getRuntime(accountKey);
+  if (!courierAutomations.has(runtime.key)) {
+    courierAutomations.set(runtime.key, createCourierAutomation({
+      readConfig: () => readConfig(runtime), updateConfig: (patch) => updateConfig(runtime, patch),
+      connected: () => Boolean(runtime.socket && runtime.status === "connected"),
+      sendImages: async (jid, images, caption) => sendImages(await ensureConnected(runtime), jid, images, caption),
+      render: renderCourierSummaryImage,
+    }));
+  }
+  return courierAutomations.get(runtime.key);
+}
+function notifyCourierAutomation(accountKey) {
+  setImmediate(() => getCourierAutomation(accountKey).run().catch((error) => console.error(`[courier-auto:${accountKey}]`, error.message)));
+}
+export function getAccountCourierAutomationStatus(accountKey) {
+  return isPrimary(accountKey) ? primary.getPrimaryCourierAutomationStatus() : getCourierAutomation(accountKey).status();
+}
+export function sendAccountCourierSummary(accountKey, payload) {
+  return isPrimary(accountKey) ? primary.sendPrimaryCourierSummary(payload) : getCourierAutomation(accountKey).manual(payload);
+}
+export function previewAccountCourierSummary(accountKey, date) {
+  return isPrimary(accountKey) ? primary.previewPrimaryCourierSummary(date) : getCourierAutomation(accountKey).preview(date);
+}
+let courierSchedulerStarted = false;
+let courierSchedulerRunning = false;
+export function startCourierReportScheduler() {
+  if (courierSchedulerStarted) return;
+  courierSchedulerStarted = true;
+  const tick = async () => {
+    if (courierSchedulerRunning) return;
+    courierSchedulerRunning = true;
+    try {
+      const keys = await listAccountKeys();
+      const tasks = [primary.runPrimaryCourierAutomation(), ...keys.map((key) => getCourierAutomation(key).run())];
+      const results = await Promise.allSettled(tasks);
+      for (const result of results) if (result.status === "rejected") console.error("[courier-auto-scheduler]", result.reason?.message);
+    } finally { courierSchedulerRunning = false; }
+  };
+  tick().catch(console.error);
+  setInterval(() => tick().catch(console.error), 15000);
+}
 
 export function normalizeWhatsAppAccountKey(value) {
   const clean = String(value || PRIMARY_WHATSAPP_ACCOUNT).trim().toLowerCase();
@@ -420,7 +466,9 @@ export async function saveAccountGroups(accountKey, type, groupJids) {
   const runtime = getRuntime(accountKey);
   const field = configFieldByType[type] || configFieldByType.default;
   const singular = field.replace(/s$/, "");
-  return updateConfig(runtime, { [field]: values, [singular]: values[0] });
+  const config = await updateConfig(runtime, { [field]: values, [singular]: values[0] });
+  if (type === "default") notifyCourierAutomation(runtime.key);
+  return config;
 }
 
 export async function sendAccountGroupReport(accountKey, type, payload) {
@@ -643,6 +691,7 @@ export async function saveAccountBackupConfig(accountKey, { phoneNumber, snapsho
     latestBackupSnapshot: snapshot || null,
     rescheduleApprovalReaction: approvalReaction || "✅",
   });
+  notifyCourierAutomation(runtime.key);
   return { ok: true, backupWhatsappNumber: config.backupWhatsappNumber, hasBackupSnapshot: Boolean(config.latestBackupSnapshot) };
 }
 
@@ -654,6 +703,7 @@ export async function saveAccountBackupSnapshot(accountKey, payload) {
     latestBackupSnapshot: payload.snapshot || previous.latestBackupSnapshot,
     rescheduleApprovalReaction: payload.approvalReaction || previous.rescheduleApprovalReaction,
   }));
+  notifyCourierAutomation(runtime.key);
   return { ok: true, backupWhatsappNumber: config.backupWhatsappNumber, hasBackupSnapshot: Boolean(config.latestBackupSnapshot) };
 }
 

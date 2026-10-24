@@ -222,18 +222,30 @@ export function sendTextToWhatsAppRecipient({ phoneNumber, message }) {
   });
 }
 
-export function saveWhatsAppBackupConfig({ phoneNumber, snapshot, approvalReaction }) {
+export function saveWhatsAppBackupConfig({ phoneNumber, snapshot, approvalReaction, accountKey }) {
   return requestJson("/backup-config", {
     method: "POST",
+    headers: accountKey ? { "X-WhatsApp-Account": accountKey } : {},
     body: JSON.stringify({ phoneNumber, snapshot, approvalReaction }),
   });
 }
 
-export function syncWhatsAppBackupSnapshot({ phoneNumber, snapshot, approvalReaction }) {
+export function syncWhatsAppBackupSnapshot({ phoneNumber, snapshot, approvalReaction, accountKey }) {
   return requestJson("/backup-snapshot", {
     method: "POST",
+    headers: accountKey ? { "X-WhatsApp-Account": accountKey } : {},
     body: JSON.stringify({ phoneNumber, snapshot, approvalReaction }),
   });
+}
+
+export function getCourierAutomationStatus(accountKey) {
+  return requestJson("/courier-automation", { headers: accountKey ? { "X-WhatsApp-Account": accountKey } : {} });
+}
+export function previewCourierSummary(date, accountKey) {
+  return requestJson(`/courier-summary-preview?date=${encodeURIComponent(date)}`, { headers: accountKey ? { "X-WhatsApp-Account": accountKey } : {} });
+}
+export function sendCourierSummary(date, accountKey) {
+  return requestJson("/send-courier-summary", { method: "POST", headers: accountKey ? { "X-WhatsApp-Account": accountKey } : {}, body: JSON.stringify({ date }) });
 }
 
 export function sendWhatsAppBackupNow() {

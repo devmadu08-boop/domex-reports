@@ -35,6 +35,7 @@ import RescheduleReport from "./components/RescheduleReport.jsx";
 import PettyCashManagement from "./components/PettyCashManagement.jsx";
 import AuditReport from "./components/AuditReport.jsx";
 import ExportButtons from "./components/ExportButtons.jsx";
+import CourierAutomationPanel from "./components/CourierAutomationPanel.jsx";
 import AllInOneReports from "./components/AllInOneReports.jsx";
 import OperationReportForm, { emptyOperationForm } from "./components/OperationReportForm.jsx";
 import { CourierPerformanceReport, OperationReport } from "./components/ReportTable.jsx";
@@ -120,6 +121,7 @@ import {
 } from "./permissions.js";
 import {
   getWhatsAppQueue,
+  getWhatsAppAccountKey,
   getBackendHealth,
   getSystemHealth,
   retryFailedWhatsAppQueue,
@@ -501,7 +503,7 @@ export default function App() {
       window.removeEventListener("online", scheduleBackupSync);
       unsubscribe();
     };
-  }, [session?.branchName, settings.backupWhatsappNumber, settings.rescheduleApprovalReaction]);
+  }, [session?.branchName, session?.userId, session?.role, firebaseBootstrapped, settings.backupWhatsappNumber, settings.rescheduleApprovalReaction]);
 
   useEffect(() => {
     if (!session?.branchName || !firebaseAuthReady) return undefined;
@@ -888,20 +890,22 @@ export default function App() {
       : [...courierRows, normalized];
 
     setCourierRows(nextRows);
-    unsavedDraftUpdatedAtRef.current = new Date().toISOString();
+    saveReportType(selectedDate, "courierRows", nextRows);
+    unsavedDraftUpdatedAtRef.current = "";
     setCourierForm(emptyCourierForm);
     setEditingCourierId(null);
     setCourierNames(saveCourierName(normalized.courierName));
-    showNotice(editingCourierId ? "Courier row updated successfully." : "Courier row added successfully.");
+    refreshHistory();
+    showNotice(editingCourierId ? "Courier row updated and saved." : "Courier row added and saved.");
   }
 
   function handleCourierEdit(row) {
     setCourierForm({
       courierName: row.courierName || "",
-      onRouteCount: row.onRouteCount || "",
-      deliveryCount: row.deliveryCount || "",
-      resendCount: row.resendCount || "",
-      pickupCount: row.pickupCount || "",
+      onRouteCount: row.onRouteCount ?? "",
+      deliveryCount: row.deliveryCount ?? "",
+      resendCount: row.resendCount ?? "",
+      pickupCount: row.pickupCount ?? "",
     });
     setEditingCourierId(row.id);
     setActiveTab("courier");
@@ -910,8 +914,10 @@ export default function App() {
   function handleCourierDelete(id) {
     if (!confirm("Delete this courier row?")) return;
     const nextRows = courierRows.filter((row) => row.id !== id);
-    unsavedDraftUpdatedAtRef.current = new Date().toISOString();
+    saveReportType(selectedDate, "courierRows", nextRows);
+    unsavedDraftUpdatedAtRef.current = "";
     setCourierRows(nextRows);
+    refreshHistory();
     showNotice("Courier row deleted.");
   }
 
@@ -970,11 +976,13 @@ export default function App() {
   }
 
   async function handleSaveAppSettings(nextSettings) {
+    const accountKey = getWhatsAppAccountKey(session);
     const savedSettings = saveSettings(nextSettings);
     setSettingsState(savedSettings);
     setStableTarget(savedSettings.operationTarget || "");
     setOperationForm((current) => ({ ...current, target: savedSettings.operationTarget || "" }));
     showNotice("Settings saved successfully.");
+    syncBackupConfigToBackend(savedSettings, accountKey);
 
     setCloudStatus("Saving settings to Firebase Realtime Database...");
     try {
@@ -990,7 +998,6 @@ export default function App() {
       setCloudStatus(error.message || "Settings Firebase sync failed.");
     }
 
-    syncBackupConfigToBackend(savedSettings);
   }
 
   async function handleThemeChange(themeId) {
@@ -1007,12 +1014,13 @@ export default function App() {
     }
   }
 
-  async function syncBackupConfigToBackend(savedSettings = getSettings()) {
+  async function syncBackupConfigToBackend(savedSettings = getSettings(), accountKey = getWhatsAppAccountKey(session)) {
     try {
       await saveWhatsAppBackupConfig({
         phoneNumber: savedSettings.backupWhatsappNumber,
         snapshot: createBackupData(),
         approvalReaction: savedSettings.rescheduleApprovalReaction,
+        accountKey,
       });
     } catch {
       // WhatsApp backend may be offline on local/Vercel. The app still keeps the setting in Firebase/local storage.
@@ -1021,13 +1029,15 @@ export default function App() {
 
   async function syncBackupSnapshotToBackend() {
     const savedSettings = getSettings();
-    if (!savedSettings.backupWhatsappNumber) return;
-    if (!savedSettings.backupWhatsappNumber) return;
+    const snapshot = createBackupData();
+    if (!firebaseBootstrapped && !snapshot.localUpdatedAt) return;
+    if (!Object.keys(snapshot.reports || {}).length && !snapshot.localUpdatedAt) return;
     try {
       await syncWhatsAppBackupSnapshot({
         phoneNumber: savedSettings.backupWhatsappNumber,
-        snapshot: createBackupData(),
+        snapshot,
         approvalReaction: savedSettings.rescheduleApprovalReaction,
+        accountKey: getWhatsAppAccountKey(session),
       });
     } catch {
       // Background sync must stay quiet to avoid interrupting report entry.
@@ -1421,6 +1431,8 @@ export default function App() {
                 onBothPdf={() => runExport(() => exportBothAsPdf([courierReportRef.current, operationReportRef.current], selectedDate))}
               />
             </div>
+
+            <CourierAutomationPanel key={getWhatsAppAccountKey(session)} selectedDate={selectedDate} accountKey={getWhatsAppAccountKey(session)} settings={settings} onSaveSettings={handleSaveAppSettings} />
 
             <div className="grid gap-5 overflow-hidden xl:grid-cols-2">
               <div className="overflow-x-auto rounded-3xl border border-[#eadff2] bg-[#fff8f4] shadow-xl">
