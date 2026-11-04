@@ -193,6 +193,8 @@ User account metadata and pending Google approvals are stored under `reportSyste
 
 Firebase is configured in `src/services/firebase.js`.
 
+The Courier menu includes Meter & Fuel, backed by private VPS SQLite storage with separate branch accounts, optimistic revisions, daily database backups and administrator JSON backup/restore. Seed an empty database with `node backend/meter/importLegacy.js BACKUP_JSON DATABASE_DIRECTORY`; never place migration files in the public web directory. Existing report sync is unchanged. See [desktop/README.md](desktop/README.md) for the Windows application and installer build.
+
 To use Firebase Realtime Database sync:
 
 1. Open Firebase Console.

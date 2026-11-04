@@ -4,7 +4,7 @@ import ThemeSwitcher from "./ThemeSwitcher.jsx";
 
 const groups = [
   { label: "Dashboard", icon: Home, tabs: ["dashboard"] },
-  { label: "Courier", icon: Truck, tabs: ["courier"] },
+  { label: "Courier", icon: Truck, tabs: ["courier", "speedMeter"] },
   { label: "Operations", icon: PackageCheck, tabs: ["operation", "autoDispatch"] },
   { label: "Reports", icon: FileText, tabs: ["riderPerformance", "exports", "allReports", "audit"] },
   { label: "Deliveries", icon: PackageCheck, tabs: ["deliveredConverter", "reschedule"] },

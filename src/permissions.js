@@ -1,4 +1,5 @@
 export const SYSTEM_ACCESS_OPTIONS = [
+  { id: "speedMeter", label: "Vehicle Meter & Fuel", group: "Reports" },
   { id: "dashboard", label: "Dashboard", group: "General" },
   { id: "riderPerformance", label: "Rider Delivery Performance", group: "Reports" },
   { id: "courier", label: "Courier Performance", group: "Reports" },
@@ -30,6 +31,7 @@ export const USER_ROLE_OPTIONS = [
 ];
 
 const TAB_ACCESS = {
+  speedMeter: ["speedMeter", "courier"],
   dashboard: ["dashboard"],
   courier: ["courier"],
   riderPerformance: ["riderPerformance", "courier"],

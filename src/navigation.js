@@ -1,4 +1,5 @@
 export const TAB_PATHS = {
+  speedMeter: '/meter-workspace/',
   riderPerformance: '/rider-delivery-performance/',
   dashboard: '/dashboard/', courier: '/courier/', operation: '/operations/', exports: '/reports/',
   allReports: '/all-reports/', deliveredConverter: '/delivered-report/', reschedule: '/reschedule-report/',

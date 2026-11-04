@@ -15,6 +15,7 @@ import { getWhatsAppStatus, startDailyBackupScheduler, startWhatsAppClient } fro
 import { getWhatsAppQueueStatus, startWhatsAppQueueWorker } from "./whatsapp/whatsappQueue.js";
 import { startRegionalDispatchAutomation } from "./domex/regionalDispatchAutomationService.js";
 import regionalDispatchRoutes from "./domex/regionalDispatchRoutes.js";
+import { createMeterRoutes } from "./meter/meterRoutes.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -75,6 +76,7 @@ app.use("/api/whatsapp", whatsappRoutes);
 app.use("/api/meter-monitor", meterMonitorRoutes);
 app.use("/api/domex", domexAutomationRoutes);
 app.use("/api/regional-dispatch", regionalDispatchRoutes);
+app.use("/api/meter-workspace", createMeterRoutes());
 
 const distPath = path.resolve("dist");
 if (fs.existsSync(distPath)) {

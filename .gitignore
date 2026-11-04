@@ -11,6 +11,14 @@ vite-dev.err.log
 .env.*.local
 
 /ubuntukey.pem
+/desktop/.venv/
+/desktop/build/
+/desktop/dist/
+/desktop/release/
+/desktop/*.spec
+/desktop/private/
+/desktop/__pycache__/
+/tmp/speed-meter-inspect/
 
 backend/data/
 
