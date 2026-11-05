@@ -19,6 +19,8 @@ vite-dev.err.log
 /desktop/*.spec
 /desktop/private/
 /desktop/__pycache__/
+/desktop/electron/node_modules/
+/desktop/dist-electron/
 /tmp/speed-meter-inspect/
 
 backend/data/

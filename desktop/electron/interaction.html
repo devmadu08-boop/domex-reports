@@ -1,0 +1,8 @@
+<!doctype html><html><head><meta charset="utf-8"><title>DOMEX interaction check</title></head>
+<body style="font:20px Arial;background:#fbf5ec;color:#7c1026;padding:40px">
+<h1>DOMEX interaction check</h1><label>Test text <input id="text" aria-label="Test text"></label>
+<button id="click">Test click</button><p id="result">Waiting for click</p><p id="bridge">Waiting for bridge</p>
+<script>
+document.getElementById('click').onclick=()=>document.getElementById('result').textContent='Clicked: '+document.getElementById('text').value;
+window.pywebview.api.get_version().then(v=>document.getElementById('bridge').textContent='Native bridge responsive · '+v);
+</script></body></html>

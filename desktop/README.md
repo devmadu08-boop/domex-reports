@@ -1,16 +1,20 @@
 # DOMEX Workspace for Windows
 
-This Windows application opens the full live DOMEX report portal in a native Edge WebView2 window. The integrated Meter & Fuel workspace uses the VPS SQLite database. Existing report sections continue using their existing shared report sync. Internet access is required; unsaved meter entries have per-user local recovery drafts.
+Version 1.0.2 uses an Electron/Chromium window, replacing the Python/.NET WebView wrapper after unresponsive input was reported in the installed application. Windows controls run in the native desktop runtime; Excel exports use asynchronous IPC and ExcelJS. The full live report portal and the VPS Meter & Fuel workspace use the same shared data as the browser. Internet access is required.
 
-Install Microsoft Edge WebView2 Runtime if Windows does not already have it. Sign in to the report portal normally, then use your separate meter account for Meter & Fuel. Desktop Excel exports produce real XLSX files; the browser also offers Excel-compatible CSV.
+Sign in with the existing report login, then use the separate meter account under Courier > Meter & Fuel. The new desktop browser profile is separate from the earlier WebView2 profile, which is preserved. Server data and logins are unchanged. Profiles and private diagnostics live under %APPDATA%/DOMEX Workspace Desktop; uninstall preserves them. A second launch brings the existing window forward.
 
-Build from this folder with Python 3.11 and Inno Setup 6:
+Build with Node.js and Inno Setup 6:
 
-    py -3.11 -m venv .venv311
-    .venv311/Scripts/pip install -r requirements.txt
-    .venv311/Scripts/pyinstaller --noconfirm --windowed --name "DOMEX Workspace" --icon assets/domex.ico --distpath dist --workpath build main.py
-    "C:/Program Files (x86)/Inno Setup 6/ISCC.exe" setup.iss
+    npm ci --prefix desktop/electron
+    ./desktop/build.ps1
 
-The installer does not contain server passwords, SSH keys, or customer data. Profiles are stored under the user's Local AppData/DOMEX Workspace directory. Uninstall preserves this profile.
+The resulting installer is desktop/release/DOMEX_Workspace_Setup_1.0.2.exe. Chromium is included; Python, .NET and WebView2 are not required. The renderer has context isolation and sandboxing enabled, Node disabled, and only a small validated IPC bridge for Excel export. The installer contains no customer data or server credentials.
 
-Version 1.0.1 serializes access to the persistent browser profile and exposes only the Excel callable to JavaScript. Startup tests use separate profiles, wait after rendering, and exercise native maximize/restore dispatch. Use `--interaction-test` for the isolated typing/click/native bridge/window-control check. Runtime errors are recorded in rotating `desktop.log` files under Local AppData/DOMEX Workspace.
+Validation:
+
+    node --test tests/desktopWorkbook.test.mjs
+    "desktop/dist-electron/DOMEX Workspace-win32-x64/DOMEX Workspace.exe" --smoke-test
+    "desktop/dist-electron/DOMEX Workspace-win32-x64/DOMEX Workspace.exe" --interaction-test
+
+Smoke mode uses an isolated profile, waits after live portal loading, verifies minimize/maximize/restore and the export bridge, writes SmokeTest/smoke-result.json, and closes. Interaction mode uses a local fixture to verify actual typing, clicks, native bridge and window controls without touching customer data.
