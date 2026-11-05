@@ -1,13 +1,13 @@
 [Setup]
 AppId={{BF08E53F-E371-43EC-A7C2-4C5161A44B17}
 AppName=DOMEX Workspace
-AppVersion=1.0.0
+AppVersion=1.0.1
 AppPublisher=DOMEX Report System
 DefaultDirName={localappdata}\Programs\DOMEX Workspace
 DefaultGroupName=DOMEX Workspace
 PrivilegesRequired=lowest
 OutputDir=release
-OutputBaseFilename=DOMEX_Workspace_Setup_1.0.0
+OutputBaseFilename=DOMEX_Workspace_Setup_1.0.1
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -25,4 +25,4 @@ Name: "{group}\DOMEX Workspace"; Filename: "{app}\DOMEX Workspace.exe"
 Name: "{group}\DOMEX Meter and Fuel"; Filename: "{app}\DOMEX Workspace.exe"; Parameters: "--meter"
 Name: "{autodesktop}\DOMEX Workspace"; Filename: "{app}\DOMEX Workspace.exe"; Tasks: desktopicon
 [Run]
-Filename: "{app}\DOMEX Workspace.exe"; Description: "Launch DOMEX Workspace"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\DOMEX Workspace.exe"; Description: "Launch DOMEX Workspace"; Flags: nowait postinstall skipifsilent runasoriginaluser

@@ -12,6 +12,7 @@ vite-dev.err.log
 
 /ubuntukey.pem
 /desktop/.venv/
+/desktop/.venv311/
 /desktop/build/
 /desktop/dist/
 /desktop/release/
